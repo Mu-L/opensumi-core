@@ -20,6 +20,7 @@ const jsdom = new JSDOM('<div id="main"></div>', {
   resources: resourceLoader,
 });
 global.document = jsdom.window.document;
+global.UIEvent = jsdom.window.UIEvent;
 
 let text = '';
 global.navigator = Object.assign(jsdom.window.navigator, {
@@ -41,6 +42,7 @@ global.getComputedStyle = jsdom.window.getComputedStyle;
 global.window = jsdom.window;
 global.DOMParser = jsdom.window.DOMParser;
 global.MutationObserver = jsdom.window.MutationObserver;
+global.IntersectionObserver = jsdom.window.IntersectionObserver;
 global.KeyboardEvent = jsdom.window.KeyboardEvent;
 global.requestAnimationFrame = (fn) => setTimeout(fn, 16);
 global.cancelAnimationFrame = (timer) => {
@@ -54,8 +56,6 @@ global.document.queryCommandSupported = () => {};
 global.document.execCommand = () => {};
 global.HTMLElement = jsdom.window.HTMLElement;
 global.self = global;
-global.TextEncoder = TextEncoder;
-global.TextDecoder = TextDecoder;
 
 global.ElectronIpcRenderer = {
   send: () => {},
@@ -103,4 +103,4 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // https://stackoverflow.com/a/44143119/9443819
-process.setMaxListeners(0);
+require('events').EventEmitter.defaultMaxListeners = 100;

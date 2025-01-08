@@ -1,31 +1,32 @@
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
 import { Button } from '@opensumi/ide-components';
 import {
-  useInjectable,
-  localize,
   IContextKeyService,
-  isUndefined,
   IMarkdownString,
+  isString,
+  isUndefined,
+  localize,
   toLocalString,
   toMarkdownHtml,
+  useAutorun,
+  useInjectable,
 } from '@opensumi/ide-core-browser';
 import { InlineActionBar } from '@opensumi/ide-core-browser/lib/components/actions';
-import { AbstractMenuService, MenuId, IMenu } from '@opensumi/ide-core-browser/lib/menu/next';
+import { AbstractMenuService, IMenu, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 
 import {
-  IThreadComment,
-  ICommentsCommentTitle,
   CommentMode,
   ICommentReply,
   ICommentsCommentContext,
-  ICommentsZoneWidget,
+  ICommentsCommentTitle,
   ICommentsFeatureRegistry,
   ICommentsThread,
+  ICommentsZoneWidget,
+  IThreadComment,
 } from '../common';
 
-import { CommentReactions, CommentReactionSwitcher } from './comment-reactions.view';
+import { CommentReactionSwitcher, CommentReactions } from './comment-reactions.view';
 import { CommentsBody } from './comments-body';
 import { CommentsTextArea } from './comments-textarea.view';
 import styles from './comments.module.less';
@@ -110,7 +111,7 @@ const useCommentContext = (
 const ReplyItem: React.FC<{
   reply: IThreadComment;
   thread: ICommentsThread;
-}> = observer(({ reply, thread }) => {
+}> = ({ reply, thread }) => {
   const { contextKeyService } = thread;
   const { author, label, body, mode, timestamp } = reply;
   const iconUrl = author.iconPath?.toString();
@@ -136,7 +137,7 @@ const ReplyItem: React.FC<{
               {timestamp && <Timestamp timestamp={timestamp} />}
               {typeof label === 'string' ? <span className={styles.comment_item_label}>{label}</span> : label}
               {' : '}
-              <span className={styles.comment_item_body}>{body}</span>
+              <span className={styles.comment_item_body}>{typeof body === 'string' ? body : body.value}</span>
               {reply.reactions && reply.reactions.length > 0 && (
                 <CommentReactionSwitcher className={styles.reply_item_title} thread={thread} comment={reply} />
               )}
@@ -213,19 +214,26 @@ const ReplyItem: React.FC<{
       {reply.reactions && reply.reactions.length > 0 && <CommentReactions thread={thread} comment={reply} />}
     </div>
   );
-});
+};
 
 export const CommentItem: React.FC<{
   thread: ICommentsThread;
   commentThreadContext: IMenu;
   widget: ICommentsZoneWidget;
-}> = observer(({ thread, commentThreadContext, widget }) => {
-  const { readOnly, contextKeyService } = thread;
+}> = ({ thread, commentThreadContext, widget }) => {
   const [showReply, setShowReply] = React.useState(false);
   const [replyText, setReplyText] = React.useState('');
-  const [comment, ...replies] = thread.comments;
+
+  const { contextKeyService } = thread;
+  const readOnly = useAutorun(thread.readOnly);
+  const [comment, ...replies] = useAutorun(thread.comments);
+
   const { author, label, body, mode, timestamp } = comment;
-  const iconUrl = author.iconPath?.toString();
+  const iconUrl = !isString(author.iconPath)
+    ? author.iconPath?.authority
+      ? author.iconPath?.toString()
+      : ''
+    : author.iconPath;
   const [textValue, setTextValue, onChangeTextArea, commentContext, commentTitleContext, handleDragFiles] =
     useCommentContext(contextKeyService, comment);
   const commentsFeatureRegistry = useInjectable<ICommentsFeatureRegistry>(ICommentsFeatureRegistry);
@@ -359,4 +367,4 @@ export const CommentItem: React.FC<{
       </div>
     </div>
   );
-});
+};

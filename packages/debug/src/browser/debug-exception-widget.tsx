@@ -1,13 +1,13 @@
 import React, { useRef } from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { AppConfig, ConfigProvider, useInjectable } from '@opensumi/ide-core-browser';
 import { formatLocalize, localize } from '@opensumi/ide-core-common';
 import { ICodeEditor } from '@opensumi/ide-monaco';
+import * as monaco from '@opensumi/ide-monaco';
 import { ZoneWidget } from '@opensumi/ide-monaco-enhance';
 import { EditorOption } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 import { IDebugExceptionInfo } from '../common';
 
@@ -63,14 +63,13 @@ export class DebugExceptionWidget extends ZoneWidget {
     container.style.lineHeight = `${fontInfo.lineHeight}px`;
     container.tabIndex = 0;
 
-    ReactDOM.render(
+    ReactDOM.createRoot(container).render(
       <ConfigProvider value={this.configContext}>
         <ExceptionInfoContainer
           info={this.exceptionInfo}
           layout={() => this.layout(undefined)}
         ></ExceptionInfoContainer>
       </ConfigProvider>,
-      container,
     );
   }
 

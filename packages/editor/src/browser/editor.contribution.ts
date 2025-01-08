@@ -1,90 +1,91 @@
 import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  IClientApp,
+  AppConfig,
   ClientAppContribution,
-  KeybindingContribution,
-  KeybindingRegistry,
-  EDITOR_COMMANDS,
   CommandContribution,
   CommandRegistry,
-  URI,
-  Domain,
-  localize,
-  MonacoService,
-  ServiceNames,
-  MonacoContribution,
   CommandService,
-  QuickPickService,
-  IEventBus,
-  Schemes,
-  PreferenceService,
-  Disposable,
-  IPreferenceSettingsService,
-  OpenerContribution,
-  IOpenerService,
-  IClipboardService,
-  QuickOpenContribution,
-  IQuickOpenHandlerRegistry,
-  PrefixQuickOpenService,
-  MonacoOverrideServiceRegistry,
-  IContextKeyService,
-  getLanguageIdFromMonaco,
-  QuickPickItem,
-  AppConfig,
-  SUPPORTED_ENCODINGS,
-  FILE_COMMANDS,
-  electronEnv,
   CorePreferences,
+  Disposable,
+  Domain,
+  EDITOR_COMMANDS,
+  FILE_COMMANDS,
+  IClientApp,
+  IClipboardService,
+  IContextKeyService,
+  IEditorExtensionContribution,
+  IEventBus,
+  IOpenerService,
+  IPreferenceSettingsService,
+  IQuickInputService,
+  IQuickOpenHandlerRegistry,
+  KeybindingContribution,
+  KeybindingRegistry,
+  MonacoContribution,
+  MonacoOverrideServiceRegistry,
+  MonacoService,
+  OpenerContribution,
+  PreferenceService,
+  PrefixQuickOpenService,
+  QuickOpenContribution,
+  QuickPickItem,
+  QuickPickService,
+  SUPPORTED_ENCODINGS,
+  Schemes,
+  ServiceNames,
+  URI,
+  formatLocalize,
+  getIcon,
+  getLanguageIdFromMonaco,
+  localize,
 } from '@opensumi/ide-core-browser';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { AbstractContextMenuService } from '@opensumi/ide-core-browser/lib/menu/next/menu.interface';
 import { ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next/renderer/ctxmenu/base';
-import { isWindows, isOSX, PreferenceScope, ILogger, OnEvent, WithEventBus } from '@opensumi/ide-core-common';
-import { IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
+import { IRelaxedOpenMergeEditorArgs } from '@opensumi/ide-core-browser/lib/monaco/merge-editor-widget';
+import { IDisposable, ILogger, PreferenceScope, isWindows } from '@opensumi/ide-core-common';
+import { MergeEditorService } from '@opensumi/ide-monaco/lib/browser/contrib/merge-editor/merge-editor.service';
 import { ITextmateTokenizer, ITextmateTokenizerService } from '@opensumi/ide-monaco/lib/browser/contrib/tokenizer';
 import { EOL } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import * as monaco from '@opensumi/ide-monaco/lib/common/common';
 import { EditorContextKeys } from '@opensumi/monaco-editor-core/esm/vs/editor/common/editorContextKeys';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { IFormattingEditProviderSelector } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/format/browser/format';
 import { ContextKeyExpr } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 import { SyncDescriptor } from '@opensumi/monaco-editor-core/esm/vs/platform/instantiation/common/descriptors';
 
 import {
-  WorkbenchEditorService,
-  IResourceOpenOptions,
-  EditorGroupSplitAction,
-  ILanguageService,
+  DIFF_SCHEME,
   Direction,
+  EditorGroupSplitAction,
+  IDiffResource,
   IDocPersistentCacheProvider,
   IEditor,
+  ILanguageService,
+  IResourceOpenOptions,
+  ResourceService,
   SaveReason,
+  WorkbenchEditorService,
 } from '../common';
 import { AUTO_SAVE_MODE } from '../common/editor';
 
 import { MonacoTextModelService } from './doc-model/override';
-import { IEditorDocumentModelService } from './doc-model/types';
-import { IEditorDocumentModelContentRegistry } from './doc-model/types';
+import { IEditorDocumentModelContentRegistry, IEditorDocumentModelService } from './doc-model/types';
 import { EditorOpener } from './editor-opener';
 import { MonacoCodeService, MonacoContextViewService } from './editor.override';
 import { EditorStatusBarService } from './editor.status-bar.service';
 import { EditorView } from './editor.view';
 import { DocumentFormatService } from './format/format.service';
-import { FormattingSelector } from './format/formatterSelect';
+import { FormattingSelector } from './format/formatter-selector';
 import { EditorHistoryService } from './history';
 import { EditorContextMenuController } from './menu/editor.context';
 import { NavigationMenuContainer } from './navigation.view';
 import { GoToLineQuickOpenHandler } from './quick-open/go-to-line';
 import { WorkspaceSymbolQuickOpenHandler } from './quick-open/workspace-symbol-quickopen';
-import {
-  EditorGroupsResetSizeEvent,
-  BrowserEditorContribution,
-  IEditorFeatureRegistry,
-  ResourceDecorationChangeEvent,
-} from './types';
+import { BrowserEditorContribution, EditorGroupsResetSizeEvent, IEditorFeatureRegistry } from './types';
 import { EditorSuggestWidgetContribution } from './view/suggest-widget';
 import { EditorTopPaddingContribution } from './view/topPadding';
-import { WorkbenchEditorServiceImpl, EditorGroup } from './workbench-editor.service';
-
+import { EditorGroup, WorkbenchEditorServiceImpl } from './workbench-editor.service';
 interface ResourceArgs {
   group: EditorGroup;
   uri: URI;
@@ -101,7 +102,7 @@ interface ResourceArgs {
   QuickOpenContribution,
 )
 export class EditorContribution
-  extends WithEventBus
+  extends Disposable
   implements
     CommandContribution,
     ClientAppContribution,
@@ -172,8 +173,20 @@ export class EditorContribution
   @Autowired(CorePreferences)
   private readonly corePreferences: CorePreferences;
 
+  @Autowired(MergeEditorService)
+  private readonly mergeEditorService: MergeEditorService;
+
   @Autowired(IEditorDocumentModelContentRegistry)
   contentRegistry: IEditorDocumentModelContentRegistry;
+
+  @Autowired(IQuickInputService)
+  private readonly quickInputService: IQuickInputService;
+
+  @Autowired(CommandService)
+  private readonly commandService: CommandService;
+
+  @Autowired(ResourceService)
+  private readonly resourceService: ResourceService;
 
   registerComponent(registry: ComponentRegistry) {
     registry.register('@opensumi/ide-editor', {
@@ -194,10 +207,7 @@ export class EditorContribution
     const globalContextKeyService: IContextKeyService = this.injector.get(IContextKeyService);
     const editorContextKeyService = globalContextKeyService.createScoped();
     this.workbenchEditorService.setEditorContextKeyService(editorContextKeyService);
-    registry.registerOverrideService(
-      ServiceNames.CONTEXT_KEY_SERVICE,
-      (editorContextKeyService as any).contextKeyService,
-    );
+    registry.registerOverrideService(ServiceNames.CONTEXT_KEY_SERVICE, editorContextKeyService.contextKeyService);
 
     // Monaco CodeEditorService
     registry.registerOverrideService(ServiceNames.CODE_EDITOR_SERVICE, codeEditorService);
@@ -221,19 +231,16 @@ export class EditorContribution
   @Autowired(ICtxMenuRenderer)
   private readonly contextMenuRenderer: ICtxMenuRenderer;
 
-  @Autowired(IElectronMainUIService)
-  private readonly electronMainUIService: IElectronMainUIService;
-
-  registerMonacoDefaultFormattingSelector(register): void {
+  registerMonacoDefaultFormattingSelector(register: (selector: IFormattingEditProviderSelector) => IDisposable): void {
     const formatSelector = this.injector.get(FormattingSelector);
-    register(formatSelector.select.bind(formatSelector));
+    this.addDispose(register(formatSelector.selectFormatter.bind(formatSelector)));
   }
 
-  registerEditorExtensionContribution(register): void {
+  registerEditorExtensionContribution(register: IEditorExtensionContribution<any[]>): void {
     register(
       EditorContextMenuController.ID,
       /**
-       * 如果使用 common-di 的 Injectable 装饰，在内部会无法被 monaco 实例化
+       * 如果使用 opensumi/di 的 Injectable 装饰，在内部会无法被 monaco 实例化
        * 这里借用 monaco 内置的 DI 注入方式，将依赖的 Services 通过参数传递进去
        * 在内部重新实例化时会拼接两份参数，对于 EditorContextMenuController
        * monaco 将会自动补充另一个 editor 实例作为参数
@@ -280,19 +287,8 @@ export class EditorContribution
     }
   }
 
-  @OnEvent(ResourceDecorationChangeEvent)
-  onResourceDecorationChangeEvent() {
-    if (this.appConfig.isElectronRenderer) {
-      const hasDirty = this.workbenchEditorService.hasDirty();
-      // setup macos native dirty indicator
-      this.electronMainUIService.setDocumentEdited(electronEnv.currentWindowId, hasDirty ? true : false);
-    }
-  }
-
   onWillStop(app: IClientApp) {
-    if (this.appConfig.isElectronRenderer) {
-      return this.onWillStopElectron();
-    } else {
+    if (!this.appConfig.isElectronRenderer) {
       return this.workbenchEditorService.hasDirty() || !this.cacheProvider.isFlushed();
     }
   }
@@ -319,21 +315,6 @@ export class EditorContribution
       group,
       uri,
     };
-  }
-
-  /**
-   * Return true in order to prevent exit.
-   */
-  async onWillStopElectron() {
-    if (await this.workbenchEditorService.closeAllOnlyConfirmOnce()) {
-      return true;
-    }
-
-    if (!this.cacheProvider.isFlushed()) {
-      return true;
-    }
-
-    return false;
   }
 
   private isElectronRenderer(): boolean {
@@ -407,6 +388,10 @@ export class EditorContribution
       keybinding: 'ctrlcmd+k ctrlcmd+w',
     });
     keybindings.registerKeybinding({
+      command: EDITOR_COMMANDS.CLOSE_SAVED.id,
+      keybinding: 'ctrlcmd+k u',
+    });
+    keybindings.registerKeybinding({
       command: EDITOR_COMMANDS.PIN_CURRENT.id,
       keybinding: 'ctrlcmd+k enter',
     });
@@ -430,26 +415,6 @@ export class EditorContribution
       command: EDITOR_COMMANDS.SEARCH_WORKSPACE_SYMBOL_CLASS.id,
       keybinding: this.isElectronRenderer() ? 'ctrlcmd+alt+t' : 'ctrlcmd+alt+o',
     });
-    if (this.isElectronRenderer()) {
-      keybindings.registerKeybinding({
-        command: EDITOR_COMMANDS.NEXT.id,
-        keybinding: 'ctrl+tab',
-      });
-      keybindings.registerKeybinding({
-        command: EDITOR_COMMANDS.PREVIOUS.id,
-        keybinding: 'ctrl+shift+tab',
-      });
-      if (isOSX) {
-        keybindings.registerKeybinding({
-          command: EDITOR_COMMANDS.NEXT.id,
-          keybinding: 'ctrlcmd+shift+]',
-        });
-        keybindings.registerKeybinding({
-          command: EDITOR_COMMANDS.PREVIOUS.id,
-          keybinding: 'ctrlcmd+shift+[',
-        });
-      }
-    }
     for (let i = 1; i < 10; i++) {
       keybindings.registerKeybinding({
         command: EDITOR_COMMANDS.GO_TO_GROUP.id,
@@ -465,16 +430,17 @@ export class EditorContribution
       });
     });
 
+    // The native `undo/redo` capability is retained in the native Input
     keybindings.registerKeybinding({
       command: EDITOR_COMMANDS.COMPONENT_UNDO.id,
       keybinding: 'ctrlcmd+z',
-      when: 'inEditorComponent',
+      when: 'inEditorComponent && !inputFocus',
     });
 
     keybindings.registerKeybinding({
       command: EDITOR_COMMANDS.COMPONENT_REDO.id,
       keybinding: 'shift+ctrlcmd+z',
-      when: 'inEditorComponent',
+      when: 'inEditorComponent && !inputFocus',
     });
 
     keybindings.registerKeybinding({
@@ -537,7 +503,7 @@ export class EditorContribution
         name = name || `${original.displayName} <=> ${modified.displayName}`;
         return this.workbenchEditorService.open(
           URI.from({
-            scheme: 'diff',
+            scheme: DIFF_SCHEME,
             query: URI.stringifyQuery({
               name,
               original,
@@ -546,6 +512,68 @@ export class EditorContribution
           }),
           options,
         );
+      },
+    });
+
+    commands.registerCommand(EDITOR_COMMANDS.OPEN_MERGEEDITOR_DEV, {
+      execute: async () => {
+        try {
+          const value = await this.quickInputService.open({ value: '' });
+          if (!value) {
+            return;
+          }
+
+          const toArgs = JSON.parse(value);
+
+          /**
+           * @example
+           * {
+           *   input1: {
+           *     uri: 'current 分支的 uri'
+           *   },
+           *   input2: {
+           *     uri: 'incoming 分支的 uri'
+           *   },
+           *   output: '中间视图的文件 uri',
+           *   base: '共同祖先分支的文件 uri'
+           * }
+           */
+
+          this.commandService.executeCommand(EDITOR_COMMANDS.OPEN_MERGEEDITOR.id, toArgs);
+        } catch (error) {}
+      },
+    });
+
+    commands.registerCommand(EDITOR_COMMANDS.OPEN_MERGEEDITOR, {
+      execute: (args: unknown) => {
+        const validatedArgs = IRelaxedOpenMergeEditorArgs.validate(args);
+        this.workbenchEditorService.open(
+          URI.from({
+            scheme: 'mergeEditor',
+            query: URI.stringifyQuery({
+              name: formatLocalize('mergeEditor.workbench.tab.name', validatedArgs.output.displayName),
+              openMetadata: IRelaxedOpenMergeEditorArgs.toString(validatedArgs),
+            }),
+          }),
+        );
+      },
+    });
+
+    commands.registerCommand(EDITOR_COMMANDS.MERGEEDITOR_RESET, {
+      execute: () => {
+        const nutrition = this.mergeEditorService.getNutrition();
+
+        if (!nutrition) {
+          return;
+        }
+
+        const { output } = nutrition;
+        const { uri } = output;
+
+        // 重置状态
+        this.mergeEditorService.fireRestoreState(uri);
+        // 然后再重新 compare
+        this.mergeEditorService.compare();
       },
     });
 
@@ -771,28 +799,44 @@ export class EditorContribution
       },
     });
 
+    commands.registerCommand(EDITOR_COMMANDS.GET_ENCODING, {
+      execute: (uri: URI) => {
+        if (!uri) {
+          return;
+        }
+
+        const ref = this.editorDocumentModelService.getModelDescription(uri);
+        if (!ref) {
+          return;
+        }
+
+        return ref.encoding;
+      },
+    });
+
     commands.registerCommand(EDITOR_COMMANDS.CHANGE_ENCODING, {
-      execute: async () => {
+      execute: async (uri: URI) => {
         // TODO: 这里应该和 vscode 一样，可以 通过编码打开 和 通过编码保存
         // 但目前的磁盘文件对比使用的是文件字符串 md5 对比，导致更改编码时必定触发 diff，因此编码保存无法生效
         // 长期看 md5 应该更改为 mtime 和 size 才更可靠
-        const resource = this.workbenchEditorService.currentResource;
+        uri = uri ?? this.workbenchEditorService.currentResource?.uri;
         const documentModel = this.workbenchEditorService.currentEditor?.currentDocumentModel;
-        if (!resource || !documentModel) {
+        if (!uri) {
           return;
         }
 
         const configuredEncoding = this.preferenceService.get<string>(
           'files.encoding',
           'utf8',
-          resource.uri.toString(),
-          getLanguageIdFromMonaco(resource.uri)!,
+          uri.toString(),
+          getLanguageIdFromMonaco(uri)!,
         );
 
-        const provider = await this.contentRegistry.getProvider(resource.uri);
-        const guessedEncoding = await provider?.guessEncoding?.(resource.uri);
+        const provider = await this.contentRegistry.getProvider(uri);
+        const guessedEncoding = await provider?.guessEncoding?.(uri);
+        const ref = this.editorDocumentModelService.getModelDescription(uri);
+        const currentEncoding = documentModel?.encoding ?? ref?.encoding;
 
-        const currentEncoding = documentModel.encoding;
         let matchIndex: number | undefined;
         const encodingItems: QuickPickItem<string>[] = Object.keys(SUPPORTED_ENCODINGS)
           .sort((k1, k2) => {
@@ -846,8 +890,18 @@ export class EditorContribution
           return;
         }
 
-        const uris =
-          resource.uri.scheme === 'diff' ? [resource.metadata.original, resource.metadata.modified] : [resource.uri];
+        const uris: URI[] = [];
+
+        if (uri.scheme === DIFF_SCHEME) {
+          const resource = (await this.resourceService.getResource(uri)) as IDiffResource;
+          if (resource.metadata) {
+            uris.push(resource.metadata.original);
+            uris.push(resource.metadata.modified);
+          }
+        } else {
+          uris.push(uri);
+        }
+
         uris.forEach((uri) => {
           this.editorDocumentModelService.changeModelOptions(uri, {
             encoding: selectedFileEncoding,
@@ -1143,6 +1197,13 @@ export class EditorContribution
       execute: () => this.prefixQuickOpenService.open(':'),
     });
 
+    commands.registerCommand(EDITOR_COMMANDS.TOGGLE_COLUMN_SELECTION, {
+      execute: () => {
+        const isColumnSelection = this.preferenceService.get<boolean>('editor.columnSelection');
+        this.preferenceService.set('editor.columnSelection', !isColumnSelection, PreferenceScope.User);
+      },
+    });
+
     commands.registerCommand(EDITOR_COMMANDS.TOGGLE_WORD_WRAP, {
       execute: () => {
         const wordWrap = this.preferenceService.get<string>('editor.wordWrap');
@@ -1182,6 +1243,34 @@ export class EditorContribution
       command: EDITOR_COMMANDS.COPY_RELATIVE_PATH.id,
       group: '10_path',
       order: 2,
+    });
+
+    menus.registerMenuItem(MenuId.BreadcrumbsTitleContext, {
+      command: EDITOR_COMMANDS.COPY_PATH.id,
+      group: '0_path',
+      order: 1,
+    });
+    menus.registerMenuItem(MenuId.BreadcrumbsTitleContext, {
+      command: EDITOR_COMMANDS.COPY_RELATIVE_PATH.id,
+      group: '0_path',
+      order: 2,
+    });
+    menus.registerMenuItem(MenuId.BreadcrumbsTitleContext, {
+      command: {
+        id: FILE_COMMANDS.REVEAL_IN_EXPLORER.id,
+        label: localize('file.revealInExplorer'),
+      },
+      group: '1_file',
+      order: 3,
+    });
+
+    menus.registerMenuItem(MenuId.EditorTitleContext, {
+      command: {
+        id: FILE_COMMANDS.REVEAL_IN_EXPLORER.id,
+        label: localize('file.revealInExplorer'),
+      },
+      group: '6_file',
+      order: 3,
     });
 
     menus.registerMenuItem(MenuId.EditorTitleContext, {
@@ -1239,6 +1328,7 @@ export class EditorContribution
 
     menus.registerMenuItem(MenuId.EditorTitle, {
       command: EDITOR_COMMANDS.SPLIT_TO_RIGHT.id,
+      iconClass: getIcon('embed'),
       group: 'navigation',
       when: 'resource',
       order: 5,

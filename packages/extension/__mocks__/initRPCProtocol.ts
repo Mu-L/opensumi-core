@@ -1,27 +1,37 @@
-import net from 'net';
-
 import { RPCServiceCenter, initRPCService } from '@opensumi/ide-connection';
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { createSocketConnection } from '@opensumi/ide-connection/lib/node';
-import { argv } from '@opensumi/ide-core-common/lib/node/cli';
+import { SimpleConnection } from '@opensumi/ide-connection/lib/common/connection/drivers/simple';
+import { SumiConnectionMultiplexer } from '@opensumi/ide-connection/lib/common/rpc/multiplexer';
+import { SumiConnection } from '@opensumi/ide-connection/lib/common/rpc/connection';
+import { Emitter } from '@opensumi/ide-core-common';
 
-import { KT_PROCESS_SOCK_OPTION_KEY } from '../src/common';
-
-export async function initMockRPCProtocol(client): Promise<RPCProtocol> {
-  const extCenter = new RPCServiceCenter();
-  const { getRPCService } = initRPCService(extCenter);
-  const extConnection = net.createConnection(JSON.parse(argv[KT_PROCESS_SOCK_OPTION_KEY] || '{}'));
-
-  extCenter.setConnection(createSocketConnection(extConnection));
-
-  const service = getRPCService('ExtProtocol');
-  service.on('onMessage', (msg) => {
-    // console.log('service onmessage', msg);
-  });
-  const extProtocol = new RPCProtocol({
-    onMessage: client.onMessage,
-    send: client.send,
-  });
+export async function initMockRPCProtocol(client): Promise<SumiConnectionMultiplexer> {
+  const extProtocol = new SumiConnectionMultiplexer(
+    new SimpleConnection({
+      onMessage: client.onMessage,
+      send: client.send,
+    }),
+  );
 
   return extProtocol;
+}
+
+export function createMockPairRPCProtocol() {
+  const emitterA = new Emitter<any>();
+  const emitterB = new Emitter<any>();
+
+  const mockClientA = {
+    send: (msg) => emitterB.fire(msg),
+    onMessage: emitterA.event,
+  };
+  const mockClientB = {
+    send: (msg) => emitterA.fire(msg),
+    onMessage: emitterB.event,
+  };
+
+  const rpcProtocolExt = new SumiConnectionMultiplexer(new SimpleConnection(mockClientA));
+  const rpcProtocolMain = new SumiConnectionMultiplexer(new SimpleConnection(mockClientB));
+  return {
+    rpcProtocolExt,
+    rpcProtocolMain,
+  };
 }

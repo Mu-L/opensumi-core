@@ -3,10 +3,10 @@
 // @ts-ignore
 import { Text as YText } from 'yjs';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { AppConfig } from '@opensumi/ide-core-browser';
 import { EventBusImpl, IEventBus, ILogger, URI } from '@opensumi/ide-core-common';
-import { INodeLogger } from '@opensumi/ide-core-node';
+import { INodeLogger, AppConfig as NodeAppConfig } from '@opensumi/ide-core-node';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
@@ -15,10 +15,12 @@ import {
   EditorDocumentModelRemovalEvent,
   IEditorDocumentModelService,
 } from '@opensumi/ide-editor/lib/browser';
-import { IFileService } from '@opensumi/ide-file-service';
+import { FileChangeType, IFileService } from '@opensumi/ide-file-service';
+import { FileServiceClient } from '@opensumi/ide-file-service/lib/browser/file-service-client';
+import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import { ITextModel } from '@opensumi/ide-monaco';
+import { monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 import { ICSSStyleService } from '@opensumi/ide-theme';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 import { CollaborationService } from '../../src/browser/collaboration.service';
 import { TextModelBinding } from '../../src/browser/textmodel-binding';
@@ -49,7 +51,7 @@ class MockDocModelService {
       dispose() {},
       instance: {
         getMonacoModel() {
-          return monaco.editor.createModel('');
+          return monacoApi.editor.createModel('');
         },
       },
     };
@@ -62,6 +64,7 @@ describe('CollaborationService basic routines', () => {
   let server: YWebsocketServerImpl;
   let eventBus: IEventBus;
   let workbenchEditorService: MockWorkbenchEditorService;
+  let fileServiceClient: IFileServiceClient;
 
   beforeAll(() => {
     injector = createBrowserInjector([]);
@@ -87,17 +90,34 @@ describe('CollaborationService basic routines', () => {
       token: IEventBus,
       useClass: EventBusImpl,
     });
-    injector.addProviders({
+    injector.overrideProviders({
       token: AppConfig,
       useValue: {
         wsPath: { toString: () => 'ws://127.0.0.1:8080' },
+        collaborationOptions: {
+          port: 10010,
+        },
       },
+    });
+    injector.overrideProviders({
+      token: NodeAppConfig,
+      useValue: {
+        collaborationOptions: {
+          port: 10010,
+        },
+      } as NodeAppConfig,
     });
 
     injector.addProviders({
       token: WorkbenchEditorService,
       useClass: MockWorkbenchEditorService,
     });
+
+    injector.addProviders({
+      token: IFileServiceClient,
+      useClass: FileServiceClient,
+    });
+
     workbenchEditorService = injector.get<MockWorkbenchEditorService>(WorkbenchEditorService);
     const uriString = 'file://home/situ2001/114514/1919810';
     workbenchEditorService.uri = new URI(uriString);
@@ -110,6 +130,7 @@ describe('CollaborationService basic routines', () => {
     server = injector.get(IYWebsocketServer);
     eventBus = injector.get(IEventBus);
     service = injector.get(ICollaborationService);
+    fileServiceClient = injector.get(IFileServiceClient);
 
     // mock impl, because origin impl comes with nodejs
     jest.spyOn(server, 'requestInitContent').mockImplementation(async (uri: string) => {
@@ -118,6 +139,7 @@ describe('CollaborationService basic routines', () => {
       }
     });
 
+    service.initFileWatch();
     // start server
     server.initialize();
   });
@@ -125,7 +147,7 @@ describe('CollaborationService basic routines', () => {
   it('should successfully initialize', () => {
     const spy = jest.spyOn(service, 'initialize');
     service.initialize();
-    expect(spy).toBeCalled();
+    expect(spy).toHaveBeenCalled();
   });
 
   it('should create a new binding when all things are ready', async () => {
@@ -143,8 +165,8 @@ describe('CollaborationService basic routines', () => {
     const redoSpy = jest.spyOn(targetBinding, 'redo');
     service.undoOnFocusedTextModel();
     service.redoOnFocusedTextModel();
-    expect(undoSpy).toBeCalled();
-    expect(redoSpy).toBeCalled();
+    expect(undoSpy).toHaveBeenCalled();
+    expect(redoSpy).toHaveBeenCalled();
   });
 
   it('should change YText when remote YText was changed', async () => {
@@ -162,7 +184,7 @@ describe('CollaborationService basic routines', () => {
 
     await yMapReady.promise;
 
-    expect(spy).toBeCalled();
+    expect(spy).toHaveBeenCalled();
     expect(binding['yText'].toJSON()).toBe('1919810');
   });
 
@@ -174,10 +196,23 @@ describe('CollaborationService basic routines', () => {
     expect(service['bindingMap'].has(workbenchEditorService.uri.toString())).toBeFalsy();
   });
 
-  it('should successfully destroy', () => {
-    const spy = jest.spyOn(service, 'destroy');
-    service.destroy();
-    expect(spy).toBeCalled();
+  it('should reset yTextMap on file change', async () => {
+    const { yMapReady } = service['getDeferred'](workbenchEditorService.uri.toString());
+
+    service['yTextMap'].delete(workbenchEditorService.uri.toString());
+    service['yTextMap'].set(workbenchEditorService.uri.toString(), new YText('Need delete'));
+
+    await yMapReady.promise;
+
+    fileServiceClient.fireFilesChange({
+      changes: [{ type: FileChangeType.ADDED, uri: workbenchEditorService.uri.toString() }],
+    });
+    expect(service['yTextMap'].has(workbenchEditorService.uri.toString())).toBeTruthy();
+
+    fileServiceClient.fireFilesChange({
+      changes: [{ type: FileChangeType.UPDATED, uri: workbenchEditorService.uri.toString() }],
+    });
+    expect(service['yTextMap'].has(workbenchEditorService.uri.toString())).toBeFalsy();
   });
 
   afterAll(() => {

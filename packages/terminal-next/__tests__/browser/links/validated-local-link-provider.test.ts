@@ -1,8 +1,8 @@
-import { Terminal, ILink } from 'xterm';
+import { ILink, Terminal } from '@xterm/xterm';
 
-import { URI, OperatingSystem } from '@opensumi/ide-core-common';
+import { OperatingSystem, URI } from '@opensumi/ide-core-common';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 
-import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
 import { TerminalValidatedLocalLinkProvider } from '../../../src/browser/links/validated-local-link-provider';
 
 const unixLinks = ['/foo', '~/foo', './foo', '../foo', '/foo/bar', '/foo/bar+more', 'foo/bar', 'foo/bar+more'];
@@ -283,6 +283,18 @@ describe('Workbench - TerminalValidatedLocalLinkProvider', () => {
           [11, 1],
         ],
         text: './bar',
+      },
+    ]);
+  });
+
+  test('should support single file path', async () => {
+    await assertLink('foo', false, [
+      {
+        range: [
+          [0, 1],
+          [3, 1],
+        ],
+        text: 'foo',
       },
     ]);
   });

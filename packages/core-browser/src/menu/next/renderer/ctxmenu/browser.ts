@@ -1,14 +1,22 @@
 import omit from 'lodash/omit';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IObservable } from '@opensumi/monaco-editor-core/esm/vs/base/common/observableInternal/base';
 
 import { MenuNode } from '../../base';
 import { AbstractContextMenuService } from '../../menu.interface';
 
-import { ICtxMenuRenderer, CtxMenuRenderParams } from './base';
+import { CtxMenuRenderParams, ICtxMenuRenderer } from './base';
+
+export interface IMenuRenderProps {
+  disabled?: boolean;
+  hasSubmenu?: boolean;
+}
 
 export abstract class IBrowserCtxMenu extends ICtxMenuRenderer {
   visible: boolean;
+  visibleObservable: IObservable<boolean>;
+
   onHide: ((canceled: boolean) => void) | undefined;
   point?: {
     pageX: number;
@@ -17,6 +25,8 @@ export abstract class IBrowserCtxMenu extends ICtxMenuRenderer {
   context: any;
   menuNodes: MenuNode[];
   abstract hide(canceled: boolean): void;
+  renderSubMenuTitle?: (node: MenuNode, props: IMenuRenderProps) => React.ReactNode | undefined | null;
+  renderMenuItem?: (node: MenuNode, props: IMenuRenderProps) => React.ReactNode | undefined | null;
 }
 
 @Injectable()

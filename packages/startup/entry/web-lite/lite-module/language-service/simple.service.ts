@@ -1,22 +1,25 @@
-import * as monaco from '@ali/monaco-editor-core/esm/vs/editor/editor.api';
-import type * as vscode from 'vscode';
-import { DocumentSelector, HoverProvider, CancellationToken, DefinitionProvider, ReferenceProvider } from 'vscode';
+// eslint-disable-next-line import/no-unresolved
+import { CancellationToken, DefinitionProvider, DocumentSelector, HoverProvider, ReferenceProvider } from 'vscode';
 
-import { Autowired, Injectable, ConstructorOf } from '@opensumi/di';
-import { Uri, URI, LRUMap, DisposableCollection } from '@opensumi/ide-core-common';
+import { Autowired, ConstructorOf, Injectable } from '@opensumi/di';
+import { DisposableCollection, LRUMap, URI, Uri } from '@opensumi/ide-core-common';
 import { IEditorDocumentModelService, LanguageSelector } from '@opensumi/ide-editor/lib/browser';
-import { ExtensionDocumentDataManager, IExtHostLanguages } from '@opensumi/ide-extension/lib/common/vscode';
-import { MonacoModelIdentifier, testGlob } from '@opensumi/ide-extension/lib/common/vscode';
+import {
+  ExtensionDocumentDataManager,
+  IExtHostLanguages,
+  MonacoModelIdentifier,
+  testGlob,
+} from '@opensumi/ide-extension/lib/common/vscode';
 import { fromLanguageSelector } from '@opensumi/ide-extension/lib/common/vscode/converter';
 import { Disposable } from '@opensumi/ide-extension/lib/common/vscode/ext-types';
 import {
-  SerializedDocumentFilter,
-  Hover,
-  Position,
   Definition,
   DefinitionLink,
-  ReferenceContext,
+  Hover,
   Location,
+  Position,
+  ReferenceContext,
+  SerializedDocumentFilter,
   isDocumentFilter,
 } from '@opensumi/ide-extension/lib/common/vscode/model.api';
 import { ExtHostDocumentData } from '@opensumi/ide-extension/lib/hosted/api/vscode/doc/ext-data.host';
@@ -24,7 +27,11 @@ import { Adapter } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.
 import { DefinitionAdapter } from '@opensumi/ide-extension/lib/hosted/api/vscode/language/definition';
 import { HoverAdapter } from '@opensumi/ide-extension/lib/hosted/api/vscode/language/hover';
 import { ReferenceAdapter } from '@opensumi/ide-extension/lib/hosted/api/vscode/language/reference';
+import * as monaco from '@opensumi/ide-monaco';
+import { monaco as monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 import { ITextModel } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+
+import type * as vscode from 'vscode';
 
 @Injectable()
 class LiteDocumentDataManager implements Partial<ExtensionDocumentDataManager> {
@@ -98,7 +105,6 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
     return callId;
   }
 
-  // tslint:disable-next-line:no-any
   private withAdapter<A, R>(
     handle: number,
     constructor: ConstructorOf<A>,
@@ -116,7 +122,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
       return selector.map((sel) => this.doTransformDocumentSelector(sel)!);
     }
 
-    return [this.doTransformDocumentSelector(selector)!];
+    return [this.doTransformDocumentSelector(selector as vscode.DocumentFilter | string)!];
   }
 
   private doTransformDocumentSelector(selector: string | vscode.DocumentFilter): SerializedDocumentFilter | undefined {
@@ -167,7 +173,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
     const disposable = new DisposableCollection();
     for (const language of this.getUniqueLanguages()) {
       if (this.matchLanguage(languageSelector, language)) {
-        disposable.push(monaco.languages.registerHoverProvider(language, hoverProvider));
+        disposable.push(monacoApi.languages.registerHoverProvider(language, hoverProvider));
       }
     }
 
@@ -214,7 +220,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
     const disposable = new DisposableCollection();
     for (const language of this.getUniqueLanguages()) {
       if (this.matchLanguage(languageSelector, language)) {
-        disposable.push(monaco.languages.registerDefinitionProvider(language, definitionProvider));
+        disposable.push(monacoApi.languages.registerDefinitionProvider(language, definitionProvider));
       }
     }
     this.disposables.set(handle, disposable);
@@ -232,7 +238,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
         if (!this.isLanguageFeatureEnabled(model)) {
           return undefined!;
         }
-        const result = await this.$provideDefinition(handle, model.uri, position, token);
+        const result = await this.$provideDefinition(handle, Uri.revive(model.uri), position, token);
         if (!result) {
           return undefined!;
         }
@@ -281,7 +287,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
     const disposable = new DisposableCollection();
     for (const language of this.getUniqueLanguages()) {
       if (this.matchLanguage(languageSelector, language)) {
-        disposable.push(monaco.languages.registerReferenceProvider(language, referenceProvider));
+        disposable.push(monacoApi.languages.registerReferenceProvider(language, referenceProvider));
       }
     }
     this.disposables.set(handle, disposable);
@@ -299,7 +305,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
         if (!this.matchModel(selector, MonacoModelIdentifier.fromModel(model))) {
           return undefined!;
         }
-        return this.$provideReferences(handle, model.uri, position, context, token).then((result) => {
+        return this.$provideReferences(handle, Uri.revive(model.uri), position, context, token).then((result) => {
           if (!result) {
             return undefined!;
           }
@@ -322,7 +328,7 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
   protected getUniqueLanguages(): string[] {
     const languages: string[] = [];
     // 会有重复
-    const allLanguages = monaco.languages.getLanguages().map((l) => l.id);
+    const allLanguages = monacoApi.languages.getLanguages().map((l) => l.id);
     for (const language of allLanguages) {
       if (languages.indexOf(language) === -1) {
         languages.push(language);
@@ -371,6 +377,6 @@ export class SimpleLanguageService implements Partial<IExtHostLanguages> {
   }
 
   $getLanguages(): string[] {
-    return monaco.languages.getLanguages().map((l) => l.id);
+    return monacoApi.languages.getLanguages().map((l) => l.id);
   }
 }

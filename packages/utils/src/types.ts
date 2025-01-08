@@ -7,6 +7,17 @@ const _typeof = {
 };
 
 /**
+ * Asserts that the argument passed in is neither undefined nor null.
+ */
+export function assertIsDefined<T>(arg: T | null | undefined): T {
+  if (isUndefinedOrNull(arg)) {
+    throw new Error('Assertion Failed: argument is undefined or null');
+  }
+
+  return arg;
+}
+
+/**
  * @returns whether the provided parameter is a JavaScript Array or not.
  */
 export function isArray(array: any): array is any[] {
@@ -95,6 +106,13 @@ export function isDefined<T>(arg: T | null | undefined): arg is T {
  */
 export function isUndefinedOrNull(obj: any): obj is undefined | null {
   return isUndefined(obj) || obj === null;
+}
+
+/**
+ * @returns whether the provided parameter is null.
+ */
+export function isNull(obj: any): obj is null {
+  return obj === null;
 }
 
 const hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -204,4 +222,27 @@ export function mixin(destination: any, source: any, overwrite = true): any {
  */
 export function withNullAsUndefined<T>(x: T | null): T | undefined {
   return x === null ? undefined : x;
+}
+
+export function isPromise<T = any>(obj: any): obj is Promise<T> {
+  return !!obj && (typeof obj === 'object' || typeof obj === 'function') && typeof obj.then === 'function';
+}
+
+export function isUint8Array(obj: any): obj is Uint8Array {
+  return obj instanceof Uint8Array || Object.prototype.toString.call(obj) === '[object Uint8Array]';
+}
+
+export type RemoveReadonly<T> = {
+  -readonly [P in keyof T]: T[P];
+};
+export function removeReadonly<T>(obj: T): RemoveReadonly<T> {
+  return obj as any;
+}
+
+export function isIterable<T = any>(obj: any): obj is Iterable<T> {
+  // checks for null and undefined
+  if (obj == null) {
+    return false;
+  }
+  return typeof obj[Symbol.iterator] === 'function';
 }

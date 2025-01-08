@@ -1,27 +1,29 @@
 /* eslint-disable no-console */
 import { Autowired } from '@opensumi/di';
 import {
+  ClientAppContribution,
+  IToolbarRegistry,
   KeybindingContribution,
   KeybindingRegistry,
   Logger,
-  ClientAppContribution,
-  IToolbarRegistry,
   ToolBarActionContribution,
   createToolbarActionBtn,
   createToolbarActionSelect,
+  getIcon,
 } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IStatusBarService } from '@opensumi/ide-core-browser/lib/services';
-import { CommandContribution, CommandRegistry, IEventBus, CommandService, Schemes } from '@opensumi/ide-core-common';
+import { CommandContribution, CommandRegistry, CommandService, IEventBus, Schemes } from '@opensumi/ide-core-common';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
 import { BrowserEditorContribution, EditorComponentRegistry } from '@opensumi/ide-editor/lib/browser';
 import { OutputService } from '@opensumi/ide-output/lib/browser/output.service';
 import { ISCMProvider } from '@opensumi/ide-scm';
 
 import { ExampleEditorBottomWidget } from './editor-bottom-example';
+import { ExampleEditorTopWidget } from './editor-top-example';
 import { ExamplePopover } from './exmaple-popover';
+import { MENU_BAR_FEATURE_TIP, MenuBarHelpIcon } from './menu-bar-help-icon';
 
 @Domain(
   ClientAppContribution,
@@ -65,12 +67,25 @@ export class StartupContribution
   registerEditorComponent(registry: EditorComponentRegistry) {
     registry.registerEditorSideWidget({
       id: 'example-bottom',
+      side: 'bottom',
       component: ExampleEditorBottomWidget,
+      displaysOnResource: (r) => r.uri.scheme === Schemes.file,
+    });
+
+    registry.registerEditorSideWidget({
+      id: 'example-top',
+      side: 'top',
+      component: ExampleEditorTopWidget,
       displaysOnResource: (r) => r.uri.scheme === Schemes.file,
     });
   }
 
-  registerComponent(registry: ComponentRegistry) {}
+  registerComponent(registry: ComponentRegistry) {
+    registry.register(MENU_BAR_FEATURE_TIP, {
+      id: MENU_BAR_FEATURE_TIP,
+      component: MenuBarHelpIcon,
+    });
+  }
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand(

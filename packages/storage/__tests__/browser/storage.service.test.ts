@@ -3,19 +3,19 @@ import temp from 'temp';
 
 import { Injectable, Injector } from '@opensumi/di';
 import {
-  URI,
-  FileUri,
-  STORAGE_SCHEMA,
-  Disposable,
-  StorageProvider,
-  DefaultStorageProvider,
-  STORAGE_NAMESPACE,
-  ScopedBrowserStorageService,
-  GlobalBrowserStorageService,
   AppConfig,
+  DefaultStorageProvider,
+  Disposable,
+  FileUri,
+  GlobalBrowserStorageService,
+  STORAGE_NAMESPACE,
+  STORAGE_SCHEMA,
+  ScopedBrowserStorageService,
+  StorageProvider,
+  URI,
 } from '@opensumi/ide-core-browser';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
-import { IFileServiceClient, IDiskFileProvider } from '@opensumi/ide-file-service';
+import { IDiskFileProvider, IFileServiceClient } from '@opensumi/ide-file-service';
 import { DiskFileSystemProvider } from '@opensumi/ide-file-service/lib/node/disk-file-system.provider';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
@@ -141,9 +141,9 @@ describe('StorageProvider should be work', () => {
     const extensions = ['opensumi.test.extension'];
     await extensionStorage.set('extensions', extensions);
     expect(extensionStorage.get('extensions')).toEqual(extensions);
-    const browserLocalStroage = injector.get(ScopedBrowserStorageService, [MockWorkspaceService.workspace.uri]);
-    const cache = browserLocalStroage.getData<any>(STORAGE_NAMESPACE.EXTENSIONS.path.toString());
-    expect(typeof cache?.expires).toBe('number');
+    const browserLocalStorage = injector.get(ScopedBrowserStorageService, [MockWorkspaceService.workspace.uri]);
+    const cache = browserLocalStorage.getData<any>(STORAGE_NAMESPACE.EXTENSIONS.path.toString());
+    expect(typeof cache?.expires).toBe('undefined');
     expect(cache?.extensions).toBe(JSON.stringify(extensions));
   });
 
@@ -155,8 +155,8 @@ describe('StorageProvider should be work', () => {
     const recents = ['opensumi.test.recent'];
     await recentStorage.set('recents', recents);
     expect(recentStorage.get('recents')).toEqual(recents);
-    const browserLocalStroage = injector.get(GlobalBrowserStorageService);
-    const cache = browserLocalStroage.getData<any>(STORAGE_NAMESPACE.GLOBAL_RECENT_DATA.path.toString());
+    const browserLocalStorage = injector.get(GlobalBrowserStorageService);
+    const cache = browserLocalStorage.getData<any>(STORAGE_NAMESPACE.GLOBAL_RECENT_DATA.path.toString());
     expect(cache?.expires).toBeUndefined();
     expect(cache?.recents).toBe(JSON.stringify(recents));
   });
@@ -170,8 +170,8 @@ describe('StorageProvider should be work', () => {
     const test = ['test'];
     await extensionStorage.set('test', test);
     expect(extensionStorage.get('test')).toEqual(test);
-    const browserLocalStroage = injector.get(ScopedBrowserStorageService, [MockWorkspaceService.workspace.uri]);
-    const cache = browserLocalStroage.getData<any>(customId.path.toString());
+    const browserLocalStorage = injector.get(ScopedBrowserStorageService, [MockWorkspaceService.workspace.uri]);
+    const cache = browserLocalStorage.getData<any>(customId.path.toString());
     expect(cache?.expires).toBeUndefined();
     expect(cache?.test).toBeUndefined();
   });

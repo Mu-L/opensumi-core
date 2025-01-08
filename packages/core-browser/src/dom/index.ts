@@ -1,5 +1,9 @@
-import { Disposable, Emitter, Event as BaseEvent, IDisposable } from '@opensumi/ide-core-common';
-import { isWebKit } from '@opensumi/ide-core-common';
+import { Event as BaseEvent, Disposable, Emitter, IDisposable, isWebKit } from '@opensumi/ide-core-common';
+import { space } from '@opensumi/ide-utils/lib/strings';
+
+import fastdom from './fastdom';
+
+export * from './event';
 
 export const EventType = {
   // Mouse
@@ -173,4 +177,25 @@ export class FocusTracker extends Disposable {
 
 export function trackFocus(element: HTMLElement | Window): IFocusTracker {
   return new FocusTracker(element);
+}
+
+export { fastdom };
+/**
+ * https://developer.mozilla.org/zh-CN/docs/Web/API/MouseEvent/button
+ */
+export const MouseEventButton = {
+  Left: 0,
+  Middle: 1,
+  Right: 2,
+  Back: 3,
+  Forward: 4,
+};
+
+export function createClassNameTokens(className: string): string[] {
+  return className.split(space).filter(Boolean);
+}
+
+export function addClassName(node: HTMLElement, className: string): void {
+  const tokens = createClassNameTokens(className);
+  node.classList.add(...tokens);
 }

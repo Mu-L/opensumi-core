@@ -14,9 +14,8 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 import { MaybePromise } from './async';
-import { Event, Emitter } from './event';
+import { Emitter, Event } from './event';
 
-// DisposableStore 是从 vscode lifecycle 中复制而来
 export class DisposableStore implements IDisposable {
   private toDispose = new Set<IDisposable>();
   private _isDisposed = false;
@@ -62,6 +61,12 @@ export class DisposableStore implements IDisposable {
     }
 
     return t;
+  }
+
+  public addAll(disposables: IDisposable[]) {
+    for (const item of disposables) {
+      this.add(item);
+    }
   }
 }
 
@@ -148,6 +153,7 @@ export class Disposable implements IDisposable {
   }
 
   private disposingElements = false;
+
   dispose(): void {
     if (this.disposed || this.disposingElements) {
       return;
@@ -363,6 +369,10 @@ export class RefCountedDisposable {
 
   constructor(private readonly _disposable: IDisposable) {}
 
+  get disposed() {
+    return this._counter <= 0;
+  }
+
   acquire() {
     this._counter++;
     return this;
@@ -373,5 +383,22 @@ export class RefCountedDisposable {
       this._disposable.dispose();
     }
     return this;
+  }
+}
+
+export class DisposableMap<K, V extends IDisposable = IDisposable> extends Map<K, V> implements IDisposable {
+  disposeKey(key: K): void {
+    const disposable = this.get(key);
+    if (disposable) {
+      disposable.dispose();
+    }
+    this.delete(key);
+  }
+
+  dispose(): void {
+    for (const disposable of this.values()) {
+      disposable.dispose();
+    }
+    this.clear();
   }
 }

@@ -1,14 +1,14 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { getIcon, getIconClass, getExternalIcon } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { getExternalIcon, getIcon, getIconClass } from '@opensumi/ide-core-browser';
 import {
-  QuickOpenService,
-  QuickOpenItem,
-  QuickOpenItemOptions,
-  QuickPickService,
-  QuickPickOptions,
-  QuickPickItem,
   HideReason,
   Mode,
+  QuickOpenItem,
+  QuickOpenItemOptions,
+  QuickOpenService,
+  QuickPickItem,
+  QuickPickOptions,
+  QuickPickService,
 } from '@opensumi/ide-core-browser/lib/quick-open';
 import { Emitter, Event } from '@opensumi/ide-core-common';
 
@@ -22,13 +22,20 @@ export class QuickPickServiceImpl implements QuickPickService {
   @Autowired(QuickOpenService)
   protected readonly quickOpenService: QuickOpenService;
 
+  private isAlwaysOpen = false;
+
   show(elements: string[], options?: QuickPickOptions): Promise<string | undefined>;
   show<T>(elements: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
-  show<T>(elements: QuickPickItem<T>[], options?: QuickPickOptions & { canPickMany: true }): Promise<T[] | undefined>;
+  show<T>(
+    elements: QuickPickItem<T>[],
+    options?: QuickPickOptions & { canPickMany: true; alwaysOpen?: boolean },
+  ): Promise<T[] | undefined>;
   async show<T>(
     elements: (string | QuickPickItem<T>)[],
-    options?: QuickPickOptions & { canPickMany: true },
+    options?: QuickPickOptions & { canPickMany: true; alwaysOpen?: boolean },
   ): Promise<T | T[] | undefined> {
+    this.isAlwaysOpen = !!options?.alwaysOpen;
+
     return new Promise<T | T[] | undefined>((resolve) => {
       const items = this.toItems(elements, resolve);
       if (options && this.quickTitleBar.shouldShowTitleBar(options.title, options.step, options.buttons)) {
@@ -62,6 +69,10 @@ export class QuickPickServiceImpl implements QuickPickService {
     });
   }
 
+  updateOptions(options: QuickPickOptions): void {
+    this.quickOpenService.updateOptions(options);
+  }
+
   hide(reason?: HideReason): void {
     this.quickOpenService.hide(reason);
   }
@@ -89,6 +100,7 @@ export class QuickPickServiceImpl implements QuickPickService {
     const groupLabel = typeof element === 'string' ? undefined : element.groupLabel;
     const showBorder = typeof element === 'string' ? undefined : element.showBorder;
     const buttons = typeof element === 'string' ? undefined : element.buttons;
+    const iconPath = typeof element === 'string' ? undefined : element.iconPath;
     const [icon, text] = getIconClass(label);
 
     if (icon) {
@@ -103,16 +115,21 @@ export class QuickPickServiceImpl implements QuickPickService {
       groupLabel,
       showBorder,
       buttons,
+      iconPath,
       run: (mode) => {
         if (mode !== Mode.OPEN) {
           return false;
         }
         resolve(value);
-        this.onDidAcceptEmitter.fire(undefined);
-        return true;
+        this.fireOnDidAccept();
+        return !this.isAlwaysOpen;
       },
       value,
     };
+  }
+
+  fireOnDidAccept(): void {
+    this.onDidAcceptEmitter.fire(undefined);
   }
 
   private readonly onDidAcceptEmitter: Emitter<void> = new Emitter();

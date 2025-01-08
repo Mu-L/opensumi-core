@@ -1,15 +1,15 @@
-import { Menu, MenuItemConstructorOptions, BrowserWindow } from 'electron';
+import { BrowserWindow, Menu, MenuItemConstructorOptions } from 'electron';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  INativeMenuTemplate,
   Domain,
-  isWindows,
   IDisposable,
   IElectronMainMenuService,
+  INativeMenuTemplate,
+  isWindows,
 } from '@opensumi/ide-core-common';
 
-import { ElectronMainContribution, ElectronMainApiRegistry, ElectronMainApiProvider } from '../../types';
+import { ElectronMainApiProvider, ElectronMainApiRegistry, ElectronMainContribution } from '../../types';
 
 @Injectable()
 export class ElectronMainMenuService extends ElectronMainApiProvider<'menuClick' | 'menuClose'> {
@@ -17,7 +17,7 @@ export class ElectronMainMenuService extends ElectronMainApiProvider<'menuClick'
 
   showContextMenu(template: INativeMenuTemplate, webContentsId: number) {
     let menu: Electron.Menu | undefined = this.buildMenu(template, webContentsId + '-context');
-    menu!.popup({
+    menu?.popup({
       callback: () => {
         menu = undefined;
         this.eventEmitter.fire('menuClose', webContentsId + '-context', template.id);
@@ -66,7 +66,7 @@ export class ElectronMainMenuService extends ElectronMainApiProvider<'menuClick'
   /**
    *
    * @param template
-   * @param targetId 目标webcontents或window
+   * @param targetId 目标 WebContents 或 Window
    */
   buildMenu(template: INativeMenuTemplate, targetId): Menu {
     const electronTemplate = this.getElectronTemplate(template, targetId);

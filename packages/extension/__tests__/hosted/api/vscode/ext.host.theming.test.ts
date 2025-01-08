@@ -1,27 +1,14 @@
-import { RPCProtocol } from '@opensumi/ide-connection';
 import { Emitter } from '@opensumi/ide-core-common';
 import { MainThreadTheming } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.theming';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '@opensumi/ide-extension/lib/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '@opensumi/ide-extension/lib/common/vscode';
 import { ColorThemeKind } from '@opensumi/ide-extension/lib/common/vscode/ext-types';
 import { ExtHostTheming } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.theming';
 import { IThemeService, ThemeType } from '@opensumi/ide-theme';
 
 import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHost: ExtHostTheming;
 let mainThread: MainThreadTheming;

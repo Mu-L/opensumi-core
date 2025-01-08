@@ -1,29 +1,29 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { URI, IDisposable, Emitter, Event, Uri, dispose, Disposable, BinaryBuffer } from '@opensumi/ide-core-browser';
+import { BinaryBuffer, Disposable, Emitter, Event, IDisposable, URI, Uri, dispose } from '@opensumi/ide-core-browser';
 import { ensureDir } from '@opensumi/ide-core-common/lib/browser-fs/ensure-dir';
 import { FileChange, FileSystemProviderCapabilities, FileStat as IFileStat } from '@opensumi/ide-file-service';
 import {
-  IFileServiceClient,
-  FileType,
   FileOperationError,
   FileOperationResult,
   FileSystemProvider,
+  FileType,
   IBrowserFileSystemRegistry,
+  IFileServiceClient,
 } from '@opensumi/ide-file-service/lib/common';
 
 import { ExtHostAPIIdentifier } from '../../../common/vscode';
-import { toFileStat, fromFileStat } from '../../../common/vscode/converter';
+import { fromFileStat, toFileStat } from '../../../common/vscode/converter';
 import { UriComponents } from '../../../common/vscode/ext-types';
 import {
-  IExtHostFileSystemShape,
   FileDeleteOptions,
-  IMainThreadFileSystemShape,
+  FileOverwriteOptions,
+  FilePermission,
   FileStat,
   FileSystemProviderErrorCode,
-  FileOverwriteOptions,
   IExtHostFileSystemInfoShape,
-  FilePermission,
+  IExtHostFileSystemShape,
+  IMainThreadFileSystemShape,
 } from '../../../common/vscode/file-system';
 
 @Injectable({ multiple: true })
@@ -140,24 +140,22 @@ export class MainThreadFileSystem implements IMainThreadFileSystemShape {
   }
 
   async $writeFile(uri: UriComponents, content: Uint8Array): Promise<void> {
-    const _uri = URI.revive(uri);
-    const stat = await this._fileService.getFileStat(_uri.toString(), false);
-    if (!stat) {
-      // 文件不存在
-      await ensureDir(new URI(_uri).path.dir.toString(), {
-        mkdir: (path: string) => this.$mkdir(URI.file(path).codeUri),
-        access: (path: string) =>
-          this._fileService.getFileStat(URI.file(path).codeUri.toString(), false).then((stat) => !!stat),
-      });
-      return this._fileService
-        .createFile(_uri.toString(), { content: BinaryBuffer.wrap(content).toString() })
-        .then(() => undefined)
-        .catch(MainThreadFileSystem._handleError);
-    } else {
-      return this._fileService
-        .setContent(stat!, content)
-        .then(() => undefined)
-        .catch(MainThreadFileSystem._handleError);
+    try {
+      const _uri = URI.revive(uri);
+      const stat = await this._fileService.getFileStat(_uri.toString(), false);
+      if (!stat) {
+        // 文件不存在
+        await ensureDir(new URI(_uri).path.dir.toString(), {
+          mkdir: (path: string) => this.$mkdir(URI.file(path).codeUri),
+          access: (path: string) => this._fileService.access(URI.file(path).codeUri.toString()),
+        });
+
+        await this._fileService.createFile(_uri.toString(), { content: BinaryBuffer.wrap(content).toString() });
+      } else {
+        await this._fileService.setContent(stat!, content);
+      }
+    } catch (error) {
+      return MainThreadFileSystem._handleError(error);
     }
   }
 

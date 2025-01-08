@@ -1,23 +1,41 @@
 import cls from 'classnames';
 import throttle from 'lodash/throttle';
 import React, { useCallback, useEffect, useRef } from 'react';
-import { Scrollbars as CustomScrollbars } from 'react-custom-scrollbars';
 
 import { DisposableCollection } from '@opensumi/ide-utils';
+import { Scrollbars as CustomScrollbars } from '@opensumi/react-custom-scrollbars-2';
+
 import './styles.less';
 
 export interface ICustomScrollbarProps {
   forwardedRef?: any;
-  onScroll?: any;
-  onUpdate?: any;
+  onScroll?: (values: any) => void;
+  onUpdate?: (values: any) => void;
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
-  onReachBottom?: any;
+  onReachBottom?: () => void;
   /**
    * 这种模式下，左右滚动和上下滚动都会被视为左右滚动
    */
   tabBarMode?: boolean;
+  /**
+   * 滚动条滑块大小，默认 5px
+   */
+  thumbSize?: number;
+  /**
+   * 是否隐藏纵向滚动条，默认 false
+   */
+  hiddenVertical?: boolean;
+  /**
+   * 是否隐藏横向滚动条，默认 false
+   */
+  hiddenHorizontal?: boolean;
+  /**
+   * 通用渲染， 默认 false
+   * https://github.com/malte-wessel/react-custom-scrollbars/blob/master/docs/usage.md#universal-rendering
+   */
+  universal?: boolean;
 }
 
 export const Scrollbars = ({
@@ -29,15 +47,27 @@ export const Scrollbars = ({
   className,
   onReachBottom,
   tabBarMode,
+  thumbSize = 5,
+  hiddenVertical,
+  hiddenHorizontal,
+  universal = false,
 }: ICustomScrollbarProps) => {
   const disposableCollection = useRef<DisposableCollection>(new DisposableCollection());
   const scrollerRef = useRef<HTMLDivElement>();
   const refSetter = useCallback((scrollbarsRef) => {
     if (scrollbarsRef) {
       scrollerRef.current = scrollbarsRef.view;
-      forwardedRef && forwardedRef(scrollbarsRef.view);
+      if (forwardedRef) {
+        if (typeof forwardedRef === 'function') {
+          forwardedRef(scrollbarsRef.view);
+        } else {
+          forwardedRef.current = scrollbarsRef.view;
+        }
+      }
     } else {
-      forwardedRef && forwardedRef(null);
+      if (forwardedRef && typeof forwardedRef === 'function') {
+        forwardedRef(null);
+      }
     }
   }, []);
   const verticalShadowRef = useRef<HTMLDivElement | null>();
@@ -45,6 +75,9 @@ export const Scrollbars = ({
 
   const handleReachBottom = useCallback(
     (values) => {
+      if (!values) {
+        return;
+      }
       const { scrollTop, scrollHeight, clientHeight } = values;
 
       if (scrollHeight === 0 && clientHeight === 0) {
@@ -62,6 +95,9 @@ export const Scrollbars = ({
 
   const handleUpdate = useCallback(
     throttle((values) => {
+      if (!values) {
+        return;
+      }
       const { scrollTop, scrollLeft } = values;
       const shadowTopOpacity = (1 / 20) * Math.min(scrollTop, 20);
       const shadowLeftOpacity = (1 / 20) * Math.min(scrollLeft, 20);
@@ -112,18 +148,35 @@ export const Scrollbars = ({
       className={cls(className, 'kt-scrollbar')}
       onUpdate={handleUpdate}
       onScroll={onScroll}
-      renderTrackHorizontal={({ style, ...props }) => (
-        <div {...props} style={{ ...style, left: 0, right: 0, bottom: 0 }} />
-      )}
-      renderTrackVertical={({ style, ...props }) => (
-        <div {...props} style={{ ...style, top: 0, right: 0, bottom: 0 }} />
-      )}
-      renderThumbVertical={({ style, ...props }) => (
-        <div {...props} style={{ ...style }} className={'scrollbar-thumb-vertical'} />
-      )}
-      renderThumbHorizontal={({ style, ...props }) => (
-        <div {...props} style={{ ...style }} className={'scrollbar-thumb-horizontal'} />
-      )}
+      universal={universal}
+      renderTrackHorizontal={({ style, ...props }) => {
+        const newStyle = { ...style, height: thumbSize, left: 0, right: 0, bottom: 1 };
+        if (hiddenHorizontal) {
+          newStyle.display = 'none';
+        }
+        return <div {...props} style={newStyle} />;
+      }}
+      renderTrackVertical={({ style, ...props }) => {
+        const newStyle = { ...style, width: thumbSize, top: 0, right: 1, bottom: 0 };
+        if (hiddenVertical) {
+          newStyle.display = 'none';
+        }
+        return <div {...props} style={newStyle} />;
+      }}
+      renderThumbVertical={({ style, className, ...props }) => {
+        const newStyle = { ...style, width: thumbSize };
+        if (hiddenVertical) {
+          newStyle.display = 'none';
+        }
+        return <div {...props} style={newStyle} className={cls(className, 'scrollbar-thumb-vertical')} />;
+      }}
+      renderThumbHorizontal={({ style, className, ...props }) => {
+        const newStyle = { ...style, height: thumbSize, display: 'none' };
+        if (hiddenHorizontal) {
+          newStyle.display = 'none';
+        }
+        return <div {...props} style={newStyle} className={cls(className, 'scrollbar-thumb-horizontal')} />;
+      }}
     >
       <div
         ref={(ref) => {
@@ -142,4 +195,10 @@ export const Scrollbars = ({
   );
 };
 
-export const ScrollbarsVirtualList = React.forwardRef((props, ref) => <Scrollbars {...props} forwardedRef={ref} />);
+Scrollbars.displayName = 'CustomScrollbars';
+
+export const ScrollbarsVirtualList = React.forwardRef((props, ref) => (
+  <Scrollbars {...props} thumbSize={10} forwardedRef={ref} />
+));
+
+ScrollbarsVirtualList.displayName = 'ScrollbarsVirtualList';

@@ -5,43 +5,45 @@ import temp from 'temp';
 
 import { TreeNodeEvent, TreeNodeType } from '@opensumi/ide-components';
 import {
-  IContextKeyService,
+  AppConfig,
   CorePreferences,
   EDITOR_COMMANDS,
-  PreferenceService,
   Emitter,
+  IContextKeyService,
+  ILogger,
+  PreferenceService,
 } from '@opensumi/ide-core-browser';
-import { ILogger } from '@opensumi/ide-core-browser';
-import { AppConfig } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
 import { MockedStorageProvider } from '@opensumi/ide-core-browser/__mocks__/storage';
 import {
-  FileUri,
-  URI,
-  Disposable,
-  StorageProvider,
-  IApplicationService,
-  OS,
   Deferred,
+  Disposable,
+  FileUri,
+  IApplicationService,
   IClipboardService,
+  OS,
+  StorageProvider,
+  URI,
 } from '@opensumi/ide-core-common';
 import { IDecorationsService } from '@opensumi/ide-decoration';
 import { FileDecorationsService } from '@opensumi/ide-decoration/lib/browser/decorationsService';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
-import { FileStat, FileServicePath, IDiskFileProvider, IFileServiceClient } from '@opensumi/ide-file-service';
+import { FileServicePath, FileStat, IDiskFileProvider, IFileServiceClient } from '@opensumi/ide-file-service';
 import { FileServiceClient } from '@opensumi/ide-file-service/lib/browser/file-service-client';
-import { FileSystemNodeOptions, FileService } from '@opensumi/ide-file-service/lib/node';
+import { FileService, FileSystemNodeOptions } from '@opensumi/ide-file-service/lib/node';
 import { DiskFileSystemProvider } from '@opensumi/ide-file-service/lib/node/disk-file-system.provider';
+import { WatcherProcessManagerToken } from '@opensumi/ide-file-service/lib/node/watcher-process-manager';
 import { FileContextKey } from '@opensumi/ide-file-tree-next/lib/browser/file-contextkey';
+import { IMainLayoutService } from '@opensumi/ide-main-layout';
+import { RETRACT_BOTTOM_PANEL } from '@opensumi/ide-main-layout/lib/browser/main-layout.contribution';
 import { IDialogService, IMessageService } from '@opensumi/ide-overlay';
 import { IThemeService } from '@opensumi/ide-theme';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { FileTreeNextModule } from '../../src';
-import { PasteTypes } from '../../src';
+import { FileTreeNextModule, PasteTypes } from '../../src';
 import { FileTreeContribution } from '../../src/browser/file-tree-contribution';
 import styles from '../../src/browser/file-tree-node.module.less';
 import { FileTreeService } from '../../src/browser/file-tree.service';
@@ -72,6 +74,9 @@ describe('FileTree should be work while on single workspace model', () => {
   const mockCorePreference = {
     'workbench.list.openMode': 'singleClick',
     'editor.previewMode': true,
+  };
+  const mockMainLayoutService = {
+    bottomExpanded: true,
   };
   beforeAll(async () => {
     mockFileTreeApi = {
@@ -199,7 +204,19 @@ describe('FileTree should be work while on single workspace model', () => {
         token: IClipboardService,
         useValue: mockClipboardService,
       },
+      {
+        token: IMainLayoutService,
+        useValue: mockMainLayoutService,
+      },
     );
+    injector.addProviders({
+      token: WatcherProcessManagerToken,
+      useValue: {
+        setClient: () => void 0,
+        watch: (() => 1) as any,
+        unWatch: () => void 0,
+      },
+    });
     const fileServiceClient: FileServiceClient = injector.get(IFileServiceClient);
     fileServiceClient.registerProvider('file', injector.get(IDiskFileProvider));
 
@@ -301,10 +318,18 @@ describe('FileTree should be work while on single workspace model', () => {
         done();
       });
       fileTreeService.refresh();
+      jest.runAllTimers();
     });
 
     it('Style decoration should be right while click the item', async () => {
       const { handleItemClick, decorations } = fileTreeModelService;
+
+      const retracted = jest.fn();
+      injector.mockCommand(RETRACT_BOTTOM_PANEL.id, () => {
+        mockMainLayoutService.bottomExpanded = false;
+        retracted();
+      });
+
       const treeModel = fileTreeModelService.treeModel;
       const rootNode = treeModel.root;
       const directoryNode = rootNode.getTreeNodeAtIndex(0) as Directory;
@@ -317,9 +342,11 @@ describe('FileTree should be work while on single workspace model', () => {
       const fileNode = rootNode.getTreeNodeAtIndex(1) as Directory;
       injector.mockCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, openFile);
       handleItemClick(fileNode, TreeNodeType.TreeNode);
+      expect(retracted).toHaveBeenCalledTimes(1);
+      expect(mockMainLayoutService.bottomExpanded).toBeFalsy();
       const fileDecoration = decorations.getDecorations(fileNode);
       expect(fileDecoration?.classlist).toEqual([styles.mod_selected, styles.mod_focused]);
-      expect(openFile).toBeCalledWith(fileNode.uri, { disableNavigate: true, preview: true });
+      expect(openFile).toHaveBeenCalledWith(fileNode.uri, { disableNavigate: true, preview: true });
     });
 
     it('Style decoration should be right while click with ctrl/cmd/shift', async () => {
@@ -365,7 +392,7 @@ describe('FileTree should be work while on single workspace model', () => {
       await pasteFile(directoryNode.uri);
       expect(directoryNode.expanded).toBeTruthy();
       expect(fileTreeModelService.pasteStore.type).toBe(PasteTypes.NONE);
-      expect(mockFileTreeApi.mv).toBeCalled();
+      expect(mockFileTreeApi.mv).toHaveBeenCalled();
     });
 
     it('Copy - Paste should be work', async () => {
@@ -383,7 +410,7 @@ describe('FileTree should be work while on single workspace model', () => {
       expect(directoryNode.expanded).toBeTruthy();
       // paste type should be COPY after paste
       expect(fileTreeModelService.pasteStore.type).toBe(PasteTypes.COPY);
-      expect(mockFileTreeApi.copyFile).toBeCalled();
+      expect(mockFileTreeApi.copyFile).toHaveBeenCalled();
     });
 
     it('Cross windows Copy - Paste should be work', () => {
@@ -393,7 +420,7 @@ describe('FileTree should be work while on single workspace model', () => {
       const directoryNode = rootNode.getTreeNodeAtIndex(0) as Directory;
       mockClipboardService.readResources = jest.fn(() => [URI.file('test')]);
       pasteFile(directoryNode.uri);
-      expect(mockClipboardService.readResources).toBeCalled();
+      expect(mockClipboardService.readResources).toHaveBeenCalled();
       mockClipboardService.readResources = jest.fn();
     });
 
@@ -404,7 +431,7 @@ describe('FileTree should be work while on single workspace model', () => {
       const { location, decorations } = fileTreeModelService;
       mockTreeHandle.ensureVisible = jest.fn(() => fileNode);
       await location(fileNode.uri);
-      expect(mockTreeHandle.ensureVisible).toBeCalledWith(
+      expect(mockTreeHandle.ensureVisible).toHaveBeenCalledWith(
         await fileTreeService.getFileTreeNodePathByUri(fileNode.uri),
         'center',
         true,
@@ -421,7 +448,7 @@ describe('FileTree should be work while on single workspace model', () => {
       mockTreeHandle.ensureVisible = jest.fn(() => fileNode);
       locationOnShow(fileNode.uri);
       await performLocationOnHandleShow();
-      expect(mockTreeHandle.ensureVisible).toBeCalledWith(
+      expect(mockTreeHandle.ensureVisible).toHaveBeenCalledWith(
         await fileTreeService.getFileTreeNodePathByUri(fileNode.uri),
         'center',
         true,
@@ -464,7 +491,7 @@ describe('FileTree should be work while on single workspace model', () => {
           fileTreeModelService.activeFileFocusedDecoration(directoryNode);
           mockTreeHandle.expandNode.mockClear();
           await fileTreeModelService.expandCurrentFile();
-          expect(mockTreeHandle.expandNode).toBeCalledTimes(1);
+          expect(mockTreeHandle.expandNode).toHaveBeenCalledTimes(1);
           dispose.dispose();
           defered.resolve();
         });
@@ -473,7 +500,7 @@ describe('FileTree should be work while on single workspace model', () => {
         fileTreeModelService.activeFileFocusedDecoration(directoryNode);
         mockTreeHandle.expandNode.mockClear();
         await fileTreeModelService.expandCurrentFile();
-        expect(mockTreeHandle.expandNode).toBeCalledTimes(1);
+        expect(mockTreeHandle.expandNode).toHaveBeenCalledTimes(1);
         defered.resolve();
       }
       await defered.promise;
@@ -487,7 +514,7 @@ describe('FileTree should be work while on single workspace model', () => {
         fileTreeModelService.activeFileFocusedDecoration(directoryNode);
         mockTreeHandle.collapseNode.mockClear();
         await fileTreeModelService.collapseCurrentFile();
-        expect(mockTreeHandle.collapseNode).toBeCalledTimes(1);
+        expect(mockTreeHandle.collapseNode).toHaveBeenCalledTimes(1);
         dispose.dispose();
         done();
       });
@@ -506,13 +533,13 @@ describe('FileTree should be work while on single workspace model', () => {
       };
       mockTreeHandle.promptNewTreeNode.mockResolvedValueOnce(promptHandle);
       await fileTreeModelService.newFilePrompt(root);
-      expect(mockTreeHandle.promptNewTreeNode).toBeCalled();
-      expect(promptHandle.onChange).toBeCalled();
-      expect(promptHandle.onCommit).toBeCalled();
-      expect(promptHandle.onBlur).toBeCalled();
-      expect(promptHandle.onFocus).toBeCalled();
-      expect(promptHandle.onDestroy).toBeCalled();
-      expect(promptHandle.onCancel).toBeCalled();
+      expect(mockTreeHandle.promptNewTreeNode).toHaveBeenCalled();
+      expect(promptHandle.onChange).toHaveBeenCalled();
+      expect(promptHandle.onCommit).toHaveBeenCalled();
+      expect(promptHandle.onBlur).toHaveBeenCalled();
+      expect(promptHandle.onFocus).toHaveBeenCalled();
+      expect(promptHandle.onDestroy).toHaveBeenCalled();
+      expect(promptHandle.onCancel).toHaveBeenCalled();
     });
 
     it('New Directory with root uri should be work', async () => {
@@ -527,13 +554,13 @@ describe('FileTree should be work while on single workspace model', () => {
       };
       mockTreeHandle.promptNewCompositeTreeNode.mockResolvedValueOnce(promptHandle);
       await fileTreeModelService.newDirectoryPrompt(root);
-      expect(mockTreeHandle.promptNewCompositeTreeNode).toBeCalled();
-      expect(promptHandle.onChange).toBeCalled();
-      expect(promptHandle.onCommit).toBeCalled();
-      expect(promptHandle.onBlur).toBeCalled();
-      expect(promptHandle.onFocus).toBeCalled();
-      expect(promptHandle.onDestroy).toBeCalled();
-      expect(promptHandle.onCancel).toBeCalled();
+      expect(mockTreeHandle.promptNewCompositeTreeNode).toHaveBeenCalled();
+      expect(promptHandle.onChange).toHaveBeenCalled();
+      expect(promptHandle.onCommit).toHaveBeenCalled();
+      expect(promptHandle.onBlur).toHaveBeenCalled();
+      expect(promptHandle.onFocus).toHaveBeenCalled();
+      expect(promptHandle.onDestroy).toHaveBeenCalled();
+      expect(promptHandle.onCancel).toHaveBeenCalled();
     });
   });
 
@@ -557,10 +584,10 @@ describe('FileTree should be work while on single workspace model', () => {
       dndService.handleDragStart(mockEvent as any, fileNode);
       const fileDecoration = decorations.getDecorations(fileNode);
       expect(fileDecoration?.classlist).toEqual([styles.mod_dragging]);
-      expect(mockEvent.stopPropagation).toBeCalled();
-      expect(mockEvent.dataTransfer.setDragImage).toBeCalled();
-      expect(mockEvent.dataTransfer.setData).toBeCalled();
-      expect(mockEvent.dataTransfer.setData).toBeCalledTimes(3);
+      expect(mockEvent.stopPropagation).toHaveBeenCalled();
+      expect(mockEvent.dataTransfer.setDragImage).toHaveBeenCalled();
+      expect(mockEvent.dataTransfer.setData).toHaveBeenCalled();
+      expect(mockEvent.dataTransfer.setData).toHaveBeenCalledTimes(3);
     });
 
     it('Dragging Enter should be work', async () => {
@@ -573,8 +600,8 @@ describe('FileTree should be work while on single workspace model', () => {
         stopPropagation: jest.fn(),
       };
       dndService.handleDragEnter(mockEvent as any, fileNode);
-      expect(mockEvent.preventDefault).toBeCalled();
-      expect(mockEvent.stopPropagation).toBeCalled();
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
+      expect(mockEvent.stopPropagation).toHaveBeenCalled();
     });
 
     it('Dragging Leave should be work', async () => {
@@ -587,8 +614,8 @@ describe('FileTree should be work while on single workspace model', () => {
         stopPropagation: jest.fn(),
       };
       dndService.handleDragLeave(mockEvent as any, fileNode);
-      expect(mockEvent.stopPropagation).toBeCalled();
-      expect(mockEvent.preventDefault).toBeCalled();
+      expect(mockEvent.stopPropagation).toHaveBeenCalled();
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
     });
 
     it('Dragging Over should be work', async () => {
@@ -601,8 +628,8 @@ describe('FileTree should be work while on single workspace model', () => {
         stopPropagation: jest.fn(),
       };
       dndService.handleDragOver(mockEvent as any, directoryNode);
-      expect(mockEvent.stopPropagation).toBeCalled();
-      expect(mockEvent.preventDefault).toBeCalled();
+      expect(mockEvent.stopPropagation).toHaveBeenCalled();
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
       const directoryDecoration = decorations.getDecorations(directoryNode);
       expect(directoryDecoration?.classlist).toEqual([styles.mod_dragover]);
     });
@@ -631,8 +658,8 @@ describe('FileTree should be work while on single workspace model', () => {
         },
       };
       dndService.handleDrop(mockEvent as any, directoryNode);
-      expect(mockEvent.stopPropagation).toBeCalled();
-      expect(mockEvent.preventDefault).toBeCalled();
+      expect(mockEvent.stopPropagation).toHaveBeenCalled();
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
       expect(mockEvent.dataTransfer.dropEffect).toBe('copy');
       const directoryDecoration = decorations.getDecorations(directoryNode);
       expect(directoryDecoration?.classlist).toEqual([]);
@@ -652,8 +679,8 @@ describe('FileTree should be work while on single workspace model', () => {
         },
       };
       dndService.handleDrop(mockEvent as any);
-      expect(mockEvent.stopPropagation).toBeCalled();
-      expect(mockEvent.preventDefault).toBeCalled();
+      expect(mockEvent.stopPropagation).toHaveBeenCalled();
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
       expect(mockEvent.dataTransfer.dropEffect).toBe('copy');
       const directoryDecoration = decorations.getDecorations(directoryNode);
       expect(directoryDecoration?.classlist).toEqual([]);
@@ -673,7 +700,7 @@ describe('FileTree should be work while on single workspace model', () => {
         }
         return true;
       });
-      fileTreeService.isCompactMode = true;
+      (fileTreeService as any)._isCompactMode = true;
       expect(directoryNode.expanded).toBeTruthy();
       fs.ensureDirSync(testFile);
       const dispose = fileTreeService.onNodeRefreshed(() => {
@@ -686,6 +713,7 @@ describe('FileTree should be work while on single workspace model', () => {
         done();
       });
       fileTreeService.refresh();
+      jest.runAllTimers();
     });
   });
 });

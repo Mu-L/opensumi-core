@@ -2,10 +2,13 @@ import React from 'react';
 
 import { Autowired, Injectable } from '@opensumi/di';
 import { notification, open } from '@opensumi/ide-components';
+import { parseWithoutEscape } from '@opensumi/ide-components/lib/utils';
 import { IOpenerService, toMarkdown } from '@opensumi/ide-core-browser';
-import { MessageType, uuid, localize } from '@opensumi/ide-core-common';
+import { MayCancelablePromise, MessageType, localize, uuid } from '@opensumi/ide-core-common';
 
-import { IMessageService, AbstractMessageService, MAX_MESSAGE_LENGTH } from '../common';
+import { AbstractMessageService, IMessageService, MAX_MESSAGE_LENGTH, OpenMessageOptions } from '../common';
+
+import type vscode from 'vscode';
 
 @Injectable()
 export class MessageService extends AbstractMessageService implements IMessageService {
@@ -19,10 +22,9 @@ export class MessageService extends AbstractMessageService implements IMessageSe
   private showTime = 0;
 
   // 相同文案返回的间隔时间
-  // https://github.com/react-component/notification#notificationnoticeprops
-  protected static SAME_MESSAGE_DURATION = 30;
+  protected static SAME_MESSAGE_DURATION_MS = 3000;
 
-  // 参考 vscode message 组件消失的时间
+  // 单位为秒: https://github.com/react-component/notification#notificationnoticeprops
   protected static DURATION: { [type: number]: number } = {
     [MessageType.Info]: 15,
     [MessageType.Warning]: 18,
@@ -37,20 +39,20 @@ export class MessageService extends AbstractMessageService implements IMessageSe
    * @param closable true | false
    * @param from from extension
    */
-  open<T = string>(
-    rawMessage: string | React.ReactNode,
-    type: MessageType,
-    buttons?: string[],
+  open<T = string>({
+    type,
+    buttons,
+    from,
     closable = true,
-    from?: string,
-  ): Promise<T | undefined> {
+    message: rawMessage,
+  }: OpenMessageOptions): MayCancelablePromise<T | undefined> {
     if (!rawMessage) {
       return Promise.resolve(undefined);
     }
     let message = rawMessage;
     // 如果两秒内提示信息相同，则直接返回上一个提示
     if (
-      Date.now() - this.showTime < MessageService.SAME_MESSAGE_DURATION &&
+      Date.now() - this.showTime < MessageService.SAME_MESSAGE_DURATION_MS &&
       typeof message === 'string' &&
       this.preMessage === message
     ) {
@@ -64,7 +66,7 @@ export class MessageService extends AbstractMessageService implements IMessageSe
     const description = from && typeof from === 'string' ? `${localize('component.message.origin')}: ${from}` : '';
     const key = uuid();
     const promise = open<T>(
-      toMarkdown(message, this.openerService),
+      toMarkdown(message, this.openerService, { walkTokens: parseWithoutEscape }),
       type,
       closable,
       key,

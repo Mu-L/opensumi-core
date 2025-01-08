@@ -4,9 +4,9 @@ import { WebsocketProvider } from 'y-websocket';
 // @ts-ignore
 import { Doc as YDoc, Map as YMap, YMapEvent, Text as YText } from 'yjs';
 
-import { Injectable, Autowired, Inject, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { AppConfig } from '@opensumi/ide-core-browser';
-import { Deferred, ILogger, OnEvent, uuid, WithEventBus } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Inject, Injectable, Injector } from '@opensumi/di';
+import { AppConfig, DisposableCollection } from '@opensumi/ide-core-browser';
+import { Deferred, DisposableStore, ILogger, OnEvent, WithEventBus, uuid } from '@opensumi/ide-core-common';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import {
   EditorDocumentModelCreationEvent,
@@ -16,19 +16,20 @@ import {
   IEditorDocumentModelService,
 } from '@opensumi/ide-editor/lib/browser';
 import { WorkbenchEditorServiceImpl } from '@opensumi/ide-editor/lib/browser/workbench-editor.service';
-import { ITextModel, ICodeEditor } from '@opensumi/ide-monaco';
+import { FileChangeEvent, FileChangeType, IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
+import { ICodeEditor, ITextModel } from '@opensumi/ide-monaco';
 import { ICSSStyleService } from '@opensumi/ide-theme';
 
 import {
+  CollaborationModuleContribution,
   CollaborationServiceForClientPath,
+  DEFAULT_COLLABORATION_PORT,
   ICollaborationService,
   ICollaborationServiceForClient,
   ROOM_NAME,
   UserInfo,
-  CollaborationModuleContribution,
   Y_REMOTE_SELECTION,
   Y_REMOTE_SELECTION_HEAD,
-  COLLABORATION_PORT,
 } from '../common';
 
 import { getColorByClientID } from './color';
@@ -54,6 +55,9 @@ export class CollaborationService extends WithEventBus implements ICollaboration
   @Autowired(IEditorDocumentModelService)
   private docModelManager: IEditorDocumentModelService;
 
+  @Autowired(IFileServiceClient)
+  protected readonly fileServiceClient: IFileServiceClient;
+
   @Autowired(AppConfig)
   private appConfig: AppConfig;
 
@@ -74,6 +78,9 @@ export class CollaborationService extends WithEventBus implements ICollaboration
   private yMapReadyMap: Map<string, Deferred<void>> = new Map();
 
   private bindingReadyMap: Map<string, Deferred<void>> = new Map();
+
+  protected readonly toDisposableCollection: DisposableCollection = new DisposableCollection();
+  protected cssStyleSheetsDisposables = new DisposableStore();
 
   private yMapObserver = (event: YMapEvent<YText>) => {
     const changes = event.changes.keys;
@@ -97,16 +104,31 @@ export class CollaborationService extends WithEventBus implements ICollaboration
   }
 
   initialize() {
+    /**
+     * 优先使用 appConfig.collaborationWsPath 配置
+     * 如果没有该配置才根据 wsPath 去转换端口，端口可以用 collaborationOpts.port 配置
+     */
+    const { collaborationWsPath, wsPath, collaborationOptions } = this.appConfig;
+    let serverUrl: string | undefined = collaborationWsPath;
+
+    if (!serverUrl) {
+      const path = new URL(wsPath.toString());
+      path.port = String(collaborationOptions?.port ?? DEFAULT_COLLABORATION_PORT);
+
+      serverUrl = path.toString();
+    }
+
     this.yDoc = new YDoc();
     this.yTextMap = this.yDoc.getMap();
 
-    // transform url
-    const wsPath = new URL(this.appConfig.wsPath.toString());
-    wsPath.port = String(COLLABORATION_PORT);
-    this.yWebSocketProvider = new WebsocketProvider(wsPath.toString(), ROOM_NAME, this.yDoc);
+    this.yWebSocketProvider = new WebsocketProvider(serverUrl.toString(), ROOM_NAME, this.yDoc);
 
     this.yTextMap.observe(this.yMapObserver);
 
+    this.yWebSocketProvider.awareness.on('update', this.updateCSSManagerWhenAwarenessUpdated);
+  }
+
+  registerUserInfo() {
     if (this.userInfo === undefined) {
       // fallback
       this.userInfo = {
@@ -116,20 +138,23 @@ export class CollaborationService extends WithEventBus implements ICollaboration
     }
     // add userInfo to awareness field
     this.yWebSocketProvider.awareness.setLocalStateField('user-info', this.userInfo);
+  }
 
-    this.yWebSocketProvider.awareness.on('update', this.updateCSSManagerWhenAwarenessUpdated);
+  initFileWatch() {
+    this.toDisposableCollection.push(
+      this.fileServiceClient.onFilesChanged((e) => {
+        this.handleFileChange(e);
+      }),
+    );
   }
 
   destroy() {
     this.yWebSocketProvider.awareness.off('update', this.updateCSSManagerWhenAwarenessUpdated);
-    this.clientIDStyleAddedSet.forEach((clientID) => {
-      this.cssManager.removeClass(`${Y_REMOTE_SELECTION}-${clientID}`);
-      this.cssManager.removeClass(`${Y_REMOTE_SELECTION_HEAD}-${clientID}`);
-      this.cssManager.removeClass(`${Y_REMOTE_SELECTION_HEAD}-${clientID}::after`);
-    });
+    this.cssStyleSheetsDisposables.clear();
     this.yTextMap.unobserve(this.yMapObserver);
     this.yWebSocketProvider.disconnect();
     this.bindingMap.forEach((binding) => binding.destroy());
+    this.toDisposableCollection.dispose();
   }
 
   registerContribution(contribution: CollaborationModuleContribution) {
@@ -229,31 +254,48 @@ export class CollaborationService extends WithEventBus implements ICollaboration
     if (changes.added.length > 0) {
       changes.added.forEach((clientID) => {
         if (!this.clientIDStyleAddedSet.has(clientID)) {
-          const color = getColorByClientID(clientID);
-          this.cssManager.addClass(`${Y_REMOTE_SELECTION}-${clientID}`, {
-            backgroundColor: color,
-            opacity: '0.25',
-          });
-          this.cssManager.addClass(`${Y_REMOTE_SELECTION_HEAD}-${clientID}`, {
-            position: 'absolute',
-            borderLeft: `${color} solid 2px`,
-            borderBottom: `${color} solid 2px`,
-            borderTop: `${color} solid 2px`,
-            height: '100%',
-            boxSizing: 'border-box',
-          });
-          this.cssManager.addClass(`${Y_REMOTE_SELECTION_HEAD}-${clientID}::after`, {
-            position: 'absolute',
-            content: ' ',
-            border: `3px solid ${color}`,
-            left: '-4px',
-            top: '-5px',
-          });
+          const [foregroundColor, backgroundColor] = getColorByClientID(clientID);
+          this.cssStyleSheetsDisposables.add(
+            this.cssManager.addClass(`${Y_REMOTE_SELECTION}-${clientID}`, {
+              backgroundColor,
+              opacity: '0.25',
+              color: foregroundColor,
+            }),
+          );
+          this.cssStyleSheetsDisposables.add(
+            this.cssManager.addClass(`${Y_REMOTE_SELECTION_HEAD}-${clientID}`, {
+              position: 'absolute',
+              borderLeft: `${backgroundColor} solid 2px`,
+              borderBottom: `${backgroundColor} solid 2px`,
+              borderTop: `${backgroundColor} solid 2px`,
+              height: '100%',
+              boxSizing: 'border-box',
+            }),
+          );
+          this.cssStyleSheetsDisposables.add(
+            this.cssManager.addClass(`${Y_REMOTE_SELECTION_HEAD}-${clientID}::after`, {
+              position: 'absolute',
+              content: ' ',
+              border: `3px solid ${backgroundColor}`,
+              left: '-4px',
+              top: '-5px',
+            }),
+          );
           this.clientIDStyleAddedSet.add(clientID);
         }
       });
     }
   };
+
+  private handleFileChange(e: FileChangeEvent) {
+    e.forEach((change) => {
+      // 只有从文件系统更新，并且窗口未打开情况，才重置 yTextMap
+      if (change.type === FileChangeType.UPDATED && !this.bindingMap.get(change.uri) && this.yTextMap.get(change.uri)) {
+        this.yTextMap.delete(change.uri);
+        this.resetDeferredYMapKey(change.uri);
+      }
+    });
+  }
 
   @OnEvent(EditorDocumentModelCreationEvent)
   private async editorDocumentModelCreationHandler(e: EditorDocumentModelCreationEvent) {

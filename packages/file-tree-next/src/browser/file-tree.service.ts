@@ -1,31 +1,26 @@
-import throttle from 'lodash/throttle';
-
-import { Injectable, Autowired } from '@opensumi/di';
-import { Tree, ITree, ITreeNodeOrCompositeTreeNode, TreeNodeType } from '@opensumi/ide-components';
+import { Autowired, Injectable } from '@opensumi/di';
+import { ITree, ITreeNodeOrCompositeTreeNode, Tree, TreeNodeType } from '@opensumi/ide-components';
 import {
+  CancellationTokenSource,
   CommandService,
-  IContextKeyService,
-  URI,
-  EDITOR_COMMANDS,
   Disposable,
-  FILE_COMMANDS,
-  PreferenceService,
-  Deferred,
-  Event,
+  EDITOR_COMMANDS,
   Emitter,
-  IApplicationService,
+  FILE_COMMANDS,
+  IContextKeyService,
   ILogger,
-  path,
-  Throttler,
+  PreferenceService,
+  URI,
   pSeries,
+  path,
 } from '@opensumi/ide-core-browser';
 import { CorePreferences } from '@opensumi/ide-core-browser/lib/core-preferences';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import {
   FileChange,
-  IFileServiceClient,
   FileChangeType,
   FileStat,
+  IFileServiceClient,
   IFileServiceWatcher,
 } from '@opensumi/ide-file-service/lib/common';
 import { IIconService } from '@opensumi/ide-theme';
@@ -56,9 +51,6 @@ export interface ISortNode {
 
 @Injectable()
 export class FileTreeService extends Tree implements IFileTreeService {
-  private static DEFAULT_REFRESH_DELAY = 100;
-  private static DEFAULT_FILE_EVENT_REFRESH_DELAY = 100;
-
   @Autowired(IFileTreeAPI)
   private readonly fileTreeAPI: IFileTreeAPI;
 
@@ -89,18 +81,15 @@ export class FileTreeService extends Tree implements IFileTreeService {
   @Autowired(IIconService)
   public readonly iconService: IIconService;
 
-  @Autowired(IApplicationService)
-  private readonly appService: IApplicationService;
-
   @Autowired(ILogger)
   private readonly logger: ILogger;
 
   @Autowired(FileContextKey)
   private fileContextKey: FileContextKey;
 
-  private _cacheNodesMap: Map<string, File | Directory> = new Map();
-
   private _fileServiceWatchers: Map<string, IFileServiceWatcher> = new Map();
+
+  private _symbolicFiles: Map<string, Directory | File> = new Map();
 
   // 文件系统Change事件队列
   private _changeEventDispatchQueue = new Set<string>();
@@ -114,22 +103,28 @@ export class FileTreeService extends Tree implements IFileTreeService {
 
   private _isCompactMode: boolean;
 
-  private willRefreshDeferred: Deferred<void> | null;
-
-  private requestFlushEventSignalEmitter: Emitter<void> = new Emitter();
-
   private effectedNodes: Directory[] = [];
-  private refreshThrottler: Throttler = new Throttler();
-  private fileEventRefreshResolver;
 
   private readonly onWorkspaceChangeEmitter = new Emitter<Directory>();
   private readonly onTreeIndentChangeEmitter = new Emitter<ITreeIndent>();
   private readonly onFilterModeChangeEmitter = new Emitter<boolean>();
+  private readonly onNodeRefreshedEmitter = new Emitter<void>();
 
   // 筛选模式开关
   private _filterMode = false;
   private _baseIndent: number;
   private _indent: number;
+  private _refreshable = true;
+
+  private refreshCancelToken: CancellationTokenSource;
+
+  get onNodeRefreshed() {
+    return this.onNodeRefreshedEmitter.event;
+  }
+
+  get refreshable() {
+    return this._refreshable;
+  }
 
   get filterMode() {
     return this._filterMode;
@@ -155,20 +150,8 @@ export class FileTreeService extends Tree implements IFileTreeService {
     return this.onFilterModeChangeEmitter.event;
   }
 
-  get willRefreshPromise() {
-    return this.willRefreshDeferred?.promise;
-  }
-
-  get requestFlushEventSignalEvent(): Event<void> {
-    return this.requestFlushEventSignalEmitter.event;
-  }
-
   get isCompactMode(): boolean {
     return this._isCompactMode;
-  }
-
-  set isCompactMode(value: boolean) {
-    this._isCompactMode = value;
   }
 
   get contextKey() {
@@ -178,9 +161,9 @@ export class FileTreeService extends Tree implements IFileTreeService {
   async init() {
     this._roots = await this.workspaceService.roots;
     await this.preferenceService.ready;
-    this._baseIndent = this.preferenceService.get('explorer.fileTree.baseIndent') || 8;
-    this._indent = this.preferenceService.get('explorer.fileTree.indent') || 8;
-    this._isCompactMode = this.preferenceService.get('explorer.compactFolders') as boolean;
+    this._baseIndent = this.preferenceService.getValid('explorer.fileTree.baseIndent', 8);
+    this._indent = this.preferenceService.getValid('explorer.fileTree.indent', 8);
+    this._isCompactMode = this.preferenceService.getValid('explorer.compactFolders', true);
 
     this.toDispose.push(
       this.workspaceService.onWorkspaceChanged((roots) => {
@@ -195,7 +178,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
           roots[0],
           this.fileTreeAPI.getReadableTooltip(newRootUri),
         );
-        this._root = newRoot;
+        this.root = newRoot;
         this.onWorkspaceChangeEmitter.fire(newRoot);
         this.refresh();
       }),
@@ -209,6 +192,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
 
     this.toDispose.push(
       Disposable.create(() => {
+        this._root?.dispose();
         this._roots = null;
       }),
     );
@@ -241,11 +225,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
 
   public startWatchFileEvent() {
     this._readyToWatch = true;
-    return Promise.all(
-      this._watchRootsQueue.map(async (uri) => {
-        await this.watchFilesChange(uri);
-      }),
-    );
+    return Promise.all(this._watchRootsQueue.map((uri) => this.watchFilesChange(uri)));
   }
 
   async resolveChildren(parent?: Directory) {
@@ -285,6 +265,10 @@ export class FileTreeService extends Tree implements IFileTreeService {
                 name: rootName,
               });
             }
+
+            if (child.filestat.isSymbolicLink || child.filestat.isInSymbolicDirectory) {
+              this._symbolicFiles.set(child.filestat.uri, child);
+            }
           });
           this.watchFilesChange(new URI(this._roots[0].uri));
           this.root = children[0] as Directory;
@@ -305,6 +289,9 @@ export class FileTreeService extends Tree implements IFileTreeService {
           );
           this.watchFilesChange(new URI(fileStat.uri));
           children = children.concat(child);
+          if (child.filestat.isSymbolicLink || child.filestat.isInSymbolicDirectory) {
+            this._symbolicFiles.set(child.filestat.uri, child);
+          }
         }
         return children;
       }
@@ -317,19 +304,30 @@ export class FileTreeService extends Tree implements IFileTreeService {
           this.isCompactMode && !Directory.isRoot(parent),
         );
         children = data.children;
-        // 有概率获取不到Filestat，易发生在外部删除多文件情况下
+        children.forEach((child) => {
+          if (child.filestat.isSymbolicLink || child.filestat.isInSymbolicDirectory) {
+            this._symbolicFiles.set(child.filestat.uri, child);
+          }
+        });
+        // 有概率获取不到 Filestat，易发生在外部删除多文件情况下
         const childrenParentStat = data.filestat;
-        // 需要排除软连接下的直接空目录折叠，否则会导致路径计算错误
-        // 但软连接目录下的其他目录不受影响
-        if (
-          !!childrenParentStat &&
-          this.isCompactMode &&
-          !parent.filestat.isSymbolicLink &&
-          !Directory.isRoot(parent)
-        ) {
+        if (!!childrenParentStat && this.isCompactMode && !Directory.isRoot(parent)) {
           const parentURI = new URI(childrenParentStat.uri);
-          if (parent && parent.parent) {
-            const parentName = (parent.parent as Directory).uri.relative(parentURI)?.toString();
+          const nearestParentDirectory = parent.parent as Directory;
+          if (parent && nearestParentDirectory) {
+            let parentName: string | undefined = parent.name;
+            if (parent.filestat.isSymbolicLink) {
+              // 当软链目录本身发生折叠时
+              const relativePath = new URI(parent.filestat.realUri).relative(parentURI)?.toString();
+              if (relativePath) {
+                parentName = relativePath;
+                parentName = [parent.uri.displayName].concat(parentName.split(Path.separator)).join(Path.separator);
+              }
+            } else if (nearestParentDirectory.filestat.isSymbolicLink) {
+              parentName = new URI(nearestParentDirectory.filestat.realUri).relative(parentURI)?.toString();
+            } else {
+              parentName = nearestParentDirectory.uri.relative(parentURI)?.toString();
+            }
             if (parentName && parentName !== parent.name) {
               parent.updateMetaData({
                 name: parentName,
@@ -359,6 +357,19 @@ export class FileTreeService extends Tree implements IFileTreeService {
       }),
     );
     this._fileServiceWatchers.set(uri.toString(), watcher);
+  }
+
+  public updateRefreshable(enable: boolean) {
+    if (enable === this.refreshable) {
+      return;
+    }
+    this._refreshable = enable;
+    if (this._refreshable) {
+      // 切换到可刷新状态时，处理遗留的文件树刷新事件
+      this.doHandleQueueChange();
+    } else {
+      this.refreshCancelToken?.cancel();
+    }
   }
 
   private isContentFile(node: any | undefined) {
@@ -399,15 +410,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
     } else if (!(nodes.length > 0) && this.isRootAffected(changes)) {
       this.effectedNodes.push(this.root as Directory);
     }
-    // 文件事件引起的刷新进行队列化处理，每 200 ms 处理一次刷新任务
-    return this.refreshThrottler.queue(this.doDelayRefresh.bind(this));
-  }
-
-  private async doDelayRefresh() {
-    return new Promise<void>((resolve) => {
-      this.fileEventRefreshResolver = resolve;
-      setTimeout(this.refreshEffectNode, FileTreeService.DEFAULT_FILE_EVENT_REFRESH_DELAY);
-    });
+    return this.refreshEffectNode();
   }
 
   private refreshEffectNode = () => {
@@ -422,9 +425,6 @@ export class FileTreeService extends Tree implements IFileTreeService {
         this.refresh(node);
       }
     }
-    if (this.fileEventRefreshResolver) {
-      this.fileEventRefreshResolver();
-    }
   };
 
   public async getFileTreeNodePathByUri(uri: URI) {
@@ -438,7 +438,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
       if (rootStr) {
         const rootUri = new URI(rootStr);
         if (rootUri.isEqualOrParent(uri)) {
-          return new Path(this.root?.path || '').join(rootUri.relative(uri)!.toString()).toString();
+          return new Path(this.root?.path || '').join(rootUri.relative(uri)?.toString() || '').toString();
         }
       }
     } else {
@@ -452,14 +452,14 @@ export class FileTreeService extends Tree implements IFileTreeService {
           // 多工作区模式下，路径需要拼接项目名称
           return new Path(this.root?.path || '/')
             .join(rootUri.displayName)
-            .join(rootUri.relative(uri)!.toString())
+            .join(rootUri.relative(uri)?.toString() || '')
             .toString();
         }
       }
     }
   }
 
-  // 软链接目录下，文件节点路径不能通过uri去获取，存在偏差
+  // 软链接目录下，文件节点路径不能通过 uri 去获取，存在偏差
   public async moveNodeByPath(
     from: Directory,
     to: Directory,
@@ -472,8 +472,8 @@ export class FileTreeService extends Tree implements IFileTreeService {
     if (oldPath && newPath && newPath !== oldPath) {
       const movedNode = from.moveNode(oldPath, newPath);
       // 更新节点除了 name 以外的其他属性，如 fileStat，tooltip 等，否则节点数据可能会异常
-      if (movedNode) {
-        (movedNode as File).updateMetaData({
+      if (movedNode && File.is(movedNode)) {
+        movedNode.updateMetaData({
           uri: to.uri.resolve(newName),
           fileStat: {
             ...to.filestat,
@@ -482,8 +482,35 @@ export class FileTreeService extends Tree implements IFileTreeService {
           },
           tooltip: this.fileTreeAPI.getReadableTooltip(to.uri.resolve(newName)),
         });
+        if (Directory.is(movedNode)) {
+          this.updateChildren(movedNode);
+        }
       }
       return movedNode;
+    }
+  }
+
+  private async updateChildren(parent: Directory) {
+    const children = parent.children;
+    if (!children || children.length === 0) {
+      return;
+    }
+    for (const child of children) {
+      if (File.is(child)) {
+        const newUri = parent.uri.resolve(child.uri.displayName);
+        child.updateMetaData({
+          uri: newUri,
+          fileStat: {
+            ...child.filestat,
+            uri: newUri.toString(),
+            isDirectory: Directory.is(child) ? true : false,
+          },
+          tooltip: this.fileTreeAPI.getReadableTooltip(newUri),
+        });
+        if (Directory.is(child)) {
+          this.updateChildren(child);
+        }
+      }
     }
   }
 
@@ -528,8 +555,13 @@ export class FileTreeService extends Tree implements IFileTreeService {
     const node = this.getNodeByPathOrUri(path);
     if (node && node.parent) {
       // 压缩节点情况下，刷新父节点目录即可
-      if (node.displayName.indexOf(Path.separator) > 0 && !notRefresh) {
-        this.refresh(node.parent as Directory);
+      if (this.isCompactMode && !notRefresh) {
+        if (node.parent.children?.length === 2) {
+          // 当存在两个子节点时，删除一个子节点后，需要刷新父节点
+          this.refresh(node.parent?.parent as Directory);
+        } else {
+          this.refresh(node.parent as Directory);
+        }
       } else {
         (node.parent as Directory).removeNode(node.path);
       }
@@ -540,8 +572,8 @@ export class FileTreeService extends Tree implements IFileTreeService {
     const nodes: File[] = [];
     for (const uri of uris) {
       const node = this.getNodeByPathOrUri(uri);
-      if (node) {
-        nodes.push(node as File);
+      if (node && File.is(node)) {
+        nodes.push(node);
       }
     }
     for (const node of nodes) {
@@ -570,13 +602,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
     return /^file:\/\//.test(str);
   }
 
-  /**
-   *
-   * @param pathOrUri 路径或者URI对象
-   * @param compactMode 是否开启压缩模式查找
-   *
-   */
-  getNodeByPathOrUri(pathOrUri: string | URI) {
+  public getNodeByPathOrUri(pathOrUri: string | URI) {
     let path: string | undefined;
     let pathURI: URI | undefined;
     if (typeof pathOrUri !== 'string') {
@@ -588,6 +614,9 @@ export class FileTreeService extends Tree implements IFileTreeService {
       path = pathOrUri;
     }
     if (this.isFileURI(pathOrUri) && !!pathURI) {
+      if (this._symbolicFiles.has(pathURI?.toString())) {
+        return this._symbolicFiles.get(pathURI.toString());
+      }
       let rootStr;
       if (!this.isMultipleWorkspace) {
         rootStr = this.workspaceService.workspace?.uri;
@@ -597,44 +626,37 @@ export class FileTreeService extends Tree implements IFileTreeService {
       if (this.root && rootStr) {
         const rootUri = new URI(rootStr);
         if (rootUri.isEqualOrParent(pathURI)) {
-          let basePath = new Path(this.root.path);
-          if (this.isMultipleWorkspace) {
-            basePath = basePath.join(rootUri.displayName);
+          const relativePath = rootUri.relative(pathURI);
+          if (relativePath) {
+            path = new Path(this.root.path).join(relativePath.toString()).toString();
           }
-          path = basePath.join(rootUri.relative(pathURI)!.toString()).toString();
         }
       }
     }
-
     if (path) {
-      // 压缩模式下查找不到对应节点时，需要查看是否已有包含的文件夹存在
-      // 如当收到的变化是 /root/test_folder/test_file，而当前缓存中的路径只有/root/test_folder/test_folder2的情况
-      // 需要用当前缓存路径校验是否存在包含关系，这里/root/test_folder/test_folder2与/root/test_folder存在路径包含关系
-      // 此时应该重载/root下的文件，将test_folder目录折叠并清理缓存
-      if (this.isCompactMode && !this._cacheNodesMap.has(path)) {
-        const allNearestPath = Array.from(this._cacheNodesMap.keys()).filter((cache) => cache.indexOf(path!) >= 0);
-        let nearestPath;
-        for (const nextPath of allNearestPath) {
-          const depth = Path.pathDepth(nextPath);
-          if (nearestPath) {
-            if (depth < nearestPath.depth) {
-              nearestPath = {
-                path: nextPath,
-                depth,
-              };
-            }
-          } else {
-            nearestPath = {
-              path: nextPath,
-              depth,
-            };
+      const node = this.root?.getTreeNodeByPath(path) as File | Directory;
+      if (!node) {
+        // 尝试从再上层获取节点，可能为压缩节点
+        let parentNode: Directory | undefined;
+        const paths = path.split(Path.separator);
+        while (paths.length >= 1) {
+          paths.pop();
+          const parentPath = paths.join(Path.separator);
+          parentNode = this.root?.getTreeNodeByPath(parentPath) as Directory;
+          if (parentNode) {
+            break;
           }
         }
-        if (nearestPath) {
-          return this.root?.getTreeNodeByPath(nearestPath.path) as File | Directory;
+        // 找到最相邻的父节点，从父节点的子节点中筛选出节点
+        if (parentNode && Directory.is(parentNode)) {
+          for (const child of (parentNode as Directory).children || []) {
+            if (child.path.includes(path)) {
+              return child as Directory | File;
+            }
+          }
         }
       }
-      return this.root?.getTreeNodeByPath(path) as File | Directory;
+      return node;
     }
   }
 
@@ -673,17 +695,14 @@ export class FileTreeService extends Tree implements IFileTreeService {
   /**
    * 刷新指定下的所有子节点
    */
-  async refresh(node: Directory = this.root as Directory) {
-    // 如果正在刷新，就不要创建新的 Defer
-    // 否则会导致下面的 callback 闭包 resolve 的仍然是之前捕获的旧 defer
-    if (!this.willRefreshDeferred) {
-      this.willRefreshDeferred = new Deferred();
-    }
+  async refresh(node: Directory | File = this.root as Directory) {
     if (!node) {
       return;
     }
-    if (!Directory.is(node) && node.parent) {
-      node = node.parent as Directory;
+    if (!Directory.is(node)) {
+      if (File.is(node) && node.parent) {
+        node = node.parent as Directory;
+      }
     }
 
     // 队列化刷新动作减少更新成本
@@ -691,26 +710,18 @@ export class FileTreeService extends Tree implements IFileTreeService {
     return this.doHandleQueueChange();
   }
 
-  private doHandleQueueChange = throttle(
-    async () => {
-      try {
-        // 询问是否此时可进行刷新事件
-        await this.requestFlushEventSignalEmitter.fireAndAwait();
-        await this.flushEventQueue();
-      } catch (error) {
-        this.logger.error('flush file change event queue error:', error);
-      } finally {
-        this.onNodeRefreshedEmitter.fire();
-        this.willRefreshDeferred?.resolve();
-        this.willRefreshDeferred = null;
-      }
-    },
-    FileTreeService.DEFAULT_REFRESH_DELAY,
-    {
-      leading: true,
-      trailing: true,
-    },
-  );
+  private async doHandleQueueChange() {
+    if (!this.refreshable) {
+      return;
+    }
+    try {
+      await this.flushEventQueue();
+    } catch (error) {
+      this.logger.error('flush file change event queue error:', error);
+    } finally {
+      this.onNodeRefreshedEmitter.fire();
+    }
+  }
 
   /**
    * 将文件排序并删除多余文件（指已有父文件夹将被删除）
@@ -724,13 +735,14 @@ export class FileTreeService extends Tree implements IFileTreeService {
       }))
       .filter((node) => node && !!node.node) as ISortNode[];
 
-    nodes.sort((pathA, pathB) => {
-      // 直接获取节点深度比通过path取深度更可靠
-      const pathADepth = pathA.node?.depth || 0;
-      const pathBDepth = pathB.node?.depth || 0;
-      return pathADepth - pathBDepth;
-    });
-
+    if (_paths.length > 1) {
+      nodes.sort((pathA, pathB) => {
+        // 直接获取节点深度比通过path取深度更可靠
+        const pathADepth = pathA.node?.depth || 0;
+        const pathBDepth = pathB.node?.depth || 0;
+        return pathADepth - pathBDepth;
+      });
+    }
     const roots = [] as ISortNode[];
     for (let index = nodes.length - 1; index >= 0; index--) {
       // 从后往前遍历整个列表
@@ -757,10 +769,13 @@ export class FileTreeService extends Tree implements IFileTreeService {
     const queue = Array.from(this._changeEventDispatchQueue);
 
     const effectedRoots = this.sortPaths(queue);
+    if (!this.refreshCancelToken || this.refreshCancelToken.token.isCancellationRequested) {
+      this.refreshCancelToken = new CancellationTokenSource();
+    }
     const promise = pSeries(
       effectedRoots.map((root) => async () => {
         if (Directory.is(root.node)) {
-          await (root.node as Directory).refresh();
+          await (root.node as Directory).refresh(this.refreshCancelToken);
         }
       }),
     );
@@ -824,7 +839,7 @@ export class FileTreeService extends Tree implements IFileTreeService {
   public toggleFilterMode() {
     this._filterMode = !this.filterMode;
     this.onFilterModeChangeEmitter.fire(this.filterMode);
-    this.fileContextKey.filesExplorerFilteredContext.set(this.filterMode);
+    this.fileContextKey?.filesExplorerFilteredContext.set(this.filterMode);
     // 清理掉输入值
     if (this.filterMode === false) {
       // 退出时若需要做 filter 值清理以及聚焦操作

@@ -1,81 +1,91 @@
 import globToRegExp from 'glob-to-regexp';
-import {
-  DocumentSelector,
-  CompletionItemProvider,
-  CancellationToken,
-  DefinitionProvider,
-  TypeDefinitionProvider,
-  FoldingRangeProvider,
-  FoldingContext,
-  DocumentColorProvider,
-  DocumentRangeFormattingEditProvider,
-  DocumentFormattingEditProvider,
-  CallHierarchyProvider,
-  TypeHierarchyProvider,
-  InlayHintsProvider,
-  InlineCompletionItemProvider,
-} from 'vscode';
 import { SymbolInformation } from 'vscode-languageserver-types';
 
-import { IMarkerData, IRange, Uri, UriComponents, IMarkdownString } from '@opensumi/ide-core-common';
+import { IMarkdownString, IMarkerData, IRange, UriComponents } from '@opensumi/ide-core-common';
 import { IEvaluatableExpression } from '@opensumi/ide-debug/lib/common/evaluatable-expression';
-import { InlineValueContext, InlineValue } from '@opensumi/ide-debug/lib/common/inline-values';
+import { InlineValue, InlineValueContext } from '@opensumi/ide-debug/lib/common/inline-values';
+// eslint-disable-next-line import/order
 import { ILanguageStatus, ISingleEditOperation } from '@opensumi/ide-editor';
-// eslint-disable-next-line import/no-restricted-paths
-import type { ITextModel } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import { Range as MonacoRange } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
-import type {
-  CodeActionContext,
-  SignatureHelpContext,
-  Command,
-  CompletionItemLabel,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
-import * as languages from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
+// eslint-disable-next-line import/no-restricted-paths
+
+import { IDocumentFilterDto } from './converter';
 import { Disposable } from './ext-types';
 import { IExtensionDescription } from './extension';
 import {
-  SerializedDocumentFilter,
-  Hover,
-  Position,
-  Range,
-  Definition,
-  DefinitionLink,
-  FoldingRange,
-  RawColorInfo,
-  ColorPresentation,
-  DocumentHighlight,
-  FormattingOptions,
-  SingleEditOperation,
-  SerializedLanguageConfiguration,
-  ReferenceContext,
-  Location,
-  ILink,
-  DocumentSymbol,
-  WorkspaceEditDto,
-  RenameLocation,
-  Selection,
-  ISerializedSignatureHelpProviderMetadata,
-  SelectionRange,
-  ICallHierarchyItemDto,
-  ITypeHierarchyItemDto,
-  IOutgoingCallDto,
-  IIncomingCallDto,
+  CacheId,
+  ChainedCacheId,
   CodeLens,
-  SemanticTokensLegend,
-  WithDuration,
+  ColorPresentation,
+  CompletionContext,
   CompletionItemInsertTextRule,
   CompletionItemKind,
   CompletionItemTag,
-  ChainedCacheId,
-  IWorkspaceEditDto,
-  CacheId,
+  Definition,
+  DefinitionLink,
+  DocumentHighlight,
+  DocumentSymbol,
+  FoldingRange,
+  FormattingOptions,
+  Hover,
+  ICallHierarchyItemDto,
   ICodeLensListDto,
-  ISignatureHelpDto,
+  IIncomingCallDto,
+  ILink,
   ILinksListDto,
+  IOutgoingCallDto,
+  ISerializedSignatureHelpProviderMetadata,
+  ISignatureHelpDto,
+  ITypeHierarchyItemDto,
+  IWorkspaceEditDto,
+  Location,
+  Position,
+  Range,
+  RawColorInfo,
+  ReferenceContext,
+  RenameLocation,
+  Selection,
+  SelectionRange,
+  SemanticTokensLegend,
+  SerializedDocumentFilter,
+  SerializedLanguageConfiguration,
   SerializedRegExp,
+  SingleEditOperation,
+  WithDuration,
+  WorkspaceEditDto,
 } from './model.api';
-import { CompletionContext } from './model.api';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { ITextModel, NewSymbolName } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import type { URI as Uri } from '@opensumi/monaco-editor-core/esm/vs/base/common/uri';
+import type * as languages from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+// eslint-disable-next-line import/no-restricted-paths
+import type {
+  CodeActionContext,
+  Command,
+  CompletionItemLabel,
+  NewSymbolNameTriggerKind,
+  SignatureHelpContext,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import type {
+  CallHierarchyProvider,
+  CancellationToken,
+  CompletionItemProvider,
+  DefinitionProvider,
+  DocumentColorProvider,
+  DocumentFormattingEditProvider,
+  DocumentRangeFormattingEditProvider,
+  DocumentSelector,
+  FoldingContext,
+  FoldingRangeProvider,
+  InlayHintsProvider,
+  InlineCompletionItemProvider,
+  InlineCompletionItemProviderMetadata,
+  TypeDefinitionProvider,
+  TypeHierarchyProvider,
+} from 'vscode';
+
+export type { Command } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 export interface IMainThreadLanguages {
   $unregister(handle: number): void;
@@ -91,8 +101,10 @@ export interface IMainThreadLanguages {
   ): void;
   $registerInlineCompletionsSupport(
     handle: number,
-    selector: SerializedDocumentFilter[],
+    selector: IDocumentFilterDto[],
     supportsHandleDidShowCompletionItem: boolean,
+    extensionId: string,
+    yieldsToExtensionIds: string[],
   ): void;
   $registerDefinitionProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerTypeDefinitionProvider(handle: number, selector: SerializedDocumentFilter[]): void;
@@ -145,6 +157,7 @@ export interface IMainThreadLanguages {
     selector: SerializedDocumentFilter[],
     supportsResoveInitialValues: boolean,
   ): void;
+  $registerNewSymbolNamesProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerSelectionRangeProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerDeclarationProvider(handle: number, selector: SerializedDocumentFilter[]): void;
   $registerCallHierarchyProvider(handle: number, selector: SerializedDocumentFilter[]): void;
@@ -212,9 +225,10 @@ export interface IExtHostLanguages {
   $releaseCompletionItems(handle: number, id: number): void;
 
   registerInlineCompletionsProvider(
+    extension: IExtensionDescription,
     selector: DocumentSelector,
     provider: InlineCompletionItemProvider,
-    extension: IExtensionDescription,
+    metadata: InlineCompletionItemProviderMetadata | undefined,
   ): Disposable;
   $provideInlineCompletions(
     handle: number,
@@ -223,7 +237,8 @@ export interface IExtHostLanguages {
     context: languages.InlineCompletionContext,
     token: CancellationToken,
   ): Promise<IdentifiableInlineCompletions | undefined>;
-  $handleInlineCompletionDidShow(handle: number, pid: number, idx: number): void;
+  $handleInlineCompletionDidShow(handle: number, pid: number, idx: number, updatedInsertText: string): void;
+  $handleInlineCompletionPartialAccept(handle: number, pid: number, idx: number, acceptedCharacters: number): void;
   $freeInlineCompletionsList(handle: number, pid: number): void;
 
   $provideDefinition(
@@ -419,6 +434,14 @@ export interface IExtHostLanguages {
     token: CancellationToken,
   ): PromiseLike<RenameLocation | undefined>;
 
+  $provideNewSymbolNames(
+    handle: number,
+    resource: Uri,
+    range: Range,
+    triggerKind: NewSymbolNameTriggerKind,
+    token: CancellationToken,
+  ): Promise<NewSymbolName[] | undefined>;
+
   $provideSelectionRanges(
     handle: number,
     resource: UriComponents,
@@ -575,19 +598,9 @@ export enum ISuggestDataDtoField {
 }
 
 export namespace RangeSuggestDataDto {
-  export type ISuggestRangeDto = [number, number, number, number];
+  export type ISuggestRangeDto = [number, number, number, number] | { insert: IRange; replace: IRange };
   export function to(range: Range) {
     return [range.startLineNumber, range.startColumn, range.endLineNumber, range.endColumn] as ISuggestRangeDto;
-  }
-  export function from(range: ISuggestRangeDto | { insert: IRange; replace: IRange }) {
-    return Array.isArray(range) && range.length === 4
-      ? MonacoRange.lift({
-          startLineNumber: range[0],
-          startColumn: range[1],
-          endLineNumber: range[2],
-          endColumn: range[3],
-        })
-      : range;
   }
 }
 
@@ -629,7 +642,7 @@ export function testGlob(pattern: string, value: string): boolean {
 }
 
 export interface DocumentIdentifier {
-  uri: string;
+  uri: Uri;
   languageId: string;
 }
 
@@ -647,7 +660,7 @@ export interface MonacoModelIdentifier {
 export namespace MonacoModelIdentifier {
   export function fromDocument(document: DocumentIdentifier): MonacoModelIdentifier {
     return {
-      uri: Uri.parse(document.uri),
+      uri: document.uri,
       languageId: document.languageId,
     };
   }
@@ -667,7 +680,9 @@ export interface ICodeActionDto {
   command?: Command;
   kind?: string;
   isPreferred?: boolean;
+  isAI?: boolean;
   disabled?: string;
+  ranges?: IRange[];
 }
 
 export interface ICodeActionListDto {
@@ -711,8 +726,9 @@ export interface InlineCompletionContext {
    * How the completion was triggered.
    */
   readonly triggerKind: InlineCompletionTriggerKind;
-
   readonly selectedSuggestionInfo: SelectedSuggestionInfo | undefined;
+  readonly includeInlineEdits: boolean;
+  readonly includeInlineCompletions: boolean;
 }
 
 export interface SelectedSuggestionInfo {
@@ -720,6 +736,7 @@ export interface SelectedSuggestionInfo {
   text: string;
   isSnippetText: boolean;
   completionKind: CompletionItemKind;
+  equals(other: SelectedSuggestionInfo): boolean;
 }
 
 // inline completion end

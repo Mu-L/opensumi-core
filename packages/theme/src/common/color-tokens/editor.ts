@@ -1,11 +1,10 @@
 import { localize } from '@opensumi/ide-core-common';
 
 import { Color, RGBA } from '../../common/color';
-import { registerColor, transparent, lighten, darken, lessProminent } from '../utils';
+import { darken, lessProminent, lighten, registerColor, transparent } from '../utils';
 
 import { badgeBackground, badgeForeground } from './badge';
-import { contrastBorder, activeContrastBorder, focusBorder, foreground } from './base';
-import { listInactiveSelectionBackground } from './list-tree';
+import { activeContrastBorder, contrastBorder, focusBorder, foreground } from './base';
 
 // TODO COLOR 此处vscode内的editor error warning info颜色都有做修改
 export const editorErrorBackground = registerColor(
@@ -413,6 +412,64 @@ export const diffDiagonalFill = registerColor(
 );
 
 /**
+ * Merge Editor Colors
+ */
+export const defaultMergeEditorInsertColor = new Color(new RGBA(122, 255, 31, 0.12));
+export const defaultMergeEditorRemoveColor = new Color(new RGBA(255, 21, 33, 0.12));
+export const defaultMergeEditorModifyColor = new Color(new RGBA(255, 186, 29, 0.12));
+export const mergeEditorInserted = registerColor(
+  'mergeEditor.insertedBackground',
+  { dark: defaultMergeEditorInsertColor, light: defaultMergeEditorInsertColor, hcDark: null, hcLight: null },
+  '',
+  true,
+);
+export const mergeEditorRemoved = registerColor(
+  'mergeEditor.removedBackground',
+  { dark: defaultMergeEditorRemoveColor, light: defaultMergeEditorRemoveColor, hcDark: null, hcLight: null },
+  '',
+  true,
+);
+export const mergeEditorModify = registerColor(
+  'mergeEditor.modifyBackground',
+  { dark: defaultMergeEditorModifyColor, light: defaultMergeEditorModifyColor, hcDark: null, hcLight: null },
+  '',
+  true,
+);
+export const mergeEditorInnerCharInserted = registerColor(
+  'mergeEditor.insertedInnerCharColor',
+  {
+    dark: transparent(defaultMergeEditorInsertColor, 1),
+    light: transparent(defaultMergeEditorInsertColor, 1),
+    hcDark: null,
+    hcLight: null,
+  },
+  '',
+  true,
+);
+export const mergeEditorInnerCharRemoved = registerColor(
+  'mergeEditor.removedInnerCharColor',
+  {
+    dark: transparent(defaultMergeEditorRemoveColor, 1),
+    light: transparent(defaultMergeEditorRemoveColor, 1),
+    hcDark: null,
+    hcLight: null,
+  },
+  '',
+  true,
+);
+export const mergeEditorInnerCharModify = registerColor(
+  'mergeEditor.modifyInnerCharColor',
+  {
+    dark: transparent(defaultMergeEditorModifyColor, 1),
+    light: transparent(defaultMergeEditorModifyColor, 1),
+    hcDark: null,
+    hcLight: null,
+  },
+  '',
+  true,
+);
+
+/**
  * Editor View Colors from editorColorRegistry
  */
 export const editorLineHighlight = registerColor(
@@ -553,16 +610,7 @@ export const editorGutter = registerColor(
     'Background color of the editor gutter. The gutter contains the glyph margins and the line numbers.',
   ),
 );
-export const overviewRulerCommentingRangeForeground = registerColor(
-  'editorGutter.commentRangeForeground',
-  {
-    dark: listInactiveSelectionBackground,
-    light: darken(listInactiveSelectionBackground, 0.05),
-    hcDark: Color.white,
-    hcLight: Color.black,
-  },
-  localize('editorGutterCommentRangeForeground', 'Editor gutter decoration color for commenting ranges.'),
-);
+
 export const editorUnnecessaryCodeBorder = registerColor(
   'editorUnnecessaryCode.border',
   { dark: null, light: null, hcDark: Color.fromHex('#fff').transparent(0.8), hcLight: contrastBorder },
@@ -884,4 +932,35 @@ export const editorImagePreviewBackground = registerColor(
     hcDark: new Color(new RGBA(20, 20, 20)),
   },
   localize('editorImagePreviewBackground', 'Background color of image preview editor.'),
+);
+
+export const ghostTextBorder = registerColor(
+  'editorGhostText.border',
+  {
+    dark: null,
+    light: null,
+    hcDark: Color.fromHex('#fff').transparent(0.8),
+    hcLight: Color.fromHex('#292929').transparent(0.8),
+  },
+  localize('editorGhostTextBorder', 'Border color of ghost text in the editor.'),
+);
+export const ghostTextForeground = registerColor(
+  'editorGhostText.foreground',
+  {
+    dark: Color.fromHex('#ffffff56'),
+    light: Color.fromHex('#0007'),
+    hcDark: null,
+    hcLight: null,
+  },
+  localize('editorGhostTextForeground', 'Foreground color of the ghost text in the editor.'),
+);
+export const ghostTextBackground = registerColor(
+  'editorGhostText.background',
+  {
+    dark: null,
+    light: null,
+    hcDark: null,
+    hcLight: null,
+  },
+  localize('editorGhostTextBackground', 'Background color of the ghost text in the editor.'),
 );

@@ -3,39 +3,34 @@
  * 并且 editor.main 也包含对 editor.all 的导入
  */
 import '@opensumi/monaco-editor-core/esm/vs/editor/editor.main';
-import ResizeObserver from 'resize-observer-polyfill';
 
 import { Injector } from '@opensumi/di';
-import { RPCMessageConnection } from '@opensumi/ide-connection';
-import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
 import {
+  AppLifeCycleServiceToken,
   CommandRegistry,
-  isOSX,
   ContributionProvider,
-  MaybePromise,
-  createContributionProvider,
-  StorageProvider,
   DefaultStorageProvider,
-  StorageResolverContribution,
-  ILoggerManagerClient,
-  SupportLogNamespace,
-  ILogServiceClient,
-  getDebugLogger,
-  isElectronRenderer,
-  setLanguageId,
-  IReporterService,
-  REPORT_NAME,
-  IEventBus,
-  asExtensionCandidate,
+  Deferred,
+  DisposableCollection,
+  GeneralSettingsId,
+  IAppLifeCycleService,
   IApplicationService,
   IDisposable,
-  Deferred,
-  isUndefined,
-  GeneralSettingsId,
-  UrlProvider,
+  IEventBus,
+  ILogServiceClient,
+  ILogger,
+  IReporterService,
   LifeCyclePhase,
-  AppLifeCycleServiceToken,
-  IAppLifeCycleService,
+  MaybePromise,
+  REPORT_NAME,
+  StorageProvider,
+  StorageResolverContribution,
+  URI,
+  asExtensionCandidate,
+  createContributionProvider,
+  getDebugLogger,
+  isOSX,
+  setLanguageId,
 } from '@opensumi/ide-core-common';
 import {
   DEFAULT_APPLICATION_DESKTOP_HOST,
@@ -45,125 +40,125 @@ import {
 } from '@opensumi/ide-core-common/lib/const/application';
 import { IElectronMainLifeCycleService } from '@opensumi/ide-core-common/lib/electron';
 
-import { createElectronClientConnection } from '..';
 import { ClientAppStateService } from '../application';
+import { ConnectionHelperFactory, ESupportRuntime } from '../application/runtime';
+import { BaseConnectionHelper } from '../application/runtime/base-socket';
+import { BrowserRuntime } from '../application/runtime/browser';
+import { ElectronRendererRuntime } from '../application/runtime/electron-renderer';
+import { RendererRuntime } from '../application/runtime/types';
 import { BrowserModule, IClientApp } from '../browser-module';
 import { ClientAppContribution } from '../common';
-import { CorePreferences } from '../core-preferences';
-import { injectCorePreferences } from '../core-preferences';
+import { CorePreferences, injectCorePreferences } from '../core-preferences';
 import { KeybindingRegistry, KeybindingService, NO_KEYBINDING_NAME } from '../keybinding';
+import { DesignLayoutConfig, LayoutViewSizeConfig } from '../layout/constants';
 import { RenderedEvent } from '../layout/layout.interface';
-import { MenuRegistryImpl, IMenuRegistry } from '../menu/next/base';
+import { IMenuRegistry, MenuRegistryImpl } from '../menu/next/base';
 import {
-  PreferenceProviderProvider,
-  injectPreferenceSchemaProvider,
-  injectPreferenceConfigurations,
-  PreferenceScope,
   PreferenceProvider,
+  PreferenceProviderProvider,
+  PreferenceScope,
   PreferenceService,
   PreferenceServiceImpl,
   getPreferenceLanguageId,
+  injectPreferenceConfigurations,
+  injectPreferenceSchemaProvider,
   registerLocalStorageProvider,
 } from '../preferences';
 import { AppConfig } from '../react-providers/config-provider';
-import { DEFAULT_CDN_ICON, IDE_OCTICONS_CN_CSS, IDE_CODICONS_CN_CSS, updateIconMap } from '../style/icon/icon';
+import { DEFAULT_CDN_ICON, IDE_CODICONS_CN_CSS, IDE_OCTICONS_CN_CSS, updateIconMap } from '../style/icon/icon';
 import { electronEnv } from '../utils';
 
-import { IClientAppOpts, IconInfo, IconMap, IPreferences, LayoutConfig, ModuleConstructor } from './app.interface';
-import { renderClientApp, IAppRenderer } from './app.view';
-import { createClientConnection2, bindConnectionService } from './connection';
+import { IClientAppOpts, IPreferences, IconInfo, IconMap, LayoutConfig, ModuleConstructor } from './app.interface';
+import { IAppRenderer, renderClientApp } from './app.view';
+import { bindConnectionServiceDeprecated } from './connection';
 import { injectInnerProviders } from './inner-providers';
 
-// 添加resize observer polyfill
-if (typeof (window as any).ResizeObserver === 'undefined') {
-  (window as any).ResizeObserver = ResizeObserver;
-}
+import './polyfills';
+
+import type { MessageConnection } from '@opensumi/vscode-jsonrpc/lib/common/connection';
 
 export class ClientApp implements IClientApp, IDisposable {
   /**
    * 应用是否完成初始化
    */
-  appInitialized: Deferred<void> = new Deferred();
+  public appInitialized: Deferred<void> = new Deferred();
+  public browserModules: BrowserModule[] = [];
+  public injector: Injector;
+  public config: AppConfig;
+  public commandRegistry: CommandRegistry;
+  public runtime: ElectronRendererRuntime | BrowserRuntime;
 
-  browserModules: BrowserModule[] = [];
+  private logger: ILogServiceClient;
+  private keybindingRegistry: KeybindingRegistry;
+  private keybindingService: KeybindingService;
+  private modules: ModuleConstructor[];
+  private contributionsProvider: ContributionProvider<ClientAppContribution>;
+  private nextMenuRegistry: MenuRegistryImpl;
+  private stateService: ClientAppStateService;
 
-  modules: ModuleConstructor[];
+  protected _disposables = new DisposableCollection();
 
-  injector: Injector;
-
-  logger: ILogServiceClient;
-
-  connectionPath: UrlProvider;
-
-  connectionProtocols?: string[];
-
-  keybindingRegistry: KeybindingRegistry;
-
-  keybindingService: KeybindingService;
-
-  config: AppConfig;
-
-  contributionsProvider: ContributionProvider<ClientAppContribution>;
-
-  commandRegistry: CommandRegistry;
-
-  // 这里将 onStart contribution 方法放到 MenuRegistryImpl 上了
-  nextMenuRegistry: MenuRegistryImpl;
-
-  stateService: ClientAppStateService;
-
-  constructor(opts: IClientAppOpts) {
+  constructor(protected opts: IClientAppOpts) {
     const {
       modules,
       contributions,
-      modulesInstances,
-      connectionPath,
-      connectionProtocols,
       iconStyleSheets,
       useCdnIcon,
       editorBackgroundImage,
       defaultPreferences,
       allowSetDocumentTitleFollowWorkspaceDir = true,
-      devtools = false, // if not set, disable devtools support as default
-      ...restOpts // rest part 为 AppConfig
+      ...restOpts
     } = opts;
 
     this.initEarlyPreference(opts.workspaceDir || '');
-    setLanguageId(getPreferenceLanguageId(defaultPreferences));
+    const defaultLanguage = getPreferenceLanguageId(defaultPreferences);
+    setLanguageId(defaultLanguage);
     this.injector = opts.injector || new Injector();
     this.modules = modules;
     this.modules.forEach((m) => this.resolveModuleDeps(m));
-    // moduleInstance必须第一个是layout模块
+    // The main-layout module instance should on the first
     this.browserModules = opts.modulesInstances || [];
-    const isDesktop = opts.isElectronRenderer || isElectronRenderer();
+    const isDesktop = opts.isElectronRenderer ?? this.detectRuntime() === ESupportRuntime.Electron;
+
     this.config = {
       appName: DEFAULT_APPLICATION_NAME,
       appHost: isDesktop ? DEFAULT_APPLICATION_DESKTOP_HOST : DEFAULT_APPLICATION_WEB_HOST,
-      appRoot: isUndefined(opts.appRoot) ? (isDesktop ? electronEnv.appPath : '') : opts.appRoot,
+      appRoot: opts.appRoot || '',
       uriScheme: DEFAULT_URI_SCHEME,
       // 如果通过 config 传入了 appName 及 uriScheme，则优先使用
       ...restOpts,
       // 一些转换和 typo 修复
       isElectronRenderer: isDesktop,
       workspaceDir: opts.workspaceDir || '',
-      extensionDir:
-        opts.extensionDir || (opts.isElectronRenderer || isDesktop ? electronEnv.metadata?.extensionDir : ''),
+      extensionDir: opts.extensionDir || '',
       injector: this.injector,
       wsPath: opts.wsPath || `ws://${window.location.hostname}:8000`,
       layoutConfig: opts.layoutConfig as LayoutConfig,
       editorBackgroundImage: opts.editorBackgroundImage || editorBackgroundImage,
       allowSetDocumentTitleFollowWorkspaceDir,
-      devtools,
+      devtools: opts.devtools ?? false,
+      rpcMessageTimeout: opts.rpcMessageTimeout || -1,
     };
 
-    if (devtools) {
+    this.config.connectionPath = opts.connectionPath || `${this.config.wsPath}/service`;
+
+    const layoutViewSizeConfig = this.injector.get(LayoutViewSizeConfig);
+    layoutViewSizeConfig.init(opts.layoutViewSize);
+    this.config.layoutViewSize = layoutViewSizeConfig;
+
+    const designLayoutConfig = this.injector.get(DesignLayoutConfig);
+    designLayoutConfig.setLayout(opts.designLayout, opts.AINativeConfig?.layout);
+
+    this.injector.addProviders({ token: IClientApp, useValue: this });
+    this.injector.addProviders({ token: AppConfig, useValue: this.config });
+
+    this.runtime = isDesktop ? this.injector.get(ElectronRendererRuntime) : this.injector.get(BrowserRuntime);
+    this.injector.addProviders({ token: RendererRuntime, useValue: this.runtime });
+
+    if (this.config.devtools) {
       // set a global so the opensumi devtools can identify that
       // the current page is powered by opensumi core
       window.__OPENSUMI_DEVTOOLS_GLOBAL_HOOK__ = {};
-    }
-
-    if (this.config.isElectronRenderer && electronEnv.metadata?.extensionDevelopmentHost) {
-      this.config.extensionDevelopmentHost = electronEnv.metadata.extensionDevelopmentHost;
     }
 
     if (opts.extensionDevelopmentPath) {
@@ -173,18 +168,14 @@ export class ClientApp implements IClientApp, IDisposable {
           : [asExtensionCandidate(opts.extensionDevelopmentPath, true)],
       );
 
-      this.config.extensionDevelopmentHost = !!opts.extensionDevelopmentPath;
+      this.config.extensionDevelopmentHost = true;
     }
 
-    // 旧方案兼容, 把electron.metadata.extensionCandidate提前注入appConfig的对应配置中
-    if (this.config.isElectronRenderer && electronEnv.metadata?.extensionCandidate) {
-      this.config.extensionCandidate = (this.config.extensionCandidate || []).concat(
-        electronEnv.metadata.extensionCandidate || [],
-      );
-    }
+    this.config = this.runtime.mergeAppConfig(this.config);
 
-    this.connectionPath = connectionPath || `${this.config.wsPath}/service`;
-    this.connectionProtocols = connectionProtocols;
+    if (contributions) {
+      this.injector.addProviders(...contributions);
+    }
     this.initBaseProvider();
     this.initFields();
     this.appendIconStyleSheets(iconStyleSheets, useCdnIcon);
@@ -220,8 +211,8 @@ export class ClientApp implements IClientApp, IDisposable {
    */
   public async start(
     container: HTMLElement | IAppRenderer,
-    type?: 'electron' | 'web',
-    connection?: RPCMessageConnection,
+    type?: ESupportRuntime | `${ESupportRuntime}`,
+    connection?: MessageConnection,
   ): Promise<void> {
     const reporterService: IReporterService = this.injector.get(IReporterService);
     const measureReporter = reporterService.time(REPORT_NAME.MEASURE);
@@ -229,30 +220,22 @@ export class ClientApp implements IClientApp, IDisposable {
     this.lifeCycleService.phase = LifeCyclePhase.Prepare;
 
     if (connection) {
-      await bindConnectionService(this.injector, this.modules, connection);
-    } else {
-      if (type === 'electron') {
-        await bindConnectionService(this.injector, this.modules, createElectronClientConnection());
-      } else if (type === 'web') {
-        await createClientConnection2(
-          this.injector,
-          this.modules,
-          this.connectionPath,
-          () => {
-            this.onReconnectContributions();
-          },
-          this.connectionProtocols,
-          this.config.clientId,
-        );
+      // do not allow user use deprecated method start() with connection parameter
+      // because we all use `WSChannelHandler` to create connection
+      // WSChannelHandler hasn't supported user's custom connection.
 
-        this.logger = this.getLogger();
-        // 回写需要用到打点的 Logger 的地方
-        this.injector.get(WSChannelHandler).replaceLogger(this.logger);
-      }
+      // eslint-disable-next-line no-console
+      console.error("You're using deprecated method 'start()' with connection parameter");
+      // eslint-disable-next-line no-console
+      console.error('We introduced a new connection service to replace the old one');
+      bindConnectionServiceDeprecated(this.injector, this.modules, connection);
+    } else if (type) {
+      await this.createConnection(type);
     }
+
     measureReporter.timeEnd('ClientApp.createConnection');
 
-    this.logger = this.getLogger();
+    this.logger = this.injector.get(ILogger);
     this.stateService.state = 'client_connected';
     this.registerEventListeners();
     // 在 connect 之后立即初始化数据，保证其它 module 能同步获取数据
@@ -267,12 +250,13 @@ export class ClientApp implements IClientApp, IDisposable {
     measureReporter.timeEnd('Framework.ready');
   }
 
-  private getLogger() {
-    if (this.logger) {
-      return this.logger;
-    }
-    this.logger = this.injector.get(ILoggerManagerClient).getLogger(SupportLogNamespace.Browser);
-    return this.logger;
+  protected async createConnection(type: `${ESupportRuntime}`) {
+    const factory = this.injector.get(ConnectionHelperFactory) as ConnectionHelperFactory;
+    const connectionHelper: BaseConnectionHelper = factory(type);
+    const channel = await connectionHelper.createRPCServiceChannel(this.modules);
+    channel.onReopen(() => {
+      this.onReconnectContributions();
+    });
   }
 
   private onReconnectContributions() {
@@ -289,14 +273,11 @@ export class ClientApp implements IClientApp, IDisposable {
    * 给 injector 初始化默认的 Providers
    */
   private initBaseProvider() {
-    this.injector.addProviders({ token: IClientApp, useValue: this });
-    this.injector.addProviders({ token: AppConfig, useValue: this.config });
     injectInnerProviders(this.injector);
+
+    this.runtime.registerRuntimeInnerProviders(this.injector);
   }
 
-  /**
-   * 从 injector 里获得实例
-   */
   private initFields() {
     this.contributionsProvider = this.injector.get(ClientAppContribution);
     this.commandRegistry = this.injector.get(CommandRegistry);
@@ -317,6 +298,8 @@ export class ClientApp implements IClientApp, IDisposable {
         this.injector.addProviders(...instance.providers);
       }
 
+      this.runtime.registerRuntimeModuleProviders(this.injector, instance);
+
       if (instance.preferences) {
         instance.preferences(this.injector);
       }
@@ -324,10 +307,10 @@ export class ClientApp implements IClientApp, IDisposable {
 
     injectCorePreferences(this.injector);
 
-    // 注册PreferenceService
+    // Register PreferenceService
     this.injectPreferenceService(this.injector, defaultPreferences);
 
-    // 注册存储服务
+    // Register StorageService
     this.injectStorageProvider(this.injector);
 
     for (const instance of this.browserModules) {
@@ -348,16 +331,16 @@ export class ClientApp implements IClientApp, IDisposable {
   }
 
   protected async startContributions(container) {
-    // 先渲染 layout，模块视图的时序由layout控制
+    // Rendering layout
     await this.measure('RenderApp.render', () => this.renderApp(container));
 
     this.lifeCycleService.phase = LifeCyclePhase.Initialize;
     await this.measure('Contributions.initialize', () => this.initializeContributions());
 
-    // 初始化命令、快捷键与菜单
+    // Initialize Command, Keybinding, Menus
     await this.initializeCoreRegistry();
 
-    // 核心模块初始化完毕
+    // Core modules initializeed ready
     this.stateService.state = 'core_module_initialized';
 
     this.lifeCycleService.phase = LifeCyclePhase.Starting;
@@ -366,18 +349,12 @@ export class ClientApp implements IClientApp, IDisposable {
     await this.runContributionsPhase(this.contributions, 'onDidStart');
   }
 
-  /**
-   * 初始化核心模板
-   */
   private async initializeCoreRegistry() {
     this.commandRegistry.initialize();
     await this.keybindingRegistry.initialize();
     this.nextMenuRegistry.initialize();
   }
 
-  /**
-   * run contribution#initialize
-   */
   private async initializeContributions() {
     await this.runContributionsPhase(this.contributions, 'initialize');
     this.appInitialized.resolve();
@@ -385,9 +362,6 @@ export class ClientApp implements IClientApp, IDisposable {
     this.logger.verbose('contributions.initialize done');
   }
 
-  /**
-   * run contribution#onStart
-   */
   private async onStartContributions() {
     await this.runContributionsPhase(this.contributions, 'onStart');
   }
@@ -416,7 +390,6 @@ export class ClientApp implements IClientApp, IDisposable {
     const eventBus = this.injector.get(IEventBus);
     eventBus.fire(new RenderedEvent());
   }
-
   protected async measure<T>(name: string, fn: () => MaybePromise<T>): Promise<T> {
     const reporterService: IReporterService = this.injector.get(IReporterService);
     const measureReporter = reporterService.time(REPORT_NAME.MEASURE);
@@ -429,7 +402,7 @@ export class ClientApp implements IClientApp, IDisposable {
    * `beforeunload` listener implementation
    */
   protected preventStop(): boolean {
-    // 获取corePreferences配置判断是否弹出确认框
+    // 获取配置判断是否弹出确认框
     const corePreferences = this.injector.get(CorePreferences);
     const confirmExit = corePreferences['application.confirmExit'];
     if (confirmExit === 'never') {
@@ -451,10 +424,10 @@ export class ClientApp implements IClientApp, IDisposable {
   }
 
   /**
-   * electron 退出询问
+   * Before Electron quit handler
    */
   protected async preventStopElectron(): Promise<boolean> {
-    // 获取corePreferences配置判断是否弹出确认框
+    // 获取配置判断是否弹出确认框
     const corePreferences = this.injector.get(CorePreferences);
     const confirmExit = corePreferences['application.confirmExit'];
     if (confirmExit === 'never') {
@@ -566,7 +539,7 @@ export class ClientApp implements IClientApp, IDisposable {
     });
     injector.addProviders({
       token: StorageProvider,
-      useFactory: () => (storageId) => injector.get(DefaultStorageProvider).get(storageId),
+      useFactory: (injector) => (storageId: URI) => injector.get(DefaultStorageProvider).get(storageId),
     });
     createContributionProvider(injector, StorageResolverContribution);
   }
@@ -607,9 +580,9 @@ export class ClientApp implements IClientApp, IDisposable {
   }
 
   protected initEarlyPreference(workspaceDir: string) {
-    registerLocalStorageProvider(GeneralSettingsId.Theme, workspaceDir);
-    registerLocalStorageProvider(GeneralSettingsId.Icon, workspaceDir);
-    registerLocalStorageProvider(GeneralSettingsId.Language, workspaceDir);
+    this._disposables.push(registerLocalStorageProvider(GeneralSettingsId.Theme, workspaceDir));
+    this._disposables.push(registerLocalStorageProvider(GeneralSettingsId.Icon, workspaceDir));
+    this._disposables.push(registerLocalStorageProvider(GeneralSettingsId.Language, workspaceDir));
   }
 
   public async dispose() {
@@ -622,7 +595,7 @@ export class ClientApp implements IClientApp, IDisposable {
     if (isOSX) {
       document.body.removeEventListener('wheel', this._handleWheel);
     }
-
+    this._disposables.dispose();
     this.disposeSideEffect();
   }
 
@@ -707,4 +680,18 @@ export class ClientApp implements IClientApp, IDisposable {
   private _handleWheel = () => {
     // 屏蔽在OSX系统浏览器中由于滚动导致的前进后退事件
   };
+
+  protected detectRuntime() {
+    const global = window as any;
+    if (
+      global.isElectronRenderer ||
+      (typeof navigator === 'object' &&
+        typeof navigator.userAgent === 'string' &&
+        navigator.userAgent.indexOf('Electron') >= 0)
+    ) {
+      return ESupportRuntime.Electron;
+    }
+
+    return ESupportRuntime.Web;
+  }
 }

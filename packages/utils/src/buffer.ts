@@ -2,13 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-// Some code copied and modified from https://github.com/microsoft/vscode/blob/1.44.0/src/vs/base/common/arrays.ts
-import { toCanonicalName, iconvDecode, UTF8 } from './encoding';
+
+import { UTF8, iconvDecode, toCanonicalName } from './encoding';
 import * as strings from './strings';
 
 let textEncoder: TextEncoder | null;
 
-const hasBuffer = typeof Buffer !== 'undefined';
+const isInNodeEnv =
+  typeof process !== 'undefined' &&
+  typeof process.versions !== 'undefined' &&
+  typeof process.versions.node !== 'undefined';
+
+const hasBuffer = isInNodeEnv && typeof Buffer !== 'undefined';
 const hasTextEncoder = typeof TextEncoder !== 'undefined';
 const hasTextDecoder = typeof TextDecoder !== 'undefined';
 
@@ -47,7 +52,7 @@ export class BinaryBuffer {
     }
   }
 
-  static concat(buffers: BinaryBuffer[], totalLength?: number): BinaryBuffer {
+  static concat(buffers: (BinaryBuffer | Uint8Array)[], totalLength?: number): BinaryBuffer {
     if (typeof totalLength === 'undefined') {
       totalLength = 0;
       for (let i = 0, len = buffers.length; i < len; i++) {
@@ -71,7 +76,7 @@ export class BinaryBuffer {
 
   private constructor(buffer: Uint8Array) {
     this.buffer = buffer;
-    this.byteLength = this.buffer.byteLength;
+    this.byteLength = buffer.byteLength;
   }
 
   /**
@@ -94,10 +99,7 @@ export class BinaryBuffer {
   }
 
   slice(start?: number, end?: number): BinaryBuffer {
-    // IMPORTANT: use subarray instead of slice because TypedArray#slice
-    // creates shallow copy and NodeBuffer#slice doesn't. The use of subarray
-    // ensures the same, performant, behaviour.
-    return new BinaryBuffer(this.buffer.subarray(start! /* bad lib.d.ts*/, end));
+    return new BinaryBuffer(this.buffer.subarray(start, end));
   }
 
   set(array: BinaryBuffer | Uint8Array, offset?: number): void {
@@ -288,3 +290,42 @@ export function encodeBase64({ buffer }: BinaryBuffer, padded = true, urlSafe = 
 
   return output;
 }
+
+export type ITypedArray = Uint8Array | Uint16Array | Uint32Array;
+export type IDataType = string | Buffer | ITypedArray;
+
+export const getUInt8Buffer = hasBuffer
+  ? (data: IDataType): Uint8Array => {
+      if (typeof data === 'string') {
+        const buf = Buffer.from(data, 'utf8');
+        return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+      }
+
+      if (Buffer.isBuffer(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.length);
+      }
+
+      if (ArrayBuffer.isView(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      }
+
+      throw new Error('Invalid data type!');
+    }
+  : (data: IDataType): Uint8Array => {
+      if (typeof data === 'string') {
+        if (hasTextEncoder) {
+          if (!textEncoder) {
+            textEncoder = new TextEncoder();
+          }
+          return textEncoder.encode(data);
+        } else {
+          return strings.encodeUTF8(data);
+        }
+      }
+
+      if (ArrayBuffer.isView(data)) {
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      }
+
+      throw new Error('Invalid data type!');
+    };

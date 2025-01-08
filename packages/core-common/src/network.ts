@@ -44,4 +44,18 @@ export namespace Schemes {
   export const userData = 'vscode-userdata';
 
   export const userStorage = 'user_storage';
+
+  export const design = 'design';
+
+  /**
+   * Scheme used for loading the WebAssembly files.
+   */
+  export const wasm = 'wasm';
+
+  /**
+   * Scheme used to loading the monaco utilities.
+   */
+  export const monaco = 'monaco';
+
+  export const notebookCell = 'vscode-notebook-cell';
 }

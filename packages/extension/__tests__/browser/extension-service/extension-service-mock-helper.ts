@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { Injectable, Provider } from '@opensumi/di';
@@ -6,44 +7,61 @@ import { ICommentsService } from '@opensumi/ide-comments';
 import { CommentsService } from '@opensumi/ide-comments/lib/browser/comments.service';
 import { WSChannel } from '@opensumi/ide-connection';
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
+import { SimpleConnection } from '@opensumi/ide-connection/lib/common/connection/drivers/simple';
 import {
-  IContextKeyService,
-  ILogServiceManager,
-  StorageProvider,
-  DefaultStorageProvider,
-  createContributionProvider,
-  StorageResolverContribution,
-  PreferenceProvider,
   AppConfig,
-  Uri,
-  CommandRegistryImpl,
+  AppLifeCycleServiceToken,
   CommandRegistry,
-  IPreferenceSettingsService,
-  KeybindingRegistryImpl,
-  KeybindingRegistry,
+  CommandRegistryImpl,
+  DefaultStorageProvider,
+  Deferred,
+  Disposable,
+  Emitter,
+  IContextKeyService,
+  ICredentialsService,
+  ICryptoService,
   IFileServiceClient,
   IJSONSchemaRegistry,
+  IPreferenceSettingsService,
   ISchemaStore,
+  IScopedContextKeyService,
+  KeybindingRegistry,
+  KeybindingRegistryImpl,
+  MaybeNull,
+  PreferenceProvider,
+  StorageProvider,
+  StorageResolverContribution,
   URI,
-  Disposable,
-  ICryptoService,
-  ICredentialsService,
-  Emitter,
+  Uri,
+  createContributionProvider,
 } from '@opensumi/ide-core-browser';
 import { MockPreferenceProvider } from '@opensumi/ide-core-browser/__mocks__/preference';
-import { IMenuRegistry, MenuRegistryImpl } from '@opensumi/ide-core-browser/src/menu/next';
-import { WorkbenchEditorService } from '@opensumi/ide-editor';
+import { AppLifeCycleService } from '@opensumi/ide-core-browser/lib/bootstrap/lifecycle.service';
+import { IMenuRegistry, MenuRegistryImpl } from '@opensumi/ide-core-browser/lib/menu/next';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { mockService } from '@opensumi/ide-dev-tool/src/mock-injector';
 import {
+  IEditor,
+  IEditorDocumentModel,
+  IEditorGroup,
+  INotebookService,
+  IOpenResourceResult,
+  IResource,
+  IUntitledOptions,
+  WorkbenchEditorService,
+} from '@opensumi/ide-editor';
+import {
+  EditorComponentRegistry,
+  IEditorActionRegistry,
   IEditorDocumentModelContentRegistry,
   IEditorDocumentModelService,
-  IEditorActionRegistry,
-  EditorComponentRegistry,
   ResourceService,
 } from '@opensumi/ide-editor/lib/browser';
 import { EditorComponentRegistryImpl } from '@opensumi/ide-editor/lib/browser/component';
 import { EditorActionRegistryImpl } from '@opensumi/ide-editor/lib/browser/menu/editor.menu';
+import { NotebookService } from '@opensumi/ide-editor/lib/browser/notebook.service';
 import { ResourceServiceImpl } from '@opensumi/ide-editor/lib/browser/resource.service';
-import { IExtensionStorageService } from '@opensumi/ide-extension-storage';
 import { ActivationEventServiceImpl } from '@opensumi/ide-extension/lib/browser/activation.service';
 import { BrowserRequireInterceptorContribution } from '@opensumi/ide-extension/lib/browser/require-interceptor.contribution';
 import {
@@ -51,32 +69,32 @@ import {
   IActivationEventService,
 } from '@opensumi/ide-extension/lib/browser/types';
 import { WalkthroughsService } from '@opensumi/ide-extension/lib/browser/walkthroughs.service';
+import { IExtensionStoragePathServer, IExtensionStorageService } from '@opensumi/ide-extension-storage';
 import { FileSearchServicePath } from '@opensumi/ide-file-search/lib/common/file-search';
 import { MockFileServiceClient } from '@opensumi/ide-file-service/__mocks__/file-service-client';
 import { IMainLayoutService, MainLayoutContribution } from '@opensumi/ide-main-layout';
 import { LayoutService } from '@opensumi/ide-main-layout/lib/browser/layout.service';
+import { MockContextKeyService } from '@opensumi/ide-monaco/__mocks__/monaco.context-key.service';
 import { MonacoSnippetSuggestProvider } from '@opensumi/ide-monaco/lib/browser/monaco-snippet-suggest-provider';
 import { SchemaRegistry, SchemaStore } from '@opensumi/ide-monaco/lib/browser/schema-registry';
 import { PreferenceSettingsService } from '@opensumi/ide-preferences/lib/browser/preference-settings.service';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
-import { IWorkspaceStorageServer, IGlobalStorageServer } from '@opensumi/ide-storage';
+import { IGlobalStorageServer, IWorkspaceStorageServer } from '@opensumi/ide-storage';
 import { DatabaseStorageContribution } from '@opensumi/ide-storage/lib/browser/storage.contribution';
 import { IconService } from '@opensumi/ide-theme/lib/browser';
 import { SemanticTokenRegistryImpl } from '@opensumi/ide-theme/lib/browser/semantic-tokens-registry';
+import { ThemeData } from '@opensumi/ide-theme/lib/browser/theme-data';
+import { ThemeStore } from '@opensumi/ide-theme/lib/browser/theme-store';
 import { WorkbenchThemeService } from '@opensumi/ide-theme/lib/browser/workbench.theme.service';
-import { IThemeService, IIconService } from '@opensumi/ide-theme/lib/common';
+import { IIconService, IThemeData, IThemeService, IThemeStore } from '@opensumi/ide-theme/lib/common';
 import { ISemanticTokenRegistry } from '@opensumi/ide-theme/lib/common/semantic-tokens-registry';
 import { IWebviewService } from '@opensumi/ide-webview';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
+import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 import { IWorkspaceFileService } from '@opensumi/ide-workspace-edit';
 import { WorkspaceFileService } from '@opensumi/ide-workspace-edit/lib/browser/workspace-file.service';
-import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 
-import { createBrowserInjector } from '../../../../../tools/dev-tool/src/injector-helper';
-import { mockService } from '../../../../../tools/dev-tool/src/mock-injector';
-import { MockContextKeyService } from '../../../../monaco/__mocks__/monaco.context-key.service';
 import { MockExtNodeClientService } from '../../../__mocks__/extension.service.client';
-import { MockWorker, MessagePort } from '../../../__mocks__/worker';
+import { MessagePort, MockWorker } from '../../../__mocks__/worker';
 import { ExtCommandManagementImpl } from '../../../src/browser/extension-command-management';
 import { ExtInstanceManagementService } from '../../../src/browser/extension-instance-management';
 import { ExtensionManagementService } from '../../../src/browser/extension-management.service';
@@ -87,15 +105,15 @@ import { ExtensionServiceImpl } from '../../../src/browser/extension.service';
 import { SumiContributionsService, SumiContributionsServiceToken } from '../../../src/browser/sumi/contributes';
 import { VSCodeContributesService, VSCodeContributesServiceToken } from '../../../src/browser/vscode/contributes';
 import {
+  AbstractExtensionManagementService,
+  ExtensionNodeServiceServerPath,
   ExtensionService,
+  IExtCommandManagement,
   IExtension,
   IExtensionProps,
-  ExtensionNodeServiceServerPath,
-  IExtCommandManagement,
-  AbstractExtensionManagementService,
   IRequireInterceptorService,
-  RequireInterceptorService,
   RequireInterceptorContribution,
+  RequireInterceptorService,
 } from '../../../src/common';
 import {
   AbstractNodeExtProcessService,
@@ -120,7 +138,7 @@ const mockExtensionProps: IExtensionProps = {
   packageJSON: {
     name: 'sumi-extension',
     extensionDependencies: ['uuid-for-test-extension-deps'],
-    kaitianContributes: {
+    sumiContributes: {
       viewsProxies: ['Leftview', 'TitleView'],
       browserViews: {
         left: {
@@ -293,12 +311,55 @@ const mockExtensionProps: IExtensionProps = {
 };
 
 @Injectable()
-class MockWorkbenchEditorService {
-  open() {}
-  apply() {}
-  editorGroups = [];
+class MockWorkbenchEditorService implements WorkbenchEditorService {
+  onCursorChange = () => Disposable.NULL;
+  onDidEditorGroupsChanged = () => Disposable.NULL;
+  onDidCurrentEditorGroupChanged = () => Disposable.NULL;
   onActiveResourceChange = () => Disposable.NULL;
   onActiveEditorUriChange = () => Disposable.NULL;
+
+  contributionsReady = new Deferred<void>();
+
+  editorGroups = [];
+  sortedEditorGroups: IEditorGroup[];
+  currentEditor: IEditor | null;
+  currentOrPreviousFocusedEditor: IEditor | null;
+  currentResource: MaybeNull<IResource<any>>;
+  currentEditorGroup: IEditorGroup;
+  closeAll(uri?: URI | undefined, force?: boolean | undefined): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
+  openUris(uri: URI[]): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
+  save(uri: URI): Promise<URI | undefined> {
+    throw new Error('Method not implemented.');
+  }
+  saveAs(uri: URI): Promise<URI | undefined> {
+    throw new Error('Method not implemented.');
+  }
+  saveAll(includeUntitled?: boolean | undefined): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
+  close(uri: any, force?: boolean | undefined): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
+  getAllOpenedUris(): URI[] {
+    throw new Error('Method not implemented.');
+  }
+  getAllOpenedDocuments(): Promise<IEditorDocumentModel[]> {
+    throw new Error('Method not implemented.');
+  }
+  createUntitledResource(options?: IUntitledOptions | undefined): Promise<IOpenResourceResult> {
+    throw new Error('Method not implemented.');
+  }
+  setEditorContextKeyService(contextKeyService: IScopedContextKeyService): void {
+    throw new Error('Method not implemented.');
+  }
+  async open() {
+    return {} as any;
+  }
+  apply() {}
 }
 
 const mockExtension = {
@@ -306,7 +367,7 @@ const mockExtension = {
   uri: Uri.file(mockExtensionProps.path),
   contributes: Object.assign(
     mockExtensionProps.packageJSON.contributes,
-    mockExtensionProps.packageJSON.kaitianContributes,
+    mockExtensionProps.packageJSON.sumiContributes,
   ),
   activate: () => true,
   reset() {},
@@ -409,6 +470,10 @@ export function setupExtensionServiceInjector() {
       useClass: MockWorkbenchEditorService,
     },
     {
+      token: AppLifeCycleServiceToken,
+      useClass: AppLifeCycleService,
+    },
+    {
       token: IWebviewService,
       useValue: mockService({}),
     },
@@ -441,6 +506,10 @@ export function setupExtensionServiceInjector() {
       useClass: MockContextKeyService,
     },
     {
+      token: INotebookService,
+      useClass: NotebookService,
+    },
+    {
       token: IWorkspaceStorageServer,
       useValue: {
         getItems(key) {
@@ -463,6 +532,14 @@ export function setupExtensionServiceInjector() {
         },
         init() {
           return Promise.resolve();
+        },
+      },
+    },
+    {
+      token: IExtensionStoragePathServer,
+      useValue: {
+        getLastStoragePath() {
+          return os.tmpdir();
         },
       },
     },
@@ -526,10 +603,7 @@ export function setupExtensionServiceInjector() {
       useValue: {
         clientId: 'mock_id' + Math.random(),
         openChannel() {
-          const channelSend = (content) => {
-            //
-          };
-          return new WSChannel(channelSend, 'mock_wschannel');
+          return new WSChannel(new SimpleConnection(), { id: 'mock_wschannel' });
         },
       },
     },
@@ -556,6 +630,14 @@ export function setupExtensionServiceInjector() {
     {
       token: WalkthroughsService,
       useClass: WalkthroughsService,
+    },
+    {
+      token: IThemeData,
+      useClass: ThemeData,
+    },
+    {
+      token: IThemeStore,
+      useClass: ThemeStore,
     },
     BrowserRequireInterceptorContribution,
   );

@@ -189,6 +189,11 @@ export namespace FILE_COMMANDS {
     id: 'filetree.revealInExplorer',
     category: CATEGORY,
   };
+
+  export const TOGGLE_OR_OPEN: Command = {
+    id: 'filetree.toggleOrOpen',
+    category: CATEGORY,
+  };
 }
 
 export namespace OPEN_EDITORS_COMMANDS {
@@ -243,6 +248,11 @@ export namespace OPEN_EDITORS_COMMANDS {
     id: 'opened.editors.copyPath',
     category: CATEGORY,
   };
+
+  export const LOCATION: Command = {
+    id: 'opened.editors.location',
+    category: CATEGORY,
+  };
 }
 
 export namespace COMMON_COMMANDS {
@@ -277,6 +287,7 @@ export namespace COMMON_COMMANDS {
 
   export const OPEN_LAUNCH_CONFIGURATION: Command = {
     id: 'core.launchConfiguration.open',
+    label: '%debug.action.open.configuration%',
   };
 
   export const ENVIRONMENT_VARIABLE: Command = {
@@ -347,6 +358,23 @@ export namespace EDITOR_COMMANDS {
     category: CATEGORY,
   };
 
+  export const OPEN_MERGEEDITOR: Command = {
+    id: 'editor.open.mergeEditor',
+    category: CATEGORY,
+  };
+
+  export const OPEN_MERGEEDITOR_DEV: Command = {
+    id: 'editor.open.mergeEditor.dev',
+    category: 'Merge Editor (Dev)',
+    label: 'Open Merge Editor State from Json',
+  };
+
+  export const MERGEEDITOR_RESET: Command = {
+    id: 'editor.mergeEditor.reset',
+    category: CATEGORY,
+    label: '%mergeEditor.reset%',
+  };
+
   export const CLOSE: Command = {
     id: 'editor.close',
     category: CATEGORY,
@@ -381,7 +409,6 @@ export namespace EDITOR_COMMANDS {
     id: 'editor.saveAll',
     category: CATEGORY,
     label: '%editor.saveAll%',
-    alias: 'Save All',
   };
 
   export const CLOSE_TO_RIGHT: Command = {
@@ -410,7 +437,6 @@ export namespace EDITOR_COMMANDS {
     id: 'editor.splitToRight',
     category: CATEGORY,
     label: '%editor.splitToRight%',
-    iconClass: getIcon('embed'),
   };
 
   export const SPLIT_TO_TOP: Command = {
@@ -432,6 +458,11 @@ export namespace EDITOR_COMMANDS {
 
   export const CHANGE_ENCODING: Command = {
     id: 'editor.changeEncoding',
+    category: CATEGORY,
+  };
+
+  export const GET_ENCODING: Command = {
+    id: 'editor.getEncoding',
     category: CATEGORY,
   };
 
@@ -499,7 +530,6 @@ export namespace EDITOR_COMMANDS {
     id: 'editor.closeOtherGroup',
     category: CATEGORY,
     label: '%editor.closeEditorsInOtherGroups%',
-    alias: 'Close Other Groups',
   };
 
   export const OPEN_EDITOR_AT_INDEX: Command = {
@@ -511,14 +541,12 @@ export namespace EDITOR_COMMANDS {
     id: 'editor.evenEditorGroups',
     category: CATEGORY,
     label: '%editor.resetEditorGroups%',
-    alias: 'Reset Editor Group',
   };
 
   export const REVERT_DOCUMENT: Command = {
     id: 'editor.document.revert',
     category: CATEGORY,
     label: '%editor.revert%',
-    alias: 'Revert Document',
   };
 
   export const REVERT_AND_CLOSE: Command = {
@@ -600,21 +628,18 @@ export namespace EDITOR_COMMANDS {
   export const SEARCH_WORKSPACE_SYMBOL: Command = {
     id: 'editor.workspaceSymbol.quickopen',
     label: '%editor.workspaceSymbol.quickopen%',
-    alias: 'Search Workspace Symbol',
     category: CATEGORY,
   };
 
   export const SEARCH_WORKSPACE_SYMBOL_CLASS: Command = {
     id: 'editor.workspaceSymbolClass.quickopen',
     label: '%editor.workspaceSymbolClass.quickopen%',
-    alias: 'Search Workspace Class Symbol',
     category: CATEGORY,
   };
 
   export const GO_TO_LINE: Command = {
     id: 'editor.action.gotoLine',
     label: '%editor.goToLine%',
-    alias: 'Go to Line...',
     category: CATEGORY,
   };
 
@@ -622,7 +647,6 @@ export namespace EDITOR_COMMANDS {
     id: 'workbench.action.quickOpen',
     category: CATEGORY,
     label: '%editor.quickOpen%',
-    alias: 'Go to File...',
   };
 
   export const TOGGLE_WORD_WRAP: Command = {
@@ -631,18 +655,32 @@ export namespace EDITOR_COMMANDS {
     category: CATEGORY,
   };
 
+  export const TOGGLE_COLUMN_SELECTION: Command = {
+    id: 'editor.action.toggleColumnSelection',
+    label: '%editor.action.toggleColumnSelection%',
+    category: CATEGORY,
+  };
+
+  export const FORMAT_DOCUMENT: Command = {
+    id: 'editor.action.formatDocument',
+    category: CATEGORY,
+  };
+
+  export const FORMAT_SELECTION: Command = {
+    id: 'editor.action.formatSelection',
+    category: CATEGORY,
+  };
+
   export const FORMAT_DOCUMENT_WITH: Command = {
     id: 'editor.action.formatDocument.multiple',
     category: CATEGORY,
     label: '%editor.formatDocument.label.multiple%',
-    alias: 'Format Document With...',
   };
 
   export const FORMAT_SELECTION_WITH: Command = {
     id: 'editor.action.formatSelection.multiple',
     category: CATEGORY,
     label: '%editor.formatSelection.label.multiple%',
-    alias: 'Format Selection With...',
   };
 
   export const COPY_PATH: Command = {
@@ -658,6 +696,24 @@ export namespace EDITOR_COMMANDS {
   };
 }
 
+export namespace DIFF_EDITOR_COMMANDS {
+  const CATEGORY = 'diff-editor';
+
+  export const REVERT: Command = {
+    id: 'editor.diff.revert',
+    category: CATEGORY,
+  };
+
+  export const ACCEPT: Command = {
+    id: 'editor.diff.accept',
+    category: CATEGORY,
+  };
+
+  export const TOGGLE_COLLAPSE_UNCHANGED_REGIONS: Command = {
+    id: 'editor.diff.toggleCollapseUnchangedRegions',
+    category: CATEGORY,
+  };
+}
 export namespace SEARCH_COMMANDS {
   const CATEGORY = 'search';
 
@@ -678,13 +734,6 @@ export namespace SEARCH_COMMANDS {
     id: 'file-search.clean',
     label: 'clean search',
     iconClass: getIcon('clear'),
-    category: CATEGORY,
-  };
-
-  export const FOLD: Command = {
-    id: 'file-search.fold',
-    label: 'fold search',
-    iconClass: getIcon('collapse-all'),
     category: CATEGORY,
   };
 
@@ -733,6 +782,16 @@ export namespace SEARCH_COMMANDS {
     category: CATEGORY,
     label: '%file.copy.path%',
   };
+
+  export const REPLACE: Command = {
+    id: 'search.replace',
+    category: CATEGORY,
+  };
+
+  export const CLOSE: Command = {
+    id: 'search.close',
+    category: CATEGORY,
+  };
 }
 
 export namespace OUTLINE_COMMANDS {
@@ -775,6 +834,7 @@ export namespace WORKSPACE_COMMANDS {
 
   export const REMOVE_WORKSPACE_FOLDER: Command = {
     id: 'workspace.removeFolderFromWorkspace',
+    label: '%workspace.removeFolderFromWorkspace%',
     category: CATEGORY,
   };
 
@@ -805,7 +865,7 @@ export namespace DIALOG_COMMANDS {
 }
 
 export namespace TERMINAL_COMMANDS {
-  const CATEGORY = '%terminal.name%';
+  export const CATEGORY = '%terminal.name%';
 
   export const FOCUS_NEXT_TERMINAL = {
     id: 'workbench.action.terminal.focusNextPane',
@@ -869,59 +929,71 @@ export namespace TERMINAL_COMMANDS {
   export const CLEAR_ALL_CONTENT = {
     id: 'terminal.clearAllContent',
     label: '%terminal.menu.clearAllContents%',
+    category: CATEGORY,
   };
 
   export const TAB_RENAME = {
     id: 'terminal.tabRename',
+    category: CATEGORY,
   };
 
   export const SELECT_ALL_CONTENT = {
     id: 'terminal.selectAllContent',
     label: '%terminal.menu.selectAllContent%',
+    category: CATEGORY,
   };
 
   export const MORE_SETTINGS = {
     id: 'terminal.moreSettings',
     label: '%terminal.menu.moreSettings%',
+    category: CATEGORY,
   };
 
   export const SELECT_TYPE = {
     id: 'terminal.selectType',
+    category: CATEGORY,
   };
 
   export const SELECT_ZSH = {
     id: 'terminal.selectTypeZsh',
     label: 'zsh',
+    category: CATEGORY,
   };
 
   export const SELECT_BASH = {
     id: 'terminal.selectTypeBash',
     label: 'bash',
+    category: CATEGORY,
   };
 
   export const SELECT_SH = {
     id: 'terminal.selectTypeSh',
     label: 'sh',
+    category: CATEGORY,
   };
 
   export const SELECT_CMD = {
     id: 'terminal.selectTypeCMD',
     label: 'cmd',
+    category: CATEGORY,
   };
 
   export const SELECT_POWERSHELL = {
     id: 'terminal.selectTypePowerShell',
     label: 'powershell',
+    category: CATEGORY,
   };
 
   export const COPY = {
     id: 'terminal.copy',
     label: '%edit.copy%',
+    category: CATEGORY,
   };
 
   export const PASTE = {
     id: 'terminal.paste',
     label: '%edit.paste%',
+    category: CATEGORY,
   };
 
   export const SELECT_ALL = {
@@ -932,6 +1004,19 @@ export namespace TERMINAL_COMMANDS {
 
   export const RE_LAUNCH = {
     id: 'terminal.relaunch',
+    category: CATEGORY,
+  };
+
+  export const TOGGLE_TERMINAL = {
+    id: 'terminal.toggleTerminal',
+    label: '%terminal.toggleTerminal%',
+    category: CATEGORY,
+  };
+
+  export const KILL_PROCESS = {
+    id: 'terminal.killProcess',
+    label: '%terminal.killProcess%',
+    category: CATEGORY,
   };
 }
 
@@ -979,5 +1064,49 @@ export namespace QUICK_OPEN_COMMANDS {
   };
   export const OPEN_OUTLINE: Command = {
     id: 'editor.action.quickOutline',
+  };
+  export const OPEN_VIEW: Command = {
+    id: 'editor.action.quickView',
+  };
+  export const OPEN_WITH_COMMAND: Command = {
+    id: 'editor.action.quickCommand.withCommand',
+  };
+}
+
+export namespace SCM_COMMANDS {
+  const category = 'SCM';
+
+  export const GetSCMResource = {
+    id: 'scm.getResource',
+    category,
+  };
+
+  // git extension 1.71 版本之前存在下划线，这里为了做兼容处理: https://github.com/microsoft/vscode/blob/1.68.1/extensions/git/src/repository.ts#L613
+  export const _GIT_OPEN_MERGE_EDITOR: Command = {
+    id: '_git.openMergeEditor',
+  };
+  // git extension 1.71 版本之后就去掉了前面的下划线: https://github.com/microsoft/vscode/commit/c0ade8bc816386b7194d69fed878d4b9bb796d6c#diff-da56ff967ab1a9606c01af61dc926332afb862f13c8e5c74a575bc2aa1b15e43R411
+  export const GIT_OPEN_MERGE_EDITOR: Command = {
+    id: 'git.openMergeEditor',
+  };
+}
+
+export namespace MERGE_CONFLICT_COMMANDS {
+  const CATEGORY = 'MergeConflict';
+  export const AI_ACCEPT: Command = {
+    id: 'merge-conflict.ai.accept',
+    category: CATEGORY,
+  };
+  export const ALL_RESET: Command = {
+    id: 'merge-conflict.ai.all-reset',
+    category: CATEGORY,
+  };
+  export const AI_ALL_ACCEPT: Command = {
+    id: 'merge-conflict.ai.all-accept',
+    category: CATEGORY,
+  };
+  export const AI_ALL_ACCEPT_STOP: Command = {
+    id: 'merge-conflict.ai.all-accept-stop',
+    category: CATEGORY,
   };
 }

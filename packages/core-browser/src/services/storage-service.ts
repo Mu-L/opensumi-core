@@ -2,6 +2,7 @@ import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { isObject, isUndefinedOrNull, runWhenIdle } from '@opensumi/ide-core-common';
 
 import { Logger } from '../logger';
+import { AppConfig } from '../react-providers/index';
 
 export const GLOBAL_BROWSER_STORAGE_PREFIX = 'global';
 export const SCOPED_BROWSER_STORAGE_PREFIX = 'scoped';
@@ -90,15 +91,20 @@ abstract class BaseBrowserStorageService implements StorageService {
 
   public getData<T>(key: string, defaultValue?: T): T | undefined {
     const result = this.storage.getItem(this.prefix(key));
+    let data;
     if (isUndefinedOrNull(result)) {
       return defaultValue;
     }
     try {
-      return JSON.parse(result);
+      data = JSON.parse(result);
     } catch (e) {
       this.logger.error(`storage getDate error: ${e}, use defaultValue as result.`);
+      data = defaultValue;
     }
-    return defaultValue;
+    if (data && isObject(data)) {
+      delete data['expires'];
+    }
+    return data;
   }
 
   public removeData<T>(key: string): void {
@@ -106,7 +112,7 @@ abstract class BaseBrowserStorageService implements StorageService {
   }
 
   /**
-   * 验证是否还有空间生育用来存储另一个工作区配置
+   * 验证是否还有空间用来存储另一个工作区配置
    * 如果超出限制大小，提示用户进行清理
    *
    * @private
@@ -182,11 +188,14 @@ export class GlobalBrowserStorageService extends BaseBrowserStorageService {
  */
 @Injectable()
 export class ScopedBrowserStorageService extends BaseBrowserStorageService {
+  @Autowired(AppConfig)
+  private appConfig: AppConfig;
+
   private pathname = 'unknown';
 
   constructor(@Optional() key: string) {
     super();
-    this.pathname = key;
+    this.pathname = key || this.appConfig.workspaceDir;
     // 仅对局部 LocalStorage 设置过期时间
     this.setExpires(true);
   }

@@ -1,41 +1,62 @@
-import { observable, action } from 'mobx';
-
-import { Injectable, Autowired } from '@opensumi/di';
-import { IRecycleListHandler } from '@opensumi/ide-components';
+import { Autowired, Injectable } from '@opensumi/di';
+import { EventEmitter } from '@opensumi/events';
+import { IBasicRecycleTreeHandle } from '@opensumi/ide-components';
+import { IVirtualListHandle } from '@opensumi/ide-components/lib/virtual-list/types';
 import {
-  IPreferenceViewDesc,
-  IPreferenceSettingsService,
-  ISettingGroup,
-  ISettingSection,
-  PreferenceProviderProvider,
+  CommandService,
+  Dispatcher,
+  Disposable,
   Emitter,
   Event,
-  CommandService,
-  getDebugLogger,
-  isString,
-  getIcon,
-  PreferenceScope,
-  PreferenceProvider,
-  PreferenceSchemaProvider,
   IDisposable,
+  IPreferenceSettingsService,
+  IPreferenceViewDesc,
+  IResolvedPreferenceViewDesc,
+  IResolvedSettingSection,
+  ISettingGroup,
+  ISettingSection,
+  MenubarSettingId,
+  PreferenceProvider,
+  PreferenceProviderProvider,
+  PreferenceSchemaProvider,
+  PreferenceScope,
+  PreferenceScopeWithLabel,
+  PreferenceService,
+  TerminalSettingsId,
+  UserScope,
+  WorkspaceScope,
   arrays,
   getAvailableLanguages,
-  PreferenceService,
+  getIcon,
+  isString,
   replaceLocalizePlaceholder,
-  ThrottledDelayer,
-  TerminalSettingsId,
 } from '@opensumi/ide-core-browser';
 import { SearchSettingId } from '@opensumi/ide-core-common/lib/settings/search';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
-import { toPreferenceReadableName, PreferenceSettingId, getPreferenceItemLabel } from '../common';
+import { ESectionItemKind, PreferenceSettingId, getPreferenceItemLabel, toPreferenceReadableName } from '../common';
 
 import { PREFERENCE_COMMANDS } from './preference-contribution';
 
 const { addElement } = arrays;
+
+class Versionizer<K> {
+  private readonly version = new Map<K, number>();
+
+  get(key: K) {
+    return this.version.get(key) || 0;
+  }
+  increase(key: K) {
+    this.version.set(key, (this.version.get(key) || 0) + 1);
+  }
+}
+
 @Injectable()
-export class PreferenceSettingsService implements IPreferenceSettingsService {
-  private static DEFAULT_CHANGE_DELAY = 500;
+export class PreferenceSettingsService extends Disposable implements IPreferenceSettingsService {
+  private static EXTENSION_SETTINGS_PREFIX = '@ext:';
+  private static EXTENSION_SETTINGS_REGX = /^@ext:(\S+)(.+)?/;
+
+  static DEFAULT_CHANGE_DELAY = 200;
 
   @Autowired(PreferenceService)
   protected readonly preferenceService: PreferenceService;
@@ -52,44 +73,60 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
   @Autowired(CommandService)
   protected readonly commandService: CommandService;
 
-  @observable
-  public currentGroup = '';
+  emitter = this.registerDispose(
+    new EventEmitter<{
+      currentSearchChange: [void];
+      settingsGroupsChange: [void];
+      currentSelectIdChange: [string];
+      tabListChange: [void];
+      tabIndexChange: [];
+      currentScopeChange: [];
+      settingsSectionsChange: [groupId: string];
+    }>(),
+  );
 
-  @observable
-  public currentSearch = '';
+  currentSearch = '';
+  tabIndex = 0;
+  tabList = [WorkspaceScope, UserScope] as PreferenceScopeWithLabel[];
 
-  private currentScope: PreferenceScope;
+  protected _currentScope: PreferenceScopeWithLabel = this.tabList[0];
 
-  public setCurrentGroup(groupId: string) {
-    if (this.settingsGroups.find((n) => n.id === groupId)) {
-      this.currentGroup = groupId;
-      return;
-    }
-    getDebugLogger('Preference').warn('PreferenceService#setCurrentGroup is called with an invalid groupId:', groupId);
+  get currentScope() {
+    return this._currentScope.id;
   }
 
-  private settingsGroups: ISettingGroup[] = [];
+  protected _currentSelectId = '';
 
-  private settingsSections: Map<string, ISettingSection[]> = new Map();
+  get currentSelectId() {
+    return this._currentSelectId;
+  }
+
+  set currentSelectId(id: string) {
+    this._currentSelectId = id;
+    this.emitter.emit('currentSelectIdChange', id);
+  }
+
+  settingsGroups: ISettingGroup[] = [];
+
+  settingsSections: Map<string, ISettingSection[]> = new Map();
+  private settingsSectionsVersioned: Versionizer<string> = new Versionizer();
 
   private enumLabels: Map<string, { [key: string]: string }> = new Map();
 
-  private cachedGroupSection: Map<string, ISettingSection[]> = new Map();
+  private cachedGroupSection: Map<string, IResolvedSettingSection[]> = new Map();
 
-  private _listHandler: IRecycleListHandler;
-
-  private onDidEnumLabelsChangeEmitter: Emitter<void> = new Emitter();
-  private enumLabelsChangeDelayer = new ThrottledDelayer<void>(PreferenceSettingsService.DEFAULT_CHANGE_DELAY);
-
-  private onDidSettingsChangeEmitter: Emitter<void> = new Emitter();
+  private _listHandler: IVirtualListHandle;
+  private _treeHandler: IBasicRecycleTreeHandle;
+  private onDidEnumLabelsChangeDispatcher: Dispatcher<void> = this.registerDispose(new Dispatcher());
 
   constructor() {
+    super();
     this.setEnumLabels(
       'general.language',
       new Proxy(
         {},
         {
-          get: (target, key) => getAvailableLanguages().find((l) => l.languageId === key)!.localizedLanguageName,
+          get: (target, key) => getAvailableLanguages().find((l) => l.languageId === key)?.localizedLanguageName,
         },
       ),
     );
@@ -98,39 +135,99 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
       '\r\n': 'CRLF',
       auto: 'auto',
     });
+
+    const userBeforeWorkspace = this.preferenceService.get<boolean>('settings.userBeforeWorkspace', false);
+    if (userBeforeWorkspace) {
+      this.updateTabList(userBeforeWorkspace);
+      this._currentScope = this.tabList[this.tabIndex];
+    }
+
+    this.addDispose([
+      this.preferenceService.onSpecificPreferenceChange('settings.userBeforeWorkspace', (e) => {
+        this.updateTabList(e.newValue);
+      }),
+      this.emitter.on('tabListChange', () => {
+        this.updateCurrentScope();
+      }),
+      this.emitter.on('tabIndexChange', () => {
+        this.updateCurrentScope();
+      }),
+    ]);
   }
 
-  get onDidEnumLabelsChange() {
-    return this.onDidEnumLabelsChangeEmitter.event;
+  updateTabList(userBeforeWorkspace: boolean) {
+    let tabList: PreferenceScopeWithLabel[];
+    if (userBeforeWorkspace) {
+      tabList = [UserScope, WorkspaceScope];
+    } else {
+      tabList = [WorkspaceScope, UserScope];
+    }
+
+    this.tabList = tabList;
+    this.emitter.emit('tabListChange');
   }
 
-  get onDidSettingsChange() {
-    return this.onDidSettingsChangeEmitter.event;
+  protected updateCurrentScope() {
+    this._currentScope = this.tabList[this.tabIndex];
+    this.emitter.emit('currentScopeChange');
   }
 
-  fireDidSettingsChange() {
-    this.onDidSettingsChangeEmitter.fire();
+  scrollToGroup(groupId: string): void {
+    if (groupId) {
+      this.currentSelectId = ESectionItemKind.Group + groupId;
+    }
+  }
+
+  scrollToSection(section: string): void {
+    if (section) {
+      this.currentSelectId = ESectionItemKind.Section + section;
+    }
+  }
+
+  scrollToPreference(preferenceId: string): void {
+    if (preferenceId) {
+      this.currentSelectId = ESectionItemKind.Preference + preferenceId;
+    }
+  }
+
+  updateTabIndex(index: number) {
+    this.tabIndex = index;
+    this.emitter.emit('tabIndexChange');
+  }
+
+  selectScope(scope: PreferenceScope) {
+    let index = this.tabList.findIndex((v) => v.id === scope);
+    if (index === -1) {
+      index = 0;
+    }
+    this.updateTabIndex(index);
+  }
+
+  onDidEnumLabelsChange(id: string) {
+    return this.onDidEnumLabelsChangeDispatcher.on(id);
   }
 
   private isContainSearchValue(value: string, search: string) {
     return value.toLocaleLowerCase().indexOf(search.toLocaleLowerCase()) > -1;
   }
 
-  private filterPreferences(preference: string | IPreferenceViewDesc, scope: PreferenceScope): boolean {
-    return (
-      typeof preference !== 'string' &&
-      Array.isArray(preference.hiddenInScope) &&
-      preference.hiddenInScope.includes(scope)
-    );
+  private shouldHiddenInScope(
+    v: {
+      hiddenInScope?: PreferenceScope[];
+    },
+    scope: PreferenceScope,
+  ): boolean {
+    return Array.isArray(v.hiddenInScope) && v.hiddenInScope.includes(scope);
   }
 
-  @action
-  private doSearch(value) {
+  private doSearch(value?: string) {
     if (value) {
       this.currentSearch = value;
     } else {
       this.currentSearch = '';
     }
+
+    this.emitter.emit('currentSearchChange');
   }
 
   openJSON = (scope: PreferenceScope, preferenceId: string) => {
@@ -152,8 +249,15 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
     return this._listHandler;
   }
 
-  handleListHandler = (handler: any) => {
+  handleListHandler = (handler: IVirtualListHandle) => {
     this._listHandler = handler;
+  };
+
+  get treeHandler() {
+    return this._treeHandler;
+  }
+  handleTreeHandler = (handler: IBasicRecycleTreeHandle) => {
+    this._treeHandler = handler;
   };
 
   /**
@@ -162,9 +266,8 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
    * @param search 搜索值
    */
   getSettingGroups(scope: PreferenceScope, search?: string | undefined): ISettingGroup[] {
-    this.currentScope = scope;
     const groups = this.settingsGroups.slice();
-    return groups.filter((g) => this.getSections(g.id, scope, search).length > 0);
+    return groups.filter((g) => this.getResolvedSections(g.id, scope, search).length > 0);
   }
 
   async hasThisScopeSetting(scope: PreferenceScope) {
@@ -182,9 +285,15 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
    * @param group 配置组
    */
   registerSettingGroup(group: ISettingGroup): IDisposable {
-    const disposable = addElement(this.settingsGroups, group);
-    this.fireDidSettingsChange();
-    return disposable;
+    const disposable = addElement(this.settingsGroups, {
+      ...group,
+      title: replaceLocalizePlaceholder(group.title) || group.title,
+    });
+    this.emitter.emit('settingsGroupsChange');
+    return Disposable.create(() => {
+      disposable.dispose();
+      this.emitter.emit('settingsGroupsChange');
+    });
   }
 
   /**
@@ -198,24 +307,53 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
     }
     this.cachedGroupSection.clear();
     const disposable = addElement(this.settingsSections.get(groupId)!, section);
-    this.fireDidSettingsChange();
-    return disposable;
+    this.settingsSectionsVersioned.increase(groupId);
+    this.emitter.emit('settingsSectionsChange', groupId);
+    return {
+      dispose: () => {
+        disposable.dispose();
+        this.settingsSectionsVersioned.increase(groupId);
+        this.emitter.emit('settingsSectionsChange', groupId);
+      },
+    };
+  }
+
+  visitSection(
+    section: ISettingSection,
+    cb: (v: IPreferenceViewDesc) => boolean | undefined,
+  ): IPreferenceViewDesc | undefined {
+    if (section.preferences) {
+      for (const preference of section.preferences) {
+        const result = cb(preference);
+        if (result) {
+          return preference;
+        }
+      }
+    }
+    if (section.subSections && Array.isArray(section.subSections)) {
+      for (const subSec of section.subSections) {
+        return this.visitSection(subSec, cb);
+      }
+    }
   }
 
   /**
-   * 通过配置项ID获取配置项展示信息
-   * @param preferenceId 配置项ID
+   * 通过配置项 ID 获取配置项展示信息
+   * @param preferenceId 配置项 ID
    */
-  getSectionByPreferenceId(preferenceId: string) {
+  getPreferenceViewDesc(preferenceId: string) {
     const groups = this.settingsSections.values();
     for (const sections of groups) {
       for (const section of sections) {
-        for (const preference of section.preferences) {
+        const pref = this.visitSection(section, (preference) => {
           if (!isString(preference)) {
             if (preference.id === preferenceId) {
-              return preference;
+              return true;
             }
           }
+        });
+        if (pref) {
+          return pref;
         }
       }
     }
@@ -227,49 +365,95 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
    * @param scope 作用域
    * @param search 搜索条件
    */
-  getSections(groupId: string, scope: PreferenceScope, search?: string): ISettingSection[] {
-    const key = [groupId, scope, search || ''].join('-');
+  getResolvedSections(
+    groupId: string,
+    scope: PreferenceScope = this.currentScope,
+    search: string = this.currentSearch,
+  ): IResolvedSettingSection[] {
+    if (search.startsWith(PreferenceSettingsService.EXTENSION_SETTINGS_PREFIX)) {
+      if (groupId !== 'extension') {
+        return [];
+      }
+    }
+    const groupVersion = this.settingsSectionsVersioned.get(groupId);
+    const key = [groupId, scope, search || '', groupVersion].join('-');
     if (this.cachedGroupSection.has(key)) {
       return this.cachedGroupSection.get(key)!;
     }
-    const res = (this.settingsSections.get(groupId) || []).filter((section) => {
-      if (section.hiddenInScope && section.hiddenInScope.indexOf(scope) >= 0) {
-        return false;
-      } else {
-        return true;
+    let extensionId;
+    if (PreferenceSettingsService.EXTENSION_SETTINGS_REGX.test(search)) {
+      const res = PreferenceSettingsService.EXTENSION_SETTINGS_REGX.exec(search);
+      if (res) {
+        extensionId = res[1];
+        search = res[2]?.trim();
       }
-    });
+    }
 
-    const result: ISettingSection[] = [];
-
-    res.forEach((section) => {
-      if (section.preferences) {
-        const sec = { ...section };
-        sec.preferences = section.preferences.filter((pref) => {
-          if (this.filterPreferences(pref, scope)) {
-            return false;
-          }
-          if (!search) {
-            return true;
-          }
-
+    const result: IResolvedSettingSection[] = [];
+    const processSection = (section: Required<Pick<ISettingSection, 'preferences'>>) => {
+      const preferences = section.preferences
+        .filter((pref) => !this.shouldHiddenInScope(pref, scope))
+        .map((pref) => {
           const prefId = typeof pref === 'string' ? pref : pref.id;
           const schema = this.schemaProvider.getPreferenceProperty(prefId);
           const prefLabel = typeof pref === 'string' ? toPreferenceReadableName(pref) : getPreferenceItemLabel(pref);
           const description = schema && replaceLocalizePlaceholder(schema.description);
           const markdownDescription = schema && replaceLocalizePlaceholder(schema.markdownDescription);
+          return {
+            id: prefId,
+            label: prefLabel,
+            _description: markdownDescription ?? description,
+            markdownDescription,
+            description,
+          };
+        })
+        .filter((pref) => {
+          if (!search) {
+            return true;
+          }
           return (
-            this.isContainSearchValue(prefId, search) ||
-            this.isContainSearchValue(prefLabel, search) ||
-            (description && this.isContainSearchValue(description, search)) ||
-            (markdownDescription && this.isContainSearchValue(markdownDescription, search))
+            this.isContainSearchValue(pref.id, search) ||
+            this.isContainSearchValue(pref.label, search) ||
+            (pref.description && this.isContainSearchValue(pref.description, search)) ||
+            (pref.markdownDescription && this.isContainSearchValue(pref.markdownDescription, search))
           );
-        });
-        if (sec.preferences.length > 0) {
+        }) as IResolvedPreferenceViewDesc[];
+
+      return {
+        preferences,
+      };
+    };
+
+    (this.settingsSections.get(groupId) || [])
+      .filter(
+        (section) =>
+          !this.shouldHiddenInScope(section, scope) &&
+          (!extensionId || (extensionId && extensionId === section.extensionId)),
+      )
+      .forEach((section) => {
+        const sec = { ...section } as IResolvedSettingSection;
+
+        if (section.preferences) {
+          const { preferences } = processSection(section as Required<Pick<ISettingSection, 'preferences'>>);
+          sec.preferences = preferences;
+        }
+        if (section.subSections) {
+          const subSections = section.subSections
+            .map((v) => {
+              const { preferences } = processSection(v as Required<Pick<ISettingSection, 'preferences'>>);
+              if (preferences.length > 0) {
+                return { ...v, preferences };
+              }
+            })
+            .filter(Boolean) as IResolvedSettingSection[];
+          sec.subSections = subSections;
+        }
+
+        if ((sec.preferences && sec.preferences.length > 0) || (sec.subSections && sec.subSections.length > 0)) {
           result.push(sec);
         }
-      }
-    });
+      });
+
     this.cachedGroupSection.set(key.toLocaleLowerCase(), result);
     return result;
   }
@@ -313,12 +497,7 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
    * @param labels 枚举项
    */
   setEnumLabels(preferenceName: string, labels: { [key: string]: string }) {
-    if (this.enumLabelsChangeDelayer && !this.enumLabelsChangeDelayer.isTriggered()) {
-      this.enumLabelsChangeDelayer.cancel();
-    }
-    this.enumLabelsChangeDelayer.trigger(async () => {
-      this.onDidEnumLabelsChangeEmitter.fire();
-    });
+    this.onDidEnumLabelsChangeDispatcher.dispatch(preferenceName);
     this.enumLabels.set(preferenceName, labels);
   }
 
@@ -352,7 +531,7 @@ export class PreferenceSettingsService implements IPreferenceSettingsService {
    */
   async getCurrentPreferenceUrl(scope?: PreferenceScope) {
     // 默认获取全局设置的URI
-    const url = await this.getPreferenceUrl(scope || this.currentScope || PreferenceScope.User)!;
+    const url = await this.getPreferenceUrl(scope || this.currentScope || PreferenceScope.User);
     if (!url) {
       return;
     }
@@ -392,35 +571,36 @@ export const defaultSettingGroup: ISettingGroup[] = [
     iconClass: getIcon('setting'),
   },
   {
-    id: PreferenceSettingId.Editor,
-    title: '%settings.group.editor%',
-    iconClass: getIcon('editor'),
-  },
-  {
     id: PreferenceSettingId.Terminal,
     title: '%settings.group.terminal%',
     iconClass: getIcon('terminal'),
   },
   {
-    id: PreferenceSettingId.Feature,
-    title: '%settings.group.feature%',
-    iconClass: getIcon('file-text'),
+    id: PreferenceSettingId.Editor,
+    title: '%settings.group.editor%',
+    iconClass: getIcon('editor'),
   },
   {
     id: PreferenceSettingId.View,
     title: '%settings.group.view%',
     iconClass: getIcon('detail'),
   },
+  {
+    id: PreferenceSettingId.Feature,
+    title: '%settings.group.feature%',
+    iconClass: getIcon('file-text'),
+  },
 ];
 
 export const defaultSettingSections: {
   [key: string]: ISettingSection[];
 } = {
-  general: [
+  [PreferenceSettingId.General]: [
     {
       preferences: [
         { id: 'general.theme', localized: 'preference.general.theme' },
         { id: 'general.icon', localized: 'preference.general.icon' },
+        { id: 'general.productIconTheme', localized: 'preference.general.productIconTheme' },
         {
           id: 'general.language',
           localized: 'preference.general.language',
@@ -429,8 +609,9 @@ export const defaultSettingSections: {
       ],
     },
   ],
-  editor: [
+  [PreferenceSettingId.Editor]: [
     {
+      title: 'Editor',
       preferences: [
         // 预览模式
         { id: 'editor.previewMode' },
@@ -453,9 +634,19 @@ export const defaultSettingSections: {
         { id: 'editor.fontFamily', localized: 'preference.editor.fontFamily' },
         { id: 'editor.lineHeight', localized: 'preference.editor.lineHeight' },
         { id: 'editor.trimAutoWhitespace' },
-        // workbench
-        { id: 'workbench.editorAssociations' },
+
         // 补全
+        { id: 'editor.quickSuggestionsDelay', localized: 'preference.editor.quickSuggestionsDelay' },
+        { id: 'editor.suggestOnTriggerCharacters' },
+        { id: 'editor.acceptSuggestionOnEnter' },
+        { id: 'editor.acceptSuggestionOnCommitCharacter' },
+        { id: 'editor.snippetSuggestions' },
+        { id: 'editor.wordBasedSuggestions' },
+        { id: 'editor.suggestSelection' },
+        { id: 'editor.suggestFontSize' },
+        { id: 'editor.suggestLineHeight' },
+        { id: 'editor.tabCompletion' },
+        { id: 'editor.suggest.filteredTypes' },
         { id: 'editor.suggest.insertMode' },
         { id: 'editor.suggest.filterGraceful' },
         { id: 'editor.suggest.localityBonus' },
@@ -493,21 +684,25 @@ export const defaultSettingSections: {
         { id: 'editor.suggest.showIssues' },
         { id: 'editor.suggest.preview' },
         { id: 'editor.suggest.details.visible' },
-
+        // 行内补全
+        { id: 'editor.inlineSuggest.enabled', localized: 'preference.editor.inlineSuggest.enabled' },
+        { id: 'editor.inlineSuggest.showToolbar' },
+        {
+          id: 'editor.experimental.stickyScroll.enabled',
+          localized: 'preference.editor.experimental.stickyScroll.enabled',
+        },
+        // hover
+        { id: 'editor.hover.enabled' },
+        { id: 'editor.hover.delay' },
+        { id: 'editor.hover.sticky' },
+        { id: 'editor.hover.hidingDelay' },
+        { id: 'editor.hover.above' },
         // Guides
         { id: 'editor.guides.bracketPairs', localized: 'preference.editor.guides.bracketPairs' },
         { id: 'editor.guides.indentation', localized: 'preference.editor.guides.indentation' },
         {
           id: 'editor.guides.highlightActiveIndentation',
           localized: 'preference.editor.guides.highlightActiveIndentation',
-        },
-
-        // 行内补全
-        { id: 'editor.inlineSuggest.enabled', localized: 'preference.editor.inlineSuggest.enabled' },
-
-        {
-          id: 'editor.experimental.stickyScroll.enabled',
-          localized: 'preference.editor.experimental.stickyScroll.enabled',
         },
 
         // 缩进
@@ -525,8 +720,11 @@ export const defaultSettingSections: {
         { id: 'editor.formatOnSave', localized: 'preference.editor.formatOnSave' },
         { id: 'editor.formatOnSaveTimeout', localized: 'preference.editor.formatOnSaveTimeout' },
         { id: 'editor.formatOnPaste', localized: 'preference.editor.formatOnPaste' },
-        // 智能提示
-        { id: 'editor.quickSuggestionsDelay', localized: 'preference.editor.quickSuggestionsDelay' },
+        // 代码操作
+        { id: 'editor.codeActionsOnSave', localized: 'preference.editor.saveCodeActions' },
+        { id: 'editor.codeActionsOnSaveNotification', localized: 'preference.editor.saveCodeActionsNotification' },
+        // 其他
+        { id: 'editor.gotoLocation.multiple' },
         // 文件
         // `forceReadOnly` 选项暂时不对用户暴露
         // {id: 'editor.forceReadOnly', localized: 'preference.editor.forceReadOnly'},
@@ -537,22 +735,122 @@ export const defaultSettingSections: {
           id: 'editor.bracketPairColorization.enabled',
           localized: 'preference.editor.bracketPairColorization.enabled',
         },
+        { id: 'workbench.editorAssociations' },
+        { id: 'editor.unicodeHighlight.ambiguousCharacters' },
+        { id: 'editor.unicodeHighlight.allowedCharacters' },
+        { id: 'editor.unicodeHighlight.allowedLocales' },
+      ],
+    },
+    {
+      title: 'Diff Editor',
+      preferences: [
         // Diff 编辑器
         { id: 'diffEditor.renderSideBySide', localized: 'preference.diffEditor.renderSideBySide' },
         { id: 'diffEditor.ignoreTrimWhitespace', localized: 'preference.diffEditor.ignoreTrimWhitespace' },
+      ],
+    },
+    {
+      title: 'Merge Editor',
+      preferences: [
+        // merge 编辑器
+        {
+          id: 'mergeEditor.autoApplyNonConflictChanges',
+          localized: 'preference.mergeEditor.autoApplyNonConflictChanges',
+        },
+      ],
+    },
+    {
+      title: 'Files',
+      preferences: [
         { id: 'files.autoGuessEncoding', localized: 'preference.files.autoGuessEncoding.title' },
         { id: 'files.encoding', localized: 'preference.files.encoding.title' },
-        { id: 'files.eol' },
-        { id: 'files.trimFinalNewlines' },
-        { id: 'files.trimTrailingWhitespace' },
-        { id: 'files.insertFinalNewline' },
+        { id: 'files.eol', localized: 'preference.files.eol' },
+        { id: 'files.trimFinalNewlines', localized: 'preference.files.trimFinalNewlines' },
+        { id: 'files.trimTrailingWhitespace', localized: 'preference.files.trimTrailingWhitespace' },
+        { id: 'files.insertFinalNewline', localized: 'preference.files.insertFinalNewline' },
         { id: 'files.exclude', localized: 'preference.files.exclude.title' },
         { id: 'files.watcherExclude', localized: 'preference.files.watcherExclude.title' },
         { id: 'files.associations', localized: 'preference.files.associations.title' },
       ],
     },
   ],
-  terminal: [
+  // 整体布局相关的，比如 QuickOpen 也放这
+  [PreferenceSettingId.View]: [
+    {
+      // 菜单栏
+      title: 'MenuBar',
+      preferences: [{ id: MenubarSettingId.CompactMode, localized: 'preference.menubar.mode.compact' }],
+    },
+    {
+      // 布局信息
+      title: 'Layout',
+      preferences: [{ id: 'view.saveLayoutWithWorkspace', localized: 'preference.view.saveLayoutWithWorkspace.title' }],
+    },
+    {
+      title: 'File Tree',
+      preferences: [],
+    },
+    {
+      // 资源管理器
+      title: 'Explorer',
+      preferences: [
+        { id: 'explorer.fileTree.baseIndent', localized: 'preference.explorer.fileTree.baseIndent.title' },
+        { id: 'explorer.fileTree.indent', localized: 'preference.explorer.fileTree.indent.title' },
+        { id: 'explorer.compactFolders', localized: 'preference.explorer.compactFolders.title' },
+        { id: 'explorer.autoReveal', localized: 'preference.explorer.autoReveal' },
+      ],
+    },
+    {
+      title: 'QuickOpen',
+      preferences: [{ id: 'workbench.quickOpen.preserveInput' }],
+    },
+    {
+      title: 'Search',
+      preferences: [
+        // 搜索
+        { id: SearchSettingId.Include },
+        { id: SearchSettingId.Exclude, localized: 'preference.search.exclude.title' },
+        { id: SearchSettingId.UseReplacePreview },
+        // { id: 'search.maxResults' },
+        { id: SearchSettingId.SearchOnType },
+        { id: SearchSettingId.SearchOnTypeDebouncePeriod },
+        // { id: 'search.showLineNumbers' },
+        // { id: 'search.smartCase' },
+        // { id: 'search.useGlobalIgnoreFiles' },
+        // { id: 'search.useIgnoreFiles' },
+        // { id: 'search.useParentIgnoreFiles' },
+
+        // { id: 'search.quickOpen.includeHistory' },
+        // { id: 'search.quickOpen.includeSymbols' },
+      ],
+    },
+    {
+      title: 'Output',
+      preferences: [
+        // 输出
+        { id: 'output.maxChannelLine', localized: 'output.maxChannelLine' },
+        { id: 'output.enableLogHighlight', localized: 'output.enableLogHighlight' },
+        { id: 'output.enableSmartScroll', localized: 'output.enableSmartScroll' },
+      ],
+    },
+    {
+      title: 'Debug',
+      preferences: [
+        // 调试
+        // 由于筛选器的匹配模式搜索存在性能、匹配难度大等问题，先暂时隐藏
+        // { id: 'debug.console.filter.mode', localized: 'preference.debug.console.filter.mode' },
+        { id: 'debug.console.wordWrap', localized: 'preference.debug.console.wordWrap' },
+        { id: 'debug.inline.values', localized: 'preference.debug.inline.values' },
+        { id: 'debug.toolbar.float', localized: 'preference.debug.toolbar.float.title' },
+        { id: 'debug.breakpoint.editorHint', localized: 'preference.debug.breakpoint.editorHint.title' },
+        {
+          id: 'debug.breakpoint.showBreakpointsInOverviewRuler',
+          localized: 'preference.debug.breakpoint.showBreakpointsInOverviewRuler',
+        },
+      ],
+    },
+  ],
+  [PreferenceSettingId.Terminal]: [
     {
       preferences: [
         // 终端类型
@@ -584,56 +882,19 @@ export const defaultSettingSections: {
           localized: 'preference.terminal.integrated.cursorStyle',
         },
         { id: 'terminal.integrated.localEchoStyle', localized: 'preference.terminal.integrated.localEchoStyle' },
+        { id: 'terminal.integrated.xtermRenderType', localized: 'preference.terminal.integrated.xtermRenderType' },
       ],
     },
   ],
-  feature: [
+  [PreferenceSettingId.Feature]: [
     {
-      preferences: [
-        // 树/列表项
-        { id: 'workbench.list.openMode', localized: 'preference.workbench.list.openMode.title' },
-        { id: 'explorer.autoReveal', localized: 'preference.explorer.autoReveal' },
-
-        // 搜索
-        { id: SearchSettingId.Include },
-        { id: SearchSettingId.Exclude, localized: 'preference.search.exclude.title' },
-        { id: SearchSettingId.UseReplacePreview },
-        // { id: 'search.maxResults' },
-        { id: SearchSettingId.SearchOnType },
-        { id: SearchSettingId.SearchOnTypeDebouncePeriod },
-        // { id: 'search.showLineNumbers' },
-        // { id: 'search.smartCase' },
-        // { id: 'search.useGlobalIgnoreFiles' },
-        // { id: 'search.useIgnoreFiles' },
-        // { id: 'search.useParentIgnoreFiles' },
-
-        // { id: 'search.quickOpen.includeHistory' },
-        // { id: 'search.quickOpen.includeSymbols' },
-
-        // 输出
-        { id: 'output.maxChannelLine', localized: 'output.maxChannelLine' },
-        { id: 'output.enableLogHighlight', localized: 'output.enableLogHighlight' },
-        { id: 'output.enableSmartScroll', localized: 'output.enableSmartScroll' },
-        // 调试
-        // 由于筛选器的匹配模式搜索存在性能、匹配难度大等问题，先暂时隐藏
-        // { id: 'debug.console.filter.mode', localized: 'preference.debug.console.filter.mode' },
-        { id: 'debug.console.wordWrap', localized: 'preference.debug.console.wordWrap' },
-        { id: 'debug.inline.values', localized: 'preference.debug.inline.values' },
-      ],
+      title: 'Misc',
+      preferences: [],
     },
-  ],
-  view: [
     {
-      preferences: [
-        // 资源管理器
-        { id: 'explorer.fileTree.baseIndent', localized: 'preference.explorer.fileTree.baseIndent.title' },
-        { id: 'explorer.fileTree.indent', localized: 'preference.explorer.fileTree.indent.title' },
-        { id: 'explorer.compactFolders', localized: 'preference.explorer.compactFolders.title' },
-        // 运行与调试
-        { id: 'debug.toolbar.float', localized: 'preference.debug.toolbar.float.title' },
-        // 布局信息
-        { id: 'view.saveLayoutWithWorkspace', localized: 'preference.view.saveLayoutWithWorkspace.title' },
-      ],
+      // 树/列表项
+      title: 'Tree Component',
+      preferences: [{ id: 'workbench.list.openMode', localized: 'preference.workbench.list.openMode.title' }],
     },
   ],
 };

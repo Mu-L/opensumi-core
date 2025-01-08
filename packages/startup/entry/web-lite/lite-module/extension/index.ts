@@ -1,5 +1,6 @@
 import { Injectable } from '@opensumi/di';
-import { IExtensionNodeClientService, IExtraMetaData, IExtensionMetaData } from '@opensumi/ide-extension/lib/common';
+import { IExtensionMetaData, IExtensionNodeClientService, IExtraMetaData } from '@opensumi/ide-extension/lib/common';
+import { IExtensionLanguagePack } from '@opensumi/ide-extension/lib/common/vscode';
 
 import { getExtension } from './utils';
 
@@ -20,6 +21,18 @@ export const getExtensions: () => Promise<IExtensionMetaData[]> = () => {
 
 @Injectable()
 export class ExtensionClientService implements IExtensionNodeClientService {
+  pid(): Promise<number | null> {
+    throw new Error('Method not implemented.');
+  }
+  setupNLSConfig(languageId: string, storagePath: string): Promise<void> {
+    throw new Error('Method not implemented.');
+  }
+  getOpenVSXRegistry(): Promise<string> {
+    throw new Error('Method not implemented.');
+  }
+  getLanguagePack(languageId: string): Promise<IExtensionLanguagePack | undefined> {
+    throw new Error('Method not implemented.');
+  }
   restartExtProcessByClient(): void {
     throw new Error('Method not implemented.');
   }

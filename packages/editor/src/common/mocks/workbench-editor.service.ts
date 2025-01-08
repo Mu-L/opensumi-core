@@ -1,10 +1,12 @@
 import { Injectable } from '@opensumi/di';
-import { URI, Emitter, MaybeNull, Event } from '@opensumi/ide-core-common';
+import { Emitter, Event, MaybeNull, URI } from '@opensumi/ide-core-common';
 
 // eslint-disable-next-line import/no-restricted-paths
-import type { IEditorGroup } from '../../browser';
-import { WorkbenchEditorService, IResourceOpenOptions, IUntitledOptions, IOpenResourceResult } from '../editor';
+import { IOpenResourceResult, IResourceOpenOptions, IUntitledOptions, WorkbenchEditorService } from '../editor';
 import { IResource } from '../resource';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { IEditorDocumentModel, IEditorGroup } from '../../browser';
 
 @Injectable()
 export class MockWorkbenchEditorService extends WorkbenchEditorService {
@@ -29,6 +31,14 @@ export class MockWorkbenchEditorService extends WorkbenchEditorService {
     throw new Error('Method not implemented.');
   }
 
+  save(uri: URI): Promise<URI | undefined> {
+    throw new Error('Method not implemented.');
+  }
+
+  saveAs(uri: URI): Promise<URI | undefined> {
+    throw new Error('Method not implemented.');
+  }
+
   saveAll(includeUntitled?: boolean): Promise<void> {
     throw new Error('Method not implemented.');
   }
@@ -41,6 +51,10 @@ export class MockWorkbenchEditorService extends WorkbenchEditorService {
     throw new Error('Method not implemented.');
   }
 
+  async getAllOpenedDocuments(): Promise<IEditorDocumentModel[]> {
+    throw new Error('Method not implemented.');
+  }
+
   // 创建一个带待存的资源
   createUntitledResource(options?: IUntitledOptions): Promise<IOpenResourceResult> {
     throw new Error('Method not implemented.');
@@ -48,5 +62,9 @@ export class MockWorkbenchEditorService extends WorkbenchEditorService {
 
   setEditorContextKeyService() {
     throw new Error('Method not implemented.');
+  }
+
+  calcDirtyCount() {
+    return 0;
   }
 }

@@ -1,12 +1,18 @@
+// eslint-disable-next-line import/no-unresolved
 import vscode from 'vscode';
 
-import type {
-  OnEnterRule,
-  IndentationRule,
-} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/languageConfiguration';
-
 import * as types from './ext-types';
-import { SerializedIndentationRule, SerializedRegExp, SerializedOnEnterRule } from './model.api';
+import {
+  SerializedAutoClosingPair,
+  SerializedIndentationRule,
+  SerializedOnEnterRule,
+  SerializedRegExp,
+} from './model.api';
+
+import type {
+  IndentationRule,
+  OnEnterRule,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/languageConfiguration';
 
 /**
  * Returns `true` if the parameter has type "object" and not null, an array, a regexp, a date.
@@ -136,4 +142,17 @@ export function serializeIndentation(indentationRules?: vscode.IndentationRule):
     indentNextLinePattern: serializeRegExp(indentationRules.indentNextLinePattern),
     unIndentedLinePattern: serializeRegExp(indentationRules.unIndentedLinePattern),
   };
+}
+
+export function serializeAutoClosingPairs(
+  pairs: vscode.AutoClosingPair[] | undefined,
+): SerializedAutoClosingPair[] | undefined {
+  if (!pairs) {
+    return undefined;
+  }
+  return pairs.map((pair) => ({
+    open: pair.open,
+    close: pair.close,
+    notIn: pair.notIn ? pair.notIn.map((tokenType) => types.SyntaxTokenType.toString(tokenType)) : undefined,
+  }));
 }

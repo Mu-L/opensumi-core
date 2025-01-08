@@ -1,21 +1,22 @@
-import clsx from 'classnames';
+import cls from 'classnames';
 
 import { Autowired, Injectable } from '@opensumi/di';
-import { Disposable, URI, IEventBus, IMarkdownString } from '@opensumi/ide-core-common';
-import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import { Disposable, IEventBus, IMarkdownString, URI } from '@opensumi/ide-core-common';
+import * as monaco from '@opensumi/ide-monaco';
 import { IThemeService } from '@opensumi/ide-theme';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
-import { IDecorationRenderOptions, IDecorationApplyOptions } from '../common';
+import { IDecorationApplyOptions, IDecorationRenderOptions } from '../common';
 
 import {
-  IEditorDecorationCollectionService,
-  IDynamicModelDecorationProperty,
-  IThemedCssStyle,
+  DidApplyEditorDecorationFromProvider,
   EditorDecorationChangeEvent,
   EditorDecorationTypeRemovedEvent,
-  DidApplyEditorDecorationFromProvider,
+  IDynamicModelDecorationProperty,
+  IEditorDecorationCollectionService,
+  IThemedCssStyle,
 } from './types';
+
+import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
 @Injectable({ multiple: true })
 export class MonacoEditorDecorationApplier extends Disposable {
@@ -179,7 +180,6 @@ function assignModelDecorationOptions(
     if (!target.overviewRuler) {
       target.overviewRuler = {
         color: null as any,
-        range: null as any,
         position: property.overviewRulerLane,
       };
     } else {
@@ -210,19 +210,19 @@ function assignModelDecorationOptions(
 
 function assignModelDecorationStyle(target: monaco.editor.IModelDecorationOptions, style: IThemedCssStyle) {
   if (style.className) {
-    target.className = clsx(target.className, style.className);
+    target.className = cls(target.className, style.className);
   }
   if (style.inlineClassName) {
-    target.inlineClassName = clsx(target.inlineClassName, style.inlineClassName);
+    target.inlineClassName = cls(target.inlineClassName, style.inlineClassName);
   }
   if (style.afterContentClassName) {
-    target.afterContentClassName = clsx(target.afterContentClassName, style.afterContentClassName);
+    target.afterContentClassName = cls(target.afterContentClassName, style.afterContentClassName);
   }
   if (style.beforeContentClassName) {
-    target.beforeContentClassName = clsx(target.beforeContentClassName, style.beforeContentClassName);
+    target.beforeContentClassName = cls(target.beforeContentClassName, style.beforeContentClassName);
   }
   if (style.glyphMarginClassName) {
-    target.glyphMarginClassName = clsx(target.glyphMarginClassName, style.glyphMarginClassName);
+    target.glyphMarginClassName = cls(target.glyphMarginClassName, style.glyphMarginClassName);
   }
   if (style.overviewRulerColor) {
     if (target.overviewRuler) {

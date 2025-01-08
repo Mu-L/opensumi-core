@@ -1,23 +1,19 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { VALIDATE_TYPE } from '@opensumi/ide-core-browser/lib/components';
 import {
+  Mode,
   QuickInputOptions,
   QuickOpenItem,
-  QuickOpenService,
-  Mode,
   QuickOpenItemOptions,
+  QuickOpenService,
 } from '@opensumi/ide-core-browser/lib/quick-open';
-import { localize, Emitter, Event } from '@opensumi/ide-core-common';
+import { Emitter, Event, localize } from '@opensumi/ide-core-common';
 
 import { QuickTitleBar } from './quick-title-bar';
 
 @Injectable({ multiple: true })
 export class InputBoxImpl {
-  private _options: QuickInputOptions = {};
-
-  constructor(options: QuickInputOptions) {
-    this._options = options;
-  }
+  constructor(private _options: QuickInputOptions) {}
 
   getDerivedOptionsFromValue: ((value: string) => Promise<QuickInputOptions | undefined>) | undefined;
 
@@ -35,7 +31,8 @@ export class InputBoxImpl {
       oldOptions.totalSteps !== newOptions.totalSteps ||
       oldOptions.buttons !== newOptions.buttons ||
       oldOptions.validationMessage !== newOptions.validationMessage ||
-      oldOptions.validationType !== newOptions.validationType
+      oldOptions.validationType !== newOptions.validationType ||
+      oldOptions.busy !== newOptions.busy
     );
   }
 
@@ -60,6 +57,7 @@ export class InputBoxImpl {
      * 每次刷新会触发 onType，从而使页面的展示更新
      */
     if (this.shouldUpdate(newOptions, oldOptions)) {
+      this.quickOpenService.updateOptions(newOptions);
       this.refresh();
     }
   }
@@ -134,8 +132,10 @@ export class InputBoxImpl {
               }
               if (!error && mode === Mode.OPEN) {
                 this.onDidAcceptEmitter.fire(lookFor);
-                this.quickTitleBar.hide();
-                return true;
+                if (this.options.hideOnDidAccept) {
+                  this.quickTitleBar.hide();
+                  return true;
+                }
               }
               return false;
             },
@@ -159,6 +159,7 @@ export class InputBoxImpl {
         ignoreFocusOut: this.options.ignoreFocusOut,
         enabled: this.options.enabled,
         valueSelection: this.options.valueSelection,
+        busy: this.options.busy,
         onClose: (canceled) => {
           // VSCode 对于这里的表现是，如果不是用户主动取消（说明调用成功），则不会调用 onDidHide
           if (canceled) {

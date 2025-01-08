@@ -1,12 +1,11 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { CancellationToken, IEditorDocumentModelSaveResult } from '@opensumi/ide-core-browser';
 
-import { CancellationTokenSource } from '../../../utils/lib';
 import {
-  IFileSchemeDocNodeService,
   FileSchemeDocNodeServicePath,
-  IFileSchemeDocClient,
   IContentChange,
+  IFileSchemeDocClient,
+  IFileSchemeDocNodeService,
   ISavingContent,
 } from '../common';
 

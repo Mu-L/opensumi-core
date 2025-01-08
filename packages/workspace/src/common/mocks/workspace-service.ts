@@ -1,8 +1,8 @@
 import { Injectable } from '@opensumi/di';
-import { Emitter, URI, Deferred } from '@opensumi/ide-core-common';
+import { Deferred, Emitter, URI } from '@opensumi/ide-core-common';
 import { FileStat } from '@opensumi/ide-file-service';
 
-import { IWorkspaceService } from '../../common';
+import { IWorkspaceService, WorkspaceInput } from '../../common';
 
 @Injectable()
 export class MockWorkspaceService implements IWorkspaceService {
@@ -14,10 +14,16 @@ export class MockWorkspaceService implements IWorkspaceService {
 
   whenReady: Promise<void>;
 
+  workspaceSuffixName: string;
+
   private deferredRoots = new Deferred<FileStat[]>();
 
   constructor() {
     this.whenReady = this.init();
+  }
+
+  open(uri: URI, options?: WorkspaceInput): Promise<void> {
+    throw new Error('Method not implemented.');
   }
 
   async init() {
@@ -116,7 +122,10 @@ export class MockWorkspaceService implements IWorkspaceService {
     this.deferredRoots.resolve(this._roots);
     return rootsToAdd;
   }
-  asRelativePath(pathOrUri: string | URI, includeWorkspaceFolder?: boolean | undefined): Promise<string | undefined> {
+  asRelativePath(
+    pathOrUri: string | URI,
+    includeWorkspaceFolder?: boolean | undefined,
+  ): Promise<{ path?: string; root?: string } | undefined> {
     throw new Error('Method not implemented.');
   }
   getWorkspaceRootUri(uri: URI | undefined): URI | undefined {

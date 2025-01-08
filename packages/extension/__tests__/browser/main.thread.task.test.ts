@@ -1,21 +1,20 @@
 import path from 'path';
 
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { Emitter, FileUri, ITaskDefinitionRegistry, TaskDefinitionRegistryImpl } from '@opensumi/ide-core-common';
+import { FileUri, ITaskDefinitionRegistry, TaskDefinitionRegistryImpl } from '@opensumi/ide-core-common';
 import { addEditorProviders } from '@opensumi/ide-dev-tool/src/injector-editor';
 import { ExtensionService } from '@opensumi/ide-extension';
-import { IExtensionStorageService } from '@opensumi/ide-extension-storage/lib/common';
 import { ExtensionServiceImpl } from '@opensumi/ide-extension/lib/browser/extension.service';
-import { MainthreadTasks } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.tasks';
+import { MainThreadTasks } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.tasks';
 import { MainThreadWorkspace } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.workspace';
 import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '@opensumi/ide-extension/lib/common/vscode';
-import { Task, ShellExecution } from '@opensumi/ide-extension/lib/common/vscode/ext-types';
+import { ShellExecution, Task } from '@opensumi/ide-extension/lib/common/vscode/ext-types';
 import { ExtensionDocumentDataManagerImpl } from '@opensumi/ide-extension/lib/hosted/api/vscode/doc';
 import { ExtHostMessage } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.message';
 import { ExtHostStorage } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.storage';
 import { ExtHostTerminal } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.terminal';
 import { ExtHostWorkspace } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.workspace';
 import { ExtHostTasks, createTaskApiFactory } from '@opensumi/ide-extension/lib/hosted/api/vscode/tasks/ext.host.tasks';
+import { IExtensionStorageService } from '@opensumi/ide-extension-storage/lib/common';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
 import { LayoutService } from '@opensumi/ide-main-layout/lib/browser/layout.service';
 import { MonacoService } from '@opensumi/ide-monaco';
@@ -23,7 +22,7 @@ import { OutputPreferences } from '@opensumi/ide-output/lib/browser/output-prefe
 import { TaskService } from '@opensumi/ide-task/lib/browser/task.service';
 import { TerminalTaskSystem } from '@opensumi/ide-task/lib/browser/terminal-task-system';
 import { ITaskService, ITaskSystem } from '@opensumi/ide-task/lib/common';
-import { ITerminalInternalService, ITerminalController } from '@opensumi/ide-terminal-next';
+import { ITerminalController, ITerminalInternalService } from '@opensumi/ide-terminal-next';
 import { TerminalController } from '@opensumi/ide-terminal-next/lib/browser/terminal.controller';
 import { TerminalInternalService } from '@opensumi/ide-terminal-next/lib/browser/terminal.internal.service';
 import { VariableModule } from '@opensumi/ide-variable/lib/browser';
@@ -33,6 +32,7 @@ import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockedMonacoService } from '../../../monaco/__mocks__/monaco.service.mock';
 import { mockExtensions } from '../../__mocks__/extensions';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { MockExtensionStorageService } from '../hosted/__mocks__/extensionStorageService';
 
 const extension = Object.assign({}, mockExtensions[0], {
@@ -64,20 +64,7 @@ class TestTaskProvider {
   }
 }
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 describe('MainThreadTask Test Suite', () => {
   const injector = createBrowserInjector([VariableModule]);
@@ -136,7 +123,7 @@ describe('MainThreadTask Test Suite', () => {
 
   const testProvider = new TestTaskProvider();
   let extHostTask: ExtHostTasks;
-  let mainthreadTask: MainthreadTasks;
+  let mainthreadTask: MainThreadTasks;
   let extHostTaskApi: ReturnType<typeof createTaskApiFactory>;
   const workspaceService = injector.get<MockWorkspaceService>(IWorkspaceService);
 
@@ -170,7 +157,7 @@ describe('MainThreadTask Test Suite', () => {
     const extHostTerminal = new ExtHostTerminal(rpcProtocolExt);
     const extHostWorkspace = new ExtHostWorkspace(rpcProtocolExt, extHostMessage, extHostDocs);
     extHostTask = new ExtHostTasks(rpcProtocolExt, extHostTerminal, extHostWorkspace);
-    mainthreadTask = injector.get(MainthreadTasks, [rpcProtocolMain]);
+    mainthreadTask = injector.get(MainThreadTasks, [rpcProtocolMain]);
     rpcProtocolExt.set(ExtHostAPIIdentifier.ExtHostWorkspace, extHostWorkspace);
     rpcProtocolExt.set(ExtHostAPIIdentifier.ExtHostTasks, extHostTask);
     rpcProtocolExt.set(ExtHostAPIIdentifier.ExtHostStorage, new ExtHostStorage(rpcProtocolExt));

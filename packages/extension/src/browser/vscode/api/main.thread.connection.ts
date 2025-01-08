@@ -1,31 +1,27 @@
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { ILoggerManagerClient, ILogServiceClient, SupportLogNamespace, Deferred } from '@opensumi/ide-core-browser';
-import { Disposable, DisposableCollection } from '@opensumi/ide-core-common';
+import { Deferred } from '@opensumi/ide-core-browser';
+import { Disposable, DisposableCollection, ILogger } from '@opensumi/ide-core-common';
 
 import {
-  IMainThreadConnectionService,
-  ExtensionConnection,
-  IExtHostConnection,
   ExtHostAPIIdentifier,
-  ExtensionMessageReader,
-  ExtensionMessageWriter,
+  ExtensionConnection,
+  IInterProcessConnection,
+  IInterProcessConnectionService,
 } from '../../../common/vscode';
 
 @Injectable({ multiple: true })
-export class MainThreadConnection implements IMainThreadConnectionService {
-  private proxy: IExtHostConnection;
+export class MainThreadConnection implements IInterProcessConnectionService {
+  private proxy: IInterProcessConnection;
   private connections = new Map<string, ExtensionConnection>();
   private connectionsReady = new Map<string, Deferred<void>>();
   private readonly toDispose = new DisposableCollection();
 
-  @Autowired(ILoggerManagerClient)
-  protected readonly LoggerManager: ILoggerManagerClient;
-  protected readonly logger: ILogServiceClient;
+  @Autowired(ILogger)
+  protected readonly logger: ILogger;
 
   constructor(@Optional(IRPCProtocol) private rpcProtocol: IRPCProtocol) {
     this.proxy = this.rpcProtocol.getProxy(ExtHostAPIIdentifier.ExtHostConnection);
-    this.logger = this.LoggerManager.getLogger(SupportLogNamespace.ExtensionHost);
   }
 
   dispose() {
@@ -48,7 +44,7 @@ export class MainThreadConnection implements IMainThreadConnectionService {
       await ready.promise;
     }
     if (this.connections.has(id)) {
-      this.connections.get(id)!.reader.readMessage(message);
+      this.connections.get(id)!.readMessage(message);
     } else {
       this.logger.warn(`Do not found connection ${id}`);
     }
@@ -101,15 +97,12 @@ export class MainThreadConnection implements IMainThreadConnectionService {
   }
 
   protected async doCreateConnection(id: string): Promise<ExtensionConnection> {
-    const reader = new ExtensionMessageReader();
-    const writer = new ExtensionMessageWriter(id, this.proxy);
-    const connection = new ExtensionConnection(reader, writer, () => {
+    const connection = new ExtensionConnection(id, this.proxy, () => {
       this.connections.delete(id);
       this.proxy.$deleteConnection(id);
     });
 
-    const toClose = new DisposableCollection(Disposable.create(() => reader.fireClose()));
-    this.toDispose.push(toClose);
+    this.toDispose.push(Disposable.create(() => connection.fireClose()));
 
     return connection;
   }

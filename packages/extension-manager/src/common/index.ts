@@ -1,3 +1,5 @@
+import { IObservable } from '@opensumi/ide-monaco/lib/common/observable';
+
 import { QueryParam, QueryResult, VSXExtensionRaw, VSXSearchParam, VSXSearchResult } from './vsx-registry-types';
 
 export enum EnableScope {
@@ -49,6 +51,7 @@ export class VSXExtension {
   readonly path?: string;
   readonly realpath?: string;
   readonly extensionId?: string;
+  readonly originId?: string;
   static KEYS: Set<keyof VSXExtension> = new Set([
     'version',
     'iconUrl',
@@ -84,11 +87,14 @@ export interface IVSXExtensionService {
   openExtensionEditor(extensionId: string, state: InstallState): Promise<void>;
 
   extensions: VSXExtension[];
-  installedExtensions: VSXExtension[];
-  openVSXRegistry: string;
-}
+  extensionsObservable: IObservable<VSXExtension[]>;
 
-export const VSXExtensionBackSerivceToken = Symbol('VSXExtensionBackSerivceToken');
+  installedExtensions: VSXExtension[];
+  installedExtensionsObservable: IObservable<VSXExtension[]>;
+
+  openVSXRegistry: string;
+  openVSXRegistryObservable: IObservable<string>;
+}
 
 export const VSXExtensionServicePath = 'VSXExtensionServicePath';
 
@@ -105,7 +111,6 @@ export interface IVSXExtensionBackService {
   getOpenVSXRegistry(): Promise<string>;
 }
 
-export const IOpentrsMarketplaceService = Symbol('IOpentrsMarketplaceService');
 export const IOpenvsxMarketplaceService = Symbol('IOpenvsxMarketplaceService');
 
 export interface IMarketplaceService {

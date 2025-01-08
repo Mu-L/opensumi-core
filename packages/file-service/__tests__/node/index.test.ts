@@ -3,20 +3,21 @@ import path from 'path';
 
 import * as fse from 'fs-extra';
 
-import { Injector } from '@opensumi/di';
 import { isWindows } from '@opensumi/ide-core-common';
-import { URI, FileUri, AppConfig } from '@opensumi/ide-core-node';
+import { FileUri, URI } from '@opensumi/ide-core-node';
 import { expectThrowsAsync } from '@opensumi/ide-core-node/__tests__/helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 
-import { createNodeInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { IFileService, FileChangeType } from '../../src/common';
-import { FileServiceModule, FileService } from '../../src/node';
+import { FileSystemWatcherServer } from '../../lib/node/hosted/recursive/file-service-watcher';
+import { WatcherProcessManagerToken } from '../../lib/node/watcher-process-manager';
+import { FileChangeType, IDiskFileProvider, IFileService } from '../../src/common';
+import { FileService, FileServiceModule } from '../../src/node';
 
-// tslint:disable:variable-name
 describe('FileService', () => {
   let root: URI;
   let fileService: IFileService;
-  let injector: Injector;
+  let injector: MockInjector;
   let counter = 1;
 
   beforeEach(async () => {
@@ -26,7 +27,8 @@ describe('FileService', () => {
     root = FileUri.create(testDir);
 
     injector = createNodeInjector([FileServiceModule]);
-
+    // @ts-ignore
+    injector.mock(FileSystemWatcherServer, 'isEnableNSFW', () => false);
     fileService = injector.get(IFileService);
   });
 
@@ -90,7 +92,6 @@ describe('FileService', () => {
       expect(fse.statSync(FileUri.fsPath(uri)).isFile()).toBe(true);
       expect(fse.readFileSync(FileUri.fsPath(uri), { encoding: 'utf8' })).toEqual('foo');
 
-      // tslint:disable-next-line
       await expectThrowsAsync(
         fileService.resolveContent(uri.toString(), { encoding: 'unknownEncoding' }),
         /unknownencoding/,
@@ -632,12 +633,24 @@ describe('FileService', () => {
 
   describe('watch', () => {
     it('Should return id and dispose', async () => {
+      const diskProvider = injector.get(IDiskFileProvider);
+      diskProvider['watcherProcessManager']['_whenReadyDeferred'].resolve();
+      diskProvider['watcherProcessManager'].watch = () => 1;
+      diskProvider['watcherProcessManager'].dispose = () => void 0;
+
+      diskProvider['watcherProcessManager'].unWatch = () => 1;
       const watchId = await fileService.watchFileChanges(root.toString());
       expect(typeof watchId).toEqual('number');
       await fileService.unwatchFileChanges(watchId);
     });
 
     it('Should set and get Excludes', () => {
+      const diskProvider = injector.get(IDiskFileProvider);
+      diskProvider['watcherProcessManager']['_whenReadyDeferred'].resolve();
+      diskProvider['watcherProcessManager'].watch = () => 2;
+      diskProvider['watcherProcessManager'].unWatch = () => 2;
+      diskProvider['watcherProcessManager'].setWatcherFileExcludes = () => void 0;
+
       fileService.setWatchFileExcludes(['test']);
       expect(fileService.getWatchFileExcludes()).toEqual(['test']);
 

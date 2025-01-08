@@ -15,20 +15,20 @@
  ********************************************************************************/
 
 // Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/task/src/node/task-abstract-line-matcher.ts
-
+// eslint-disable-next-line import/no-unresolved
 import { Diagnostic, DiagnosticSeverity, Range } from 'vscode';
 
 import {
-  isWindows,
+  FileLocationKind,
   ProblemLocationKind,
-  ProblemPattern,
-  ProblemMatcher,
   ProblemMatch,
   ProblemMatchData,
+  ProblemMatcher,
+  ProblemPattern,
   Severity,
-  FileLocationKind,
   URI,
   WatchingPattern,
+  isWindows,
 } from '@opensumi/ide-core-common';
 
 const endOfLine: string = isWindows ? '\r\n' : '\n';
@@ -138,7 +138,8 @@ export abstract class AbstractLineMatcher {
         if (trim) {
           value = value.trim();
         }
-        (data[property] as string) = value;
+        // TODO: ts will regrard data[property] as undefined
+        (data[property] as any) = value;
       }
     }
   }
@@ -276,7 +277,8 @@ export abstract class AbstractLineMatcher {
         result = this.matcher.severity || Severity.Error;
       }
     }
-    return Severity.toDiagnosticSeverity(result as Severity);
+    // FIXME: 这里转换的类型和插件需要的类型是不对齐的
+    return Severity.toDiagnosticSeverity(result as Severity) as any;
   }
 
   private getResource(filename: string, matcher: ProblemMatcher): URI {

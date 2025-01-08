@@ -1,4 +1,3 @@
-// 输出所有 common 里面会有的内容
 export * from '@opensumi/ide-core-common';
 
 // 输出当前 browser 特有的内容
@@ -12,13 +11,16 @@ export * from './keyboard';
 export * from './application';
 export * from './layout';
 export * from './fs';
-export * from './tree';
 export * from './toolbar';
 export * from './terminal';
+export * from './file-decoration';
+export * from './ai-native';
+export * from './design';
 
 // 前端工具方法
 export * from './logger';
 export * from './utils';
+export * from './worker';
 
 export * from './context-key';
 
@@ -40,3 +42,6 @@ export * from './services';
 export * from './encoding-registry';
 export * from './markdown';
 export * from './extensions';
+
+export * from './static-resource';
+export * from './context-key';

@@ -1,17 +1,17 @@
-import { ChildProcess, spawn, fork } from 'child_process';
+import { ChildProcess, fork, spawn } from 'child_process';
 import stream from 'stream';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { Disposable, Emitter } from '@opensumi/ide-core-common';
 
 import {
-  ProcessOptions,
   ForkOptions,
-  IProcessStartEvent,
-  IProcessExitEvent,
-  ProcessErrorEvent,
-  IProcessManage,
   IProcess,
+  IProcessExitEvent,
+  IProcessManage,
+  IProcessStartEvent,
+  ProcessErrorEvent,
+  ProcessOptions,
 } from '../common/index';
 
 import { DevNullStream } from './dev-null-stream';
@@ -106,7 +106,7 @@ export class Process extends Disposable implements IProcess {
   }
 
   get pid(): number | null {
-    return this.process ? this.process.pid : null;
+    return this.process && this.process.pid ? this.process.pid : null;
   }
 
   get onStart() {
@@ -125,9 +125,9 @@ export class Process extends Disposable implements IProcess {
     return this._killed;
   }
 
-  dispose(signal?: string) {
+  dispose(signal?: NodeJS.Signals | number) {
+    super.dispose();
     if (this.process && this.killed === false) {
-      // TODO test window is work
       this.process.kill(signal);
     }
   }

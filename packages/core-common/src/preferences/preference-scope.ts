@@ -5,6 +5,21 @@ export enum PreferenceScope {
   Folder,
 }
 
+export interface PreferenceScopeWithLabel {
+  id: PreferenceScope;
+  label: string;
+}
+
+export const WorkspaceScope: PreferenceScopeWithLabel = {
+  id: PreferenceScope.Workspace,
+  label: 'preference.tab.workspace',
+};
+
+export const UserScope: PreferenceScopeWithLabel = {
+  id: PreferenceScope.User,
+  label: 'preference.tab.user',
+};
+
 export namespace PreferenceScope {
   export function is(scope: any): scope is PreferenceScope {
     return typeof scope === 'number' && getScopes().findIndex((s) => s === scope) >= 0;
@@ -33,7 +48,7 @@ export namespace PreferenceScope {
     return names;
   }
 
-  // 转义 vscode 中对configuration中scope的定义
+  // 转义 vscode 中对 configuration 中 scope 的定义
   export function fromString(strScope: string): PreferenceScope | undefined {
     switch (strScope) {
       case 'application':

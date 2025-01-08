@@ -1,18 +1,18 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { formatLocalize, uuid } from '@opensumi/ide-core-common';
+import { formatLocalize, isString, uuid } from '@opensumi/ide-core-common';
 
 import {
-  MainThreadAPIIdentifier,
-  IMainThreadStatusBar,
-  IExtHostStatusBar,
   ArgumentProcessor,
+  IExtHostStatusBar,
   IExtensionDescription,
+  IMainThreadStatusBar,
+  MainThreadAPIIdentifier,
 } from '../../../common/vscode';
 import { MarkdownString } from '../../../common/vscode/converter';
 import { Disposable, ThemeColor } from '../../../common/vscode/ext-types';
 import * as types from '../../../common/vscode/ext-types';
+
+import type vscode from 'vscode';
 
 export class ExtHostStatusBar implements IExtHostStatusBar {
   protected readonly proxy: IMainThreadStatusBar;
@@ -26,10 +26,10 @@ export class ExtHostStatusBar implements IExtHostStatusBar {
   setStatusBarMessage(text: string, arg?: number | Thenable<any>): Disposable {
     // step3
     this.proxy.$setStatusBarMessage(text);
-    let handle: NodeJS.Timer | undefined;
+    let handle: NodeJS.Timeout | undefined;
 
     if (typeof arg === 'number') {
-      handle = global.setTimeout(() => this.proxy.$dispose(), arg);
+      handle = setTimeout(() => this.proxy.$dispose(), arg);
     } else if (typeof arg !== 'undefined') {
       arg.then(
         () => this.proxy.$dispose(),
@@ -68,17 +68,22 @@ export class StatusBarItemImpl implements vscode.StatusBarItem {
     ['statusBarItem.warningBackground', new ThemeColor('statusBarItem.warningForeground')],
   ]);
 
+  private static ALLOWED_BACKGROUND_CSS_VARS = new Map<string, string>([
+    ['var(--statusBarItem-errorBackground)', 'var(--statusBarItem-errorForeground)'],
+    ['var(--statusBarItem-warningBackground)', 'var(--statusBarItem-warningForeground)'],
+  ]);
+
   private readonly _entryId = StatusBarItemImpl.nextId();
 
   private _text = '';
   private _tooltip?: string | vscode.MarkdownString;
   private _name?: string;
   private _color: string | ThemeColor | undefined;
-  private _backgroundColor: ThemeColor | undefined;
+  private _backgroundColor: string | ThemeColor | undefined;
   private _command: string | vscode.Command | undefined;
 
   private _isVisible: boolean;
-  private _timeoutHandle: NodeJS.Timer | undefined;
+  private _timeoutHandle: NodeJS.Timeout | undefined;
 
   private _proxy: IMainThreadStatusBar;
 
@@ -143,12 +148,18 @@ export class StatusBarItemImpl implements vscode.StatusBarItem {
     this.update();
   }
 
-  public get backgroundColor(): ThemeColor | undefined {
+  public get backgroundColor(): string | ThemeColor | undefined {
     return this._backgroundColor;
   }
 
-  public set backgroundColor(color: ThemeColor | undefined) {
-    if (color && !StatusBarItemImpl.ALLOWED_BACKGROUND_COLORS.has(color.id)) {
+  public set backgroundColor(color: string | ThemeColor | undefined) {
+    if (!color) {
+      color = undefined;
+    } else if (isString(color)) {
+      if (!StatusBarItemImpl.ALLOWED_BACKGROUND_CSS_VARS.has(color)) {
+        color = undefined;
+      }
+    } else if (!StatusBarItemImpl.ALLOWED_BACKGROUND_COLORS.has(color.id)) {
       color = undefined;
     }
 
@@ -195,7 +206,7 @@ export class StatusBarItemImpl implements vscode.StatusBarItem {
       clearTimeout(this._timeoutHandle);
     }
     // Defer the update so that multiple changes to setters don't cause a redraw each
-    this._timeoutHandle = global.setTimeout(() => {
+    this._timeoutHandle = setTimeout(() => {
       this._timeoutHandle = undefined;
       const commandId = typeof this.command === 'string' ? this.command : this.command?.command;
       const commandArgs = typeof this.command === 'string' ? undefined : this.command?.arguments;
@@ -225,7 +236,11 @@ export class StatusBarItemImpl implements vscode.StatusBarItem {
       // If a background color is set, the foreground is determined
       let color = this._color;
       if (this._backgroundColor) {
-        color = StatusBarItemImpl.ALLOWED_BACKGROUND_COLORS.get(this._backgroundColor.id)!;
+        if (isString(this._backgroundColor)) {
+          color = StatusBarItemImpl.ALLOWED_BACKGROUND_CSS_VARS.get(this._backgroundColor);
+        } else {
+          color = StatusBarItemImpl.ALLOWED_BACKGROUND_COLORS.get(this._backgroundColor.id);
+        }
       }
 
       // Set to status bar

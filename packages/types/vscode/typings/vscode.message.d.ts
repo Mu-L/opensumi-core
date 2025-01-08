@@ -1,13 +1,10 @@
 declare module 'vscode' {
-
   /**
 	 * Namespace for dealing with the current window of the editor. That is visible
 	 * and active editors, as well as, UI elements to show messages, selections, and
 	 * asking for user input.
 	 */
   export namespace window {
-
-
     /**
      * Show an information message to users. Optionally provide an array of items which will be presented as
      * clickable buttons.
@@ -184,7 +181,11 @@ declare module 'vscode' {
 		 * Indicates that this message should be modal.
 		 */
     modal?: boolean;
+
+    /**
+		 * Human-readable detail message that is rendered less prominent. _Note_ that detail
+		 * is only shown for {@link MessageOptions.modal modal} messages.
+		 */
+		detail?: string;
   }
-
 }
-

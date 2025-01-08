@@ -1,6 +1,4 @@
 declare module 'vscode' {
-
-
 	/**
 	 * Controls how the task channel is used between tasks
 	 */
@@ -82,6 +80,11 @@ declare module 'vscode' {
 		 * Controls whether the terminal is cleared before executing the task.
 		 */
 		clear?: boolean;
+
+    /**
+     * Controls whether the terminal is closed after executing the task.
+     */
+    close?: boolean;
 	}
 
 	/**

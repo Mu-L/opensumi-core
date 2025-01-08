@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import { SubMenu as RcSubMenu, SubMenuProps as RCSubMenuProps } from 'rc-menu';
+import { SubMenuProps as RCSubMenuProps, SubMenu as RcSubMenu } from 'rc-menu';
 import React from 'react';
 
 interface TitleEventEntity {
@@ -19,6 +19,7 @@ export interface SubMenuProps extends RCSubMenuProps {
   onKeyDown?: (e: React.KeyboardEvent<HTMLElement>) => void;
   popupOffset?: [number, number];
   popupClassName?: string;
+  ref?: React.Ref<HTMLLIElement> | undefined;
 }
 
 class SubMenu extends React.Component<SubMenuProps, any> {

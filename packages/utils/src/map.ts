@@ -1,7 +1,8 @@
+import flatten from 'lodash/flatten';
 import { URI as Uri } from 'vscode-uri';
 
 import { CharCode } from './charCode';
-import { Iterator, IteratorResult, FIN } from './iterator';
+import { FIN, Iterator, IteratorResult } from './iterator';
 
 export function values<V = any>(set: Set<V>): V[];
 export function values<K = any, V = any>(map: Map<K, V>): V[];
@@ -622,46 +623,6 @@ export class LinkedMap<K, V> {
     return result;
   }
 
-  /* VS Code / Monaco editor runs on es5 which has no Symbol.iterator
-	keys(): IterableIterator<K> {
-		const current = this._head;
-		const iterator: IterableIterator<K> = {
-			[Symbol.iterator]() {
-				return iterator;
-			},
-			next():IteratorResult<K> {
-				if (current) {
-					const result = { value: current.key, done: false };
-					current = current.next;
-					return result;
-				} else {
-					return { value: undefined, done: true };
-				}
-			}
-		};
-		return iterator;
-	}
-
-	values(): IterableIterator<V> {
-		const current = this._head;
-		const iterator: IterableIterator<V> = {
-			[Symbol.iterator]() {
-				return iterator;
-			},
-			next():IteratorResult<V> {
-				if (current) {
-					const result = { value: current.value, done: false };
-					current = current.next;
-					return result;
-				} else {
-					return { value: undefined, done: true };
-				}
-			}
-		};
-		return iterator;
-	}
-	*/
-
   protected trimOld(newSize: number) {
     if (newSize >= this.size) {
       return;
@@ -869,6 +830,43 @@ export class LRUCache<K, V> extends LinkedMap<K, V> {
   }
 }
 
+export class DefaultMap<K, V> {
+  private map = new Map<K, V>();
+
+  constructor(private defaultValue: () => V) {}
+
+  get(key: K): V {
+    let value = this.map.get(key);
+
+    if (!value) {
+      value = this.defaultValue();
+      this.map.set(key, value);
+    }
+
+    return value;
+  }
+
+  has(key: K): boolean {
+    return this.map.has(key);
+  }
+
+  set(key: K, value: V): void {
+    this.map.set(key, value);
+  }
+
+  delete(key: K): void {
+    this.map.delete(key);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+
+  forEach(fn: (value: V, key: K) => void): void {
+    this.map.forEach(fn);
+  }
+}
+
 export class SetMap<K, V> {
   private map = new Map<K, Set<V>>();
 
@@ -930,5 +928,38 @@ export class CaseInsensitiveMap<K, V> extends Map<K, V> {
     }
 
     return super.has(key);
+  }
+}
+
+export class MultiMap<K, V> {
+  private _map = new Map<K, V[]>();
+
+  get size(): number {
+    let count = 0;
+    for (const [, values] of this._map) {
+      count += values.length;
+    }
+    return count;
+  }
+
+  get keys(): K[] {
+    return keys(this._map);
+  }
+
+  get values(): V[] {
+    return flatten(values(this._map));
+  }
+
+  get(key: K): V[] | undefined {
+    return this._map.get(key);
+  }
+
+  set(key: K, value: V): void {
+    const array = getOrSet(this._map, key, []);
+    array.push(value);
+  }
+
+  delete(key: K): void {
+    this._map.delete(key);
   }
 }

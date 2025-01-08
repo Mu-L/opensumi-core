@@ -1,19 +1,19 @@
 import { Injectable } from '@opensumi/di';
 import {
-  IDisposable,
+  Deferred,
   DisposableCollection,
   Emitter,
   Event,
-  URI,
-  Deferred,
-  isEmptyObject,
   FileStat,
+  IDisposable,
+  URI,
+  isEmptyObject,
 } from '@opensumi/ide-core-common';
 import { PreferenceScope } from '@opensumi/ide-core-common/lib/preferences/preference-scope';
 
 import { JSONUtils, JSONValue } from '../utils';
 
-import { getExternalPreferenceProvider, getAllExternalProviders } from './early-preferences';
+import { getAllExternalProviders, getExternalPreferenceProvider } from './early-preferences';
 import { PreferenceResolveResult } from './types';
 export interface IResolvedPreferences {
   default: { [key: string]: any };
@@ -251,7 +251,9 @@ export abstract class PreferenceProvider implements IDisposable {
     return this.doResolve<T>(preferenceName, resourceUri, language).value;
   }
 
-  // @final 不要 override 这个
+  /**
+   * @final
+   */
   public resolve<T>(preferenceName: string, resourceUri?: string, language?: string): PreferenceResolveResult<T> {
     if (PreferenceProvider.PreferenceDelegatesReverse[preferenceName]) {
       const res = this.getDelegateToValueFromDelegated(preferenceName);

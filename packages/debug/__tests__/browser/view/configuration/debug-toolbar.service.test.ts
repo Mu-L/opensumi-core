@@ -1,8 +1,12 @@
-import { IEventBus, EventBusImpl } from '@opensumi/ide-core-common';
+import { EventBusImpl, IEventBus } from '@opensumi/ide-core-common';
 import { DebugToolbarService } from '@opensumi/ide-debug/lib/browser/view/configuration/debug-toolbar.service';
 import { DebugViewModel } from '@opensumi/ide-debug/lib/browser/view/debug-view-model';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+
+function flushPromises() {
+  return Promise.resolve();
+}
 
 describe('Debug Configuration Service', () => {
   const mockInjector = createBrowserInjector(
@@ -62,64 +66,61 @@ describe('Debug Configuration Service', () => {
     expect(typeof debugToolbarService.doStepOut).toBe('function');
     expect(typeof debugToolbarService.updateCurrentSession).toBe('function');
     expect(typeof debugToolbarService.toolBarMenuMap).toBe('object');
-    expect(Array.isArray(debugToolbarService.sessions)).toBeTruthy();
-    expect(debugToolbarService.currentSession).toBeUndefined();
+    expect(Array.isArray(debugToolbarService.sessions.get())).toBeTruthy();
+    expect(debugToolbarService.currentSession.get()).toBeUndefined();
   });
 
   it('should init success', () => {
-    expect(mockDebugViewModel.onDidChange).toBeCalledTimes(1);
+    expect(mockDebugViewModel.onDidChange).toHaveBeenCalledTimes(1);
   });
 
-  it('onStart method should be work', () => {
-    debugToolbarService.doStart();
-    expect(mockDebugViewModel.start).toBeCalledTimes(1);
+  it('onStart method should be work', async () => {
+    await debugToolbarService.doStart();
+    jest.useFakeTimers({ advanceTimers: 100 });
+    await flushPromises();
+    expect(mockDebugViewModel.start).toHaveBeenCalledTimes(1);
   });
 
   it('doRestart method should be work', async () => {
     await debugToolbarService.doRestart();
-    expect(mockDebugViewModel.restart).toBeCalledTimes(1);
+    expect(mockDebugViewModel.restart).toHaveBeenCalledTimes(1);
   });
 
   it('doStop method should be work', async () => {
     await debugToolbarService.doStop();
-    expect(mockDebugViewModel.currentSession.terminate).toBeCalledTimes(1);
+    expect(mockDebugViewModel.currentSession.terminate).toHaveBeenCalledTimes(1);
   });
 
   it('doContinue method should be work', async () => {
     await debugToolbarService.doContinue();
-    expect(mockDebugViewModel.currentThread.continue).toBeCalledTimes(1);
+    expect(mockDebugViewModel.currentThread.continue).toHaveBeenCalledTimes(1);
   });
 
   it('doPause method should be work', async () => {
     await debugToolbarService.doPause();
-    expect(mockDebugViewModel.currentThread.pause).toBeCalledTimes(1);
+    expect(mockDebugViewModel.currentThread.pause).toHaveBeenCalledTimes(1);
   });
 
   it('doStepIn method should be work', async () => {
     await debugToolbarService.doStepIn();
-    expect(mockDebugViewModel.currentThread.stepIn).toBeCalledTimes(1);
+    expect(mockDebugViewModel.currentThread.stepIn).toHaveBeenCalledTimes(1);
   });
 
   it('doStepOver method should be work', async () => {
     await debugToolbarService.doStepOver();
-    expect(mockDebugViewModel.currentThread.stepOver).toBeCalledTimes(1);
+    expect(mockDebugViewModel.currentThread.stepOver).toHaveBeenCalledTimes(1);
   });
 
   it('doStepOut method should be work', async () => {
     await debugToolbarService.doStepOut();
-    expect(mockDebugViewModel.currentThread.stepOut).toBeCalledTimes(1);
+    expect(mockDebugViewModel.currentThread.stepOut).toHaveBeenCalledTimes(1);
   });
 
   it('updateCurrentSession method should be work', () => {
     const session = {} as any;
     debugToolbarService.updateCurrentSession(session);
     debugToolbarService.updateModel();
-    expect(debugToolbarService.currentSession).toEqual(session);
-  });
-
-  it('updateModel method should be work', () => {
-    debugToolbarService.updateModel();
-    expect(debugToolbarService.sessionCount).toBe(0);
+    expect(debugToolbarService.currentSession.get()).toEqual(session);
   });
 
   it('updateToolBarMenu method should be work', () => {

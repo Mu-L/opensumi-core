@@ -4,6 +4,7 @@ import { IRelativePattern, match } from './glob';
 import { Path } from './path';
 
 export { URI as Uri, Utils as UriUtils } from 'vscode-uri';
+
 // 3.0 的 vscode-uri 没有导出这个
 export interface UriComponents {
   scheme: string;
@@ -246,6 +247,14 @@ export class URI {
     return this.codeUri.toString(skipEncoding);
   }
 
+  toJSON() {
+    return {
+      ...this.codeUri.toJSON(),
+      // `$mid === 1` will cause URI to be deserialized as a Uri
+      $mid: undefined,
+    };
+  }
+
   isEqualOrParent(uri: URI): boolean {
     return this.authority === uri.authority && this.scheme === uri.scheme && this.path.isEqualOrParent(uri.path);
   }
@@ -294,5 +303,9 @@ export class URI {
       }
     });
     return values.join('&');
+  }
+
+  with(parsed: Partial<UriComponents>): URI {
+    return new URI(Uri.from({ ...this.codeUri.toJSON(), ...parsed }));
   }
 }

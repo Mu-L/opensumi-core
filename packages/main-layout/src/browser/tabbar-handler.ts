@@ -1,17 +1,16 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { Event, Emitter, ILogger } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Emitter, Event } from '@opensumi/ide-core-common';
 
 import { IMainLayoutService } from '../common';
 
 import { TabbarService } from './tabbar/tabbar.service';
 
+import type { ViewBadge } from 'vscode';
+
 @Injectable({ multiple: true })
 export class TabBarHandler {
   @Autowired(IMainLayoutService)
   private layoutService!: IMainLayoutService;
-
-  @Autowired(ILogger)
-  private readonly logger: ILogger;
 
   protected readonly onActivateEmitter = new Emitter<void>();
   readonly onActivate: Event<void> = this.onActivateEmitter.event;
@@ -28,7 +27,7 @@ export class TabBarHandler {
 
   constructor(public readonly containerId: string, private tabbarService: TabbarService) {
     // 如果当前视图已经激活，则设置一些激活的标志
-    if (tabbarService.currentContainerId === this.containerId) {
+    if (tabbarService.currentContainerId.get() === this.containerId) {
       this.onActivateEmitter.fire();
       this.isVisible = true;
     }
@@ -61,41 +60,41 @@ export class TabBarHandler {
    * 激活该视图
    */
   activate() {
-    this.tabbarService.currentContainerId = this.containerId;
+    this.tabbarService.updateCurrentContainerId(this.containerId);
   }
   /**
    * 取消激活该视图
    */
   deactivate() {
-    this.tabbarService.currentContainerId = '';
+    this.tabbarService.updateCurrentContainerId('');
   }
   /**
    * 当前视图激活状态
    */
   isActivated() {
-    return this.tabbarService.currentContainerId === this.containerId;
+    return this.tabbarService.currentContainerId.get() === this.containerId;
   }
   /**
    * 显示当前视图（区别于激活）
    */
   show() {
-    this.tabbarService.getContainerState(this.containerId).hidden = false;
+    this.tabbarService.showContainer(this.containerId);
   }
   /**
    * 隐藏当前视图（区别于取消激活，整个视图将不展示在 tabbar 上）
    */
   hide() {
-    this.tabbarService.getContainerState(this.containerId).hidden = true;
+    this.tabbarService.hideContainer(this.containerId);
   }
   /**
    * 设置视图的顶部标题组件
    */
   setTitleComponent(Fc: React.ComponentType, props?: object) {
-    const componentInfo = this.tabbarService.getContainer(this.containerId);
-    if (componentInfo) {
-      componentInfo.options!.titleProps = props;
-      componentInfo.options!.titleComponent = Fc;
-      this.tabbarService.forceUpdate++;
+    const component = this.tabbarService.getContainer(this.containerId);
+    if (component && component.options) {
+      component.options.titleProps = props;
+      component.options.titleComponent = Fc;
+      component.fireChange(component);
     }
   }
   /**
@@ -105,14 +104,14 @@ export class TabBarHandler {
     this.layoutService.toggleSlot(
       this.tabbarService.location,
       true,
-      size + this.tabbarService.barSize /* border宽(高)度*/,
+      size + this.tabbarService.getBarSize() /* border宽(高)度*/,
     );
   }
   /**
    * 设置视图tab的徽标
    */
-  setBadge(badge: string) {
-    this.tabbarService.getContainer(this.containerId)!.options!.badge = badge;
+  setBadge(badge?: ViewBadge | string) {
+    this.tabbarService.updateBadge(this.containerId, badge);
   }
   /**
    * 获取视图tab的徽标
@@ -144,52 +143,34 @@ export class TabBarHandler {
   toggleViews(viewIds: string[], show: boolean) {
     for (const viewId of viewIds) {
       const viewState = this.accordionService.getViewState(viewId);
-      viewState.hidden = !show;
+      this.accordionService.updateViewState(viewId, { ...viewState, hidden: !show });
     }
   }
   /**
    * 更新子视图的标题
    */
   updateViewTitle(viewId: string, title: string) {
-    const targetView = this.accordionService.views.find((view) => view.id === viewId);
-    if (targetView) {
-      targetView.name = title;
-      this.accordionService.updateViewTitle(viewId, title);
-    } else {
-      this.logger.error('没有找到目标视图，无法更新手风琴标题!');
-    }
+    this.accordionService.updateViewTitle(viewId, title);
   }
 
   /**
    * 更新子视图的描述
    */
   updateViewDescription(viewId: string, desciption: string) {
-    const targetView = this.accordionService.views.find((view) => view.id === viewId);
-    if (targetView) {
-      targetView.description = desciption;
-      this.accordionService.updateViewDesciption(viewId, desciption);
-    } else {
-      this.logger.error('没有找到目标视图，无法更新手风琴描述!');
-    }
+    this.accordionService.updateViewDesciption(viewId, desciption);
   }
 
   /**
    * 更新子视图的 message
    */
   updateViewMessage(viewId: string, message: string) {
-    const targetView = this.accordionService.views.find((view) => view.id === viewId);
-    if (targetView) {
-      targetView.message = message;
-      this.accordionService.updateViewMessage(viewId, message);
-    } else {
-      this.logger.error('没有找到目标视图，无法更新手风琴 message!');
-    }
+    this.accordionService.updateViewMessage(viewId, message);
   }
   /**
    * 更新视图的标题
    */
-  updateTitle(label: string) {
-    this.tabbarService.getContainer(this.containerId)!.options!.title = label;
+  updateTitle(title: string) {
+    this.tabbarService.updateTitle(this.containerId, title);
   }
   /**
    * 禁用侧边栏的resize功能

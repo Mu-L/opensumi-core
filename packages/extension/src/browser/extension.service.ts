@@ -1,35 +1,51 @@
-import { Autowired, Injectable } from '@opensumi/di';
+import debounce from 'lodash/debounce';
+
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { RPCServiceChannelPath } from '@opensumi/ide-connection/lib/common/server-handler';
 import {
   AppConfig,
   CommandRegistry,
   CorePreferences,
   Deferred,
+  Disposable,
   ExtensionActivateEvent,
   IClientApp,
   ILogger,
-  Disposable,
+  PreferenceService,
 } from '@opensumi/ide-core-browser';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import {
-  localize,
-  OnEvent,
-  WithEventBus,
-  ProgressLocation,
+  CancelablePromise,
+  CancellationToken,
+  ExtensionActivatedEvent,
   ExtensionDidContributes,
+  GeneralSettingsId,
+  MayCancelablePromise,
+  OnEvent,
+  ProgressLocation,
+  URI,
+  WithEventBus,
+  createCancelablePromise,
   getLanguageId,
+  localize,
+  sleep,
 } from '@opensumi/ide-core-common';
-import { IExtensionStorageService } from '@opensumi/ide-extension-storage';
+import { DebugConfigurationsReadyEvent } from '@opensumi/ide-debug';
+import { IExtensionStoragePathServer, IExtensionStorageService } from '@opensumi/ide-extension-storage';
 import { FileSearchServicePath, IFileSearchService } from '@opensumi/ide-file-search/lib/common';
+import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { IDialogService, IMessageService } from '@opensumi/ide-overlay';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import {
+  ERestartPolicy,
   ExtensionHostType,
   ExtensionNodeServiceServerPath,
   ExtensionService,
-  IExtensionNodeClientService,
   IExtCommandManagement,
   IExtensionMetaData,
+  IExtensionNodeClientService,
   LANGUAGE_BUNDLE_FIELD,
 } from '../common';
 import { ActivatedExtension } from '../common/activator';
@@ -40,16 +56,17 @@ import {
 } from '../common/extension.service';
 import { MainThreadAPIIdentifier } from '../common/vscode';
 
+import { ActivationEventServiceImpl } from './activation.service';
 import { Extension } from './extension';
 import { SumiContributionsService, SumiContributionsServiceToken } from './sumi/contributes';
 import {
-  ExtensionApiReadyEvent,
-  ExtensionDidEnabledEvent,
-  ExtensionBeforeActivateEvent,
-  ExtensionDidUninstalledEvent,
-  IActivationEventService,
   AbstractExtInstanceManagementService,
+  ExtensionApiReadyEvent,
+  ExtensionBeforeActivateEvent,
+  ExtensionDidEnabledEvent,
+  ExtensionDidUninstalledEvent,
   ExtensionsInitializedEvent,
+  IActivationEventService,
 } from './types';
 import { VSCodeContributesService, VSCodeContributesServiceToken } from './vscode/contributes';
 
@@ -69,7 +86,7 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
   private readonly commandRegistry: CommandRegistry;
 
   @Autowired(IActivationEventService)
-  private readonly activationEventService: IActivationEventService;
+  private readonly activationEventService: ActivationEventServiceImpl;
 
   @Autowired(IWorkspaceService)
   private readonly workspaceService: IWorkspaceService;
@@ -119,6 +136,31 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
   @Autowired(SumiContributionsServiceToken)
   private readonly sumiContributesService: SumiContributionsService;
 
+  @Autowired(PreferenceService)
+  private readonly preferenceService: PreferenceService;
+
+  @Autowired(IExtensionStoragePathServer)
+  private readonly extensionStoragePathServer: IExtensionStoragePathServer;
+
+  @Autowired(INJECTOR_TOKEN)
+  private readonly injector: Injector;
+
+  @Autowired(IFileServiceClient)
+  protected fileServiceClient: IFileServiceClient;
+
+  constructor() {
+    super();
+
+    this.addDispose(
+      this.fileServiceClient.onWillActivateFileSystemProvider(async () => {
+        if (!this.extensionMetaDataArr) {
+          await this.initExtensionMetaData();
+        }
+        return this.activationEventService.getTopicsData('onFileSystem');
+      }),
+    );
+  }
+
   /**
    * 这里的 ready 是区分环境，将 node/worker 区分开使用
    */
@@ -131,10 +173,14 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
   private isExtProcessRestarting = false;
 
   // 插件进程是否正在等待重启，页面不可见的时候被设置
-  private isExtProcessWaitingForRestart = false;
+  private isExtProcessWaitingForRestart: ERestartPolicy | undefined;
+  private pCrashMessageModel: MayCancelablePromise<string | undefined> | undefined;
 
   // 针对 activationEvents 为 * 的插件
   public eagerExtensionsActivated: Deferred<void> = new Deferred();
+
+  @Autowired(WSChannelHandler)
+  private readonly channelHandler: WSChannelHandler;
 
   /**
    * @internal 提供获取所有运行中的插件的列表数据
@@ -190,16 +236,28 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
     await this.initExtensionMetaData();
     await this.initExtensionInstanceData();
     await this.runEagerExtensionsContributes();
+    // update nls config by extensions
+    await this.setupExtensionNLSConfig();
+
     this.doActivate();
 
     // 监听页面展示状态，当页面状态变为可见且插件进程待重启的时候执行
     const onPageVisibilitychange = () => {
+      this.logger.log(
+        '[ext-restart]: page visibility change, current:',
+        document.visibilityState,
+        'is waiting:',
+        this.isExtProcessWaitingForRestart,
+        'is restarting:',
+        this.isExtProcessRestarting,
+      );
+
       if (
         document.visibilityState === 'visible' &&
         this.isExtProcessWaitingForRestart &&
         !this.isExtProcessRestarting
       ) {
-        this.extProcessRestartHandler();
+        this.extProcessRestartHandler(this.isExtProcessWaitingForRestart);
       }
     };
 
@@ -210,6 +268,12 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
         document.removeEventListener('visibilitychange', onPageVisibilitychange);
       }),
     );
+  }
+
+  private async setupExtensionNLSConfig() {
+    const storagePath = (await this.extensionStoragePathServer.getLastStoragePath()) || '';
+    const currentLanguage: string = this.preferenceService.get(GeneralSettingsId.Language) || getLanguageId();
+    await this.extensionNodeClient.setupNLSConfig(currentLanguage, storagePath);
   }
 
   /**
@@ -228,11 +292,7 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
       });
     }
 
-    this.extensionMetaDataArr = await this.getExtensionsMetaData(
-      Array.from(this.extensionScanDir),
-      Array.from(this.extensionCandidatePath),
-    );
-    this.logger.log('extensions count:', this.extensionMetaDataArr.length);
+    await this.getExtensionsMetaData(Array.from(this.extensionScanDir), Array.from(this.extensionCandidatePath));
   }
 
   /**
@@ -253,11 +313,12 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
 
       if (extension?.contributes && extension.enabled) {
         this.contributesService.register(extension.id, extension.contributes);
-        this.sumiContributesService.register(extension.id, extension.packageJSON.kaitianContributes || {});
+        this.sumiContributesService.register(extension.id, extension.packageJSON.sumiContributes || {});
       }
     }
 
     this.eventBus.fire(new ExtensionsInitializedEvent(this.extensionInstanceManageService.getExtensionInstances()));
+    this.eventBus.fire(new DebugConfigurationsReadyEvent(undefined));
 
     const extensionInstanceList = this.extensionInstanceManageService.getExtensionInstances();
     this.nodeExtensionService.updateExtensionData(extensionInstanceList);
@@ -291,41 +352,106 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
   /**
    * 重启插件进程
    */
-  public async restartExtProcess() {
+  public async restartExtProcess(restartPolicy: ERestartPolicy = ERestartPolicy.Always) {
     /**
      * 只有在页面可见的情况下才执行插件进程重启操作
      * 如果当前页面不可见，那么 chrome 会对 socket 进行限流，导致进程重启的 rpc 调用得不到返回从而卡住
      */
     if (document.visibilityState === 'visible') {
-      this.extProcessRestartHandler();
+      this.extProcessRestartHandler(restartPolicy);
     } else {
-      this.isExtProcessWaitingForRestart = true;
+      this.logger.log('[ext-restart]: page is not visible, waiting for restart, policy:', restartPolicy);
+      this.isExtProcessWaitingForRestart = restartPolicy;
     }
   }
 
-  private async extProcessRestartHandler() {
-    if (this.isExtProcessRestarting) {
-      return;
+  private extProcessRestartPromise: CancelablePromise<void> | undefined;
+
+  private disposeAllOverlayWindow() {
+    if (this.pCrashMessageModel) {
+      // crash message model is still open, close it
+      this.pCrashMessageModel.cancel?.();
+      this.pCrashMessageModel = undefined;
+    }
+  }
+
+  restartProgress = async (restartPolicy: ERestartPolicy = ERestartPolicy.Always) => {
+    const doRestart = async (token: CancellationToken) => {
+      this.disposeAllOverlayWindow();
+
+      token.onCancellationRequested(() => {
+        this.logger.log('[ext-restart]: ext process restart canceled');
+        this.isExtProcessRestarting = false;
+        this.isExtProcessWaitingForRestart = undefined;
+      });
+
+      try {
+        await this.startExtProcess(false);
+      } catch (err) {
+        this.logger.error(`[ext-restart]: ext-host restart failure, error: ${err}`);
+      }
+
+      this.isExtProcessRestarting = false;
+      this.isExtProcessWaitingForRestart = undefined;
+
+      this.disposeAllOverlayWindow();
+    };
+
+    await this.channelHandler.awaitChannelReady(RPCServiceChannelPath);
+
+    const policy = this.isExtProcessWaitingForRestart || restartPolicy;
+    this.logger.log('[ext-restart]: restart ext process, restart policy:', policy);
+
+    switch (policy) {
+      // @ts-expect-error Need fall-through
+      case ERestartPolicy.WhenExit:
+        // if we can get the pid, then the process is still running, no need to restart.
+        // if pid is null, it means the process is exited, then we need to start it.
+        if (await this.getExtProcessPID()) {
+          this.logger.log('[ext-restart]: ext process is still running, skip');
+          break;
+        }
+      case ERestartPolicy.Always:
+        await this.progressService.withProgress(
+          {
+            location: ProgressLocation.Notification,
+            title: localize('extension.exthostRestarting.content'),
+            buttons: [
+              {
+                id: 'extension.reload',
+                label: localize('preference.general.language.change.refresh.now'),
+                primary: true,
+                run: async () => {
+                  this.clientApp.fireOnReload();
+                },
+                dispose: () => {},
+              },
+            ],
+          },
+          async () => {
+            if (this.extProcessRestartPromise) {
+              this.extProcessRestartPromise.cancel();
+            }
+            this.extProcessRestartPromise = createCancelablePromise(doRestart);
+            await this.extProcessRestartPromise;
+          },
+        );
+
+        break;
     }
 
-    const restartProgress = () => {
-      this.progressService.withProgress(
-        {
-          location: ProgressLocation.Notification,
-          title: localize('extension.exthostRestarting.content'),
-        },
-        async () => {
-          try {
-            await this.startExtProcess(false);
-          } catch (err) {
-            this.logger.error(`[ext-restart]: ext-host restart failure, error: ${err}`);
-          }
+    this.isExtProcessRestarting = false;
+  };
 
-          this.isExtProcessRestarting = false;
-          this.isExtProcessWaitingForRestart = false;
-        },
-      );
-    };
+  restartDebounced = debounce(async () => {
+    await this.restartProgress();
+  }, 500);
+
+  private async extProcessRestartHandler(restartPolicy: ERestartPolicy = ERestartPolicy.Always) {
+    if (this.isExtProcessRestarting && restartPolicy !== ERestartPolicy.Always) {
+      this.logger.log('[ext-restart]: ext process is restarting, skip');
+      return;
+    }
 
     this.isExtProcessRestarting = true;
 
@@ -335,10 +461,21 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
        * 目前观察到页面从不可见恢复至可见状态后，可能出现 socket 堆积的现象，因此延迟 1000ms 后再进行重启操作
        * 这里延时并不能保证一定能够正确重启，只是降低失败的可能性。在解决了 socket 堆积的情况后，可以直接去掉
        */
-      setTimeout(restartProgress, 1000);
+      this.restartDebounced();
     } else {
-      restartProgress();
+      this.restartProgress(restartPolicy);
     }
+  }
+
+  private async getExtProcessPID(): Promise<number | null> {
+    return await Promise.race([
+      this.extensionNodeClient.pid().catch(async (err) => {
+        this.logger.error(`[ext-restart]: get ext process pid error, ${err}`);
+        await sleep(200);
+        return null;
+      }),
+      sleep(1000).then(() => null),
+    ]);
   }
 
   private async startExtProcess(init: boolean) {
@@ -363,14 +500,13 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
     if (!init) {
       // 重启场景下需要将申明过 browserView 的 sumi 插件的 contributes 重新跑一遍
       await this.rerunSumiViewExtensionContributes();
-
       // 重启场景下把 ActivationEvent 再发一次
       if (this.activationEventService.activatedEventSet.size) {
         const activatedEventArr = Array.from(this.activationEventService.activatedEventSet);
 
         this.activationEventService.activatedEventSet.clear();
 
-        await Promise.all(
+        await Promise.allSettled(
           activatedEventArr.map((event) => {
             const { topic, data } = JSON.parse(event);
             this.logger.verbose('fireEvent', 'event.topic', topic, 'event.data', data);
@@ -382,34 +518,39 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
   }
 
   private async startNodeExtHost(init: boolean) {
+    if (this.appConfig.noExtHost) {
+      return;
+    }
+
     // 激活 node 插件进程
-    if (!this.appConfig.noExtHost) {
-      const protocol = await this.nodeExtensionService.activate();
-      this.extensionCommandManager.registerProxyCommandExecutor(
-        'node',
-        protocol.get(MainThreadAPIIdentifier.MainThreadCommands),
-      );
-      if (init) {
-        this.ready.set('node', this.nodeExtensionService.ready);
-      }
+    const protocol = await this.nodeExtensionService.activate();
+    this.extensionCommandManager.registerProxyCommandExecutor(
+      'node',
+      protocol.get(MainThreadAPIIdentifier.MainThreadCommands),
+    );
+
+    if (init) {
+      this.ready.set('node', this.nodeExtensionService.ready);
     }
   }
 
   private async startWorkerExtHost(init: boolean) {
     // 激活 worker 插件进程
-    if (this.appConfig.extWorkerHost) {
-      try {
-        const protocol = await this.workerExtensionService.activate(this.appConfig.ignoreWorkerHostCors);
-        this.extensionCommandManager.registerProxyCommandExecutor(
-          'worker',
-          protocol.get(MainThreadAPIIdentifier.MainThreadCommands),
-        );
-        if (init) {
-          this.ready.set('worker', this.workerExtensionService.ready);
-        }
-      } catch (err) {
-        this.logger.error(`Worker host activate fail, \n ${err.message}`);
+    if (!this.appConfig.extWorkerHost) {
+      return;
+    }
+
+    try {
+      const protocol = await this.workerExtensionService.activate(this.appConfig.ignoreWorkerHostCors);
+      this.extensionCommandManager.registerProxyCommandExecutor(
+        'worker',
+        protocol.get(MainThreadAPIIdentifier.MainThreadCommands),
+      );
+      if (init) {
+        this.ready.set('worker', this.workerExtensionService.ready);
       }
+    } catch (err) {
+      this.logger.error(`Worker host activate fail, \n ${err.message}`);
     }
   }
 
@@ -484,7 +625,7 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
         (async () => {
           try {
             const result = await this.fileSearchService.find('', {
-              rootUris: this.workspaceService.tryGetRoots().map((r) => r.uri),
+              rootUris: this.workspaceService.tryGetRoots().map((stat) => new URI(stat.uri).codeUri.fsPath),
               includePatterns,
               limit: 1,
             });
@@ -519,14 +660,14 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
       );
       this.extensionMetaDataArr = extensions;
     }
+
+    this.logger.log('extensions count:', this.extensionMetaDataArr.length);
     return this.extensionMetaDataArr;
   }
 
-  private normalExtensions: Extension[] = [];
-
   private async runEagerExtensionsContributes() {
-    this.contributesService.initialize();
-    this.sumiContributesService.initialize();
+    await Promise.all([this.contributesService.initialize(), this.sumiContributesService.initialize()]);
+
     this.commandRegistry.beforeExecuteCommand(async (command, args) => {
       await this.activationEventService.fireEvent('onCommand', command);
       return args;
@@ -605,6 +746,7 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
     ]);
 
     await this.viewExtensionService.activeExtension(extension, this.nodeExtensionService.protocol);
+    this.eventBus.fire(new ExtensionActivatedEvent({ topic: 'onExtensionActivated', data: { id: extension.id } }));
   }
 
   private resetExtensionInstances() {
@@ -629,10 +771,18 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
     const extensionPaths = Array.from(activatedViewExtensionMap.keys());
 
     await Promise.all(
-      extensionPaths.map((path) => this.extensionInstanceManageService.getExtensionInstanceByPath(path)?.initialize()),
+      extensionPaths.map((path) => {
+        const extension = this.extensionInstanceManageService.getExtensionInstanceByPath(path);
+        if (extension) {
+          extension.initialize();
+          this.contributesService.register(extension.id, extension.contributes);
+          this.sumiContributesService.register(extension.id, extension.packageJSON.sumiContributes || {});
+        }
+      }),
     );
-
     activatedViewExtensionMap.clear();
+
+    await Promise.all([this.contributesService.initialize(), this.sumiContributesService.initialize()]);
   }
 
   async disposeExtProcess() {
@@ -667,10 +817,19 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
 
   // RPC call from node
   public async $restartExtProcess() {
-    await this.restartExtProcess();
+    this.logger.log('[ext-restart]: receive the command from the node side to restart the process');
+    await this.restartExtProcess(ERestartPolicy.Always);
   }
 
   public async $processNotExist() {
+    // if browser receive the message, means the connection is keep alive
+    // so we still need to restart the ext process
+    this.logger.log('[ext-restart]: receive the command from the node side that the process does not exist');
+    this.$restartExtProcess();
+    return 'ok';
+  }
+
+  public async showReloadWindow() {
     const okText = localize('extension.invalidExthostReload.confirm.ok');
     const options = [okText];
     const ifRequiredReload = this.invalidReloadStrategy === 'ifRequired';
@@ -690,6 +849,10 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
   }
 
   public async $processCrashRestart() {
+    if (this.pCrashMessageModel) {
+      this.pCrashMessageModel.cancel?.();
+    }
+
     const okText = localize('common.yes');
     const options = [okText];
     const ifRequiredReload = this.invalidReloadStrategy === 'ifRequired';
@@ -697,13 +860,17 @@ export class ExtensionServiceImpl extends WithEventBus implements ExtensionServi
       options.unshift(localize('common.no'));
     }
 
-    const msg = await this.messageService.info(
+    this.pCrashMessageModel = this.messageService.info(
       localize('extension.crashedExthostReload.confirm'),
       options,
       !!ifRequiredReload,
     );
+
+    const msg = await this.pCrashMessageModel;
+    this.pCrashMessageModel = undefined;
+
     if (msg === okText) {
-      await this.restartExtProcess();
+      await this.restartExtProcess(ERestartPolicy.Always);
     }
   }
 }

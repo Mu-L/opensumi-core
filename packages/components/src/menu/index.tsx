@@ -1,10 +1,10 @@
-import classNames from 'classnames';
+import cls from 'classnames';
 import RcMenu, { Divider, ItemGroup } from 'rc-menu';
 import React from 'react';
 import { polyfill } from 'react-lifecycles-compat';
 
-import collapseMotion from '../utils/motion';
-import raf from '../utils/raf';
+import { collapseMotion } from '../utils/motion';
+import { wrapperRaf } from '../utils/raf';
 import { warning } from '../utils/warning';
 
 import MenuContext from './MenuContext';
@@ -57,6 +57,7 @@ export interface MenuProps {
   getPopupContainer?: (triggerNode: HTMLElement) => HTMLElement;
   overflowedIndicator?: React.ReactNode;
   forceSubMenuRender?: boolean;
+  children?: React.ReactNode;
 }
 
 type InternalMenuProps = MenuProps;
@@ -138,7 +139,7 @@ class InternalMenu extends React.Component<InternalMenuProps, MenuState> {
   }
 
   componentWillUnmount() {
-    raf.cancel(this.mountRafId);
+    wrapperRaf.cancel(this.mountRafId);
   }
 
   setOpenKeys(openKeys: string[]) {
@@ -263,7 +264,7 @@ class InternalMenu extends React.Component<InternalMenuProps, MenuState> {
     const menuOpenMotion = this.getOpenMotionProps(menuMode!);
 
     const prefixCls = customizePrefixCls || 'kt-inner-menu';
-    const menuClassName = classNames(className, {
+    const menuClassName = cls(className, {
       [`${prefixCls}-inline-collapsed`]: this.getInlineCollapsed(),
     });
 

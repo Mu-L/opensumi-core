@@ -1,6 +1,6 @@
 import { IDisposable } from '@opensumi/ide-utils';
 
-import { ITreeNode, ICompositeTreeNode, ITreeNodeOrCompositeTreeNode } from './tree-node';
+import { ICompositeTreeNode, ITreeNode, ITreeNodeOrCompositeTreeNode } from './tree-node';
 
 export enum TreeNodeEvent {
   WillChangeExpansionState = 1,
@@ -110,7 +110,7 @@ export interface ITreeWatcher {
   // 监听watcheEvent事件，如节点移动，新建，删除
   onWatchEvent(path: string, callback: IWatcherCallback): IWatchTerminator;
   // 监听所有事件
-  on(event: TreeNodeEvent, callback: any);
+  on(event: TreeNodeEvent, callback: any): IDisposable;
 
   // 事件分发
 

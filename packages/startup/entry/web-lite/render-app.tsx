@@ -1,17 +1,17 @@
 import * as BrowserFS from 'browserfs';
 import * as React from 'react';
-import * as ReactDOM from 'react-dom';
+import { createRoot } from 'react-dom/client';
 
 import { Injector } from '@opensumi/di';
-import { IClientAppOpts, DEFAULT_WORKSPACE_CONFIGURATION_DIR_NAME } from '@opensumi/ide-core-browser';
+import { DEFAULT_WORKSPACE_CONFIGURATION_DIR_NAME, IClientAppOpts } from '@opensumi/ide-core-browser';
 import { ClientApp } from '@opensumi/ide-core-browser/lib/bootstrap/app';
 import { ensureDir } from '@opensumi/ide-core-common/lib/browser-fs/ensure-dir';
 import { IDiskFileProvider } from '@opensumi/ide-file-service/lib/common';
 
 import {
   AbstractHttpFileService,
-  BrowserFsProvider,
   BROWSER_HOME_DIR,
+  BrowserFsProvider,
 } from './lite-module/file-provider/browser-fs-provider';
 import { HttpFileService } from './lite-module/file-provider/http-file.service';
 
@@ -43,24 +43,25 @@ export async function renderApp(opts: IClientAppOpts) {
         // '/home': { fs: "LocalStorage", options: {} },
       },
     },
-    async function (e) {
+    async function () {
       await ensureDir(opts.workspaceDir!);
       await ensureDir(BROWSER_HOME_DIR.codeUri.fsPath);
       await ensureDir(BROWSER_HOME_DIR.path.join(DEFAULT_WORKSPACE_CONFIGURATION_DIR_NAME).toString());
       const app = new ClientApp(opts);
-      app.fireOnReload = (forcedReload: boolean) => {
+      app.fireOnReload = () => {
         window.location.reload();
       };
 
       const targetDom = document.getElementById('main')!;
-      await app.start((app) => {
+      await app.start((child) => {
         const MyApp = (
           <div id='custom-wrapper' style={{ height: '100%', width: '100%' }}>
-            {app}
+            {child({})}
           </div>
         );
-        return new Promise((resolve) => {
-          ReactDOM.render(MyApp, targetDom, resolve);
+        return new Promise<void>((resolve) => {
+          createRoot(targetDom).render(MyApp);
+          resolve();
         });
       });
       const loadingDom = document.getElementById('loading');

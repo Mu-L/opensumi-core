@@ -1,23 +1,21 @@
-import { runInAction } from 'mobx';
-
-import { Injectable, Autowired } from '@opensumi/di';
-import { URI, IEventBus, isWindows, isUndefined } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IEventBus, URI, isUndefined, isWindows, runWhenIdle } from '@opensumi/ide-core-browser';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IEditorDocumentModelService, IResource, isDiffResource } from '@opensumi/ide-editor/lib/browser';
 import { EditorGroup } from '@opensumi/ide-editor/lib/browser/workbench-editor.service';
 import { FileSystemError } from '@opensumi/ide-file-service/lib/common';
-import { EndOfLineSequence, EOL } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import { EOL, EndOfLineSequence } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import { IIdentifiedSingleEditOperation } from '@opensumi/ide-monaco/lib/common';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 import {
-  IResourceTextEdit,
-  IWorkspaceEditService,
-  IWorkspaceEdit,
   IResourceFileEdit,
-  WorkspaceEditDidRenameFileEvent,
-  WorkspaceEditDidDeleteFileEvent,
+  IResourceTextEdit,
+  IWorkspaceEdit,
+  IWorkspaceEditService,
   IWorkspaceFileService,
+  WorkspaceEditDidDeleteFileEvent,
+  WorkspaceEditDidRenameFileEvent,
 } from '../common';
 
 type WorkspaceEdit = ResourceTextEditTask | ResourceFileEdit;
@@ -130,10 +128,10 @@ export class ResourceTextEditTask {
     const monacoModel = documentModel.getMonacoModel();
     if (this.versionId) {
       if (monacoModel.getVersionId() !== this.versionId) {
-        throw new Error('文档版本不一致，无法执行变更');
+        throw new Error('Unable to perform changes due to inconsistent document versions');
       }
     }
-    const edits: monaco.editor.IIdentifiedSingleEditOperation[] = [];
+    const edits: IIdentifiedSingleEditOperation[] = [];
     let newEOL: EndOfLineSequence | undefined;
     for (const edit of this.edits) {
       if (edit.textEdit.eol && !isUndefined(edit.textEdit.eol)) {
@@ -250,7 +248,7 @@ export class ResourceFileEdit implements IResourceFileEdit {
       editorService.editorGroups.map(async (g) => {
         const index = g.resources.findIndex((r) => r.uri.isEqual(oldResource));
         if (index !== -1) {
-          await runInAction(async () => {
+          runWhenIdle(async () => {
             await g.open(newResource, {
               index,
               backend: !(g.currentResource && g.currentResource.uri.isEqual(oldResource)),
@@ -297,7 +295,7 @@ export class ResourceFileEdit implements IResourceFileEdit {
     } else if (!this.newResource && this.oldResource) {
       // 删除文件
       try {
-        // electron windows下moveToTrash大量文件会导致IDE卡死，如果检测到这个情况就不使用moveToTrash
+        // Electron Windows 下 moveToTrash 大量文件会导致IDE卡死，如果检测到这个情况就不使用 moveToTrash
         await workspaceFS.delete([this.oldResource], {
           useTrash: !(isWindows && this.oldResource.path.name === 'node_modules'),
         });

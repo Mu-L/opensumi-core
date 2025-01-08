@@ -5,11 +5,11 @@ import * as fs from 'fs-extra';
 
 import { Injector } from '@opensumi/di';
 import { AppConfig, INodeLogger, IReporterService, getDebugLogger } from '@opensumi/ide-core-node';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { ActivationEventServiceImpl } from '@opensumi/ide-extension/lib/browser/activation.service';
 import { IActivationEventService } from '@opensumi/ide-extension/lib/browser/types';
 
-import { createNodeInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { IExtensionNodeService, IExtensionNodeClientService, IExtensionHostManager } from '../../src/common';
+import { IExtensionHostManager, IExtensionNodeClientService, IExtensionNodeService } from '../../src/common';
 import { ExtensionHostManager } from '../../src/node/extension.host.manager';
 import { ExtensionNodeServiceImpl } from '../../src/node/extension.service';
 import { ExtensionServiceClientImpl } from '../../src/node/extension.service.client';
@@ -122,8 +122,6 @@ describe('Extension Service', () => {
       await extensionService.disposeClientExtProcess(mockExtClientId, true);
     });
 
-    // jest.setTimeout(20 * 1000);
-
     it('should create extension host process', async () => {
       await extensionService.createProcess(mockExtClientId);
       const port = await extensionService.getProcessInspectPort(mockExtClientId);
@@ -159,7 +157,7 @@ describe('Extension Service', () => {
     });
 
     it('should create connect listenPath', async () => {
-      const listenPath = await extensionService.getElectronMainThreadListenPath2(mockExtClientId);
+      const listenPath = await extensionService.getElectronMainThreadListenPath(mockExtClientId);
       expect(path.dirname(listenPath)).toBe(path.join(os.tmpdir(), 'sumi-ipc'));
     });
     it('should create ext server listen option', async () => {

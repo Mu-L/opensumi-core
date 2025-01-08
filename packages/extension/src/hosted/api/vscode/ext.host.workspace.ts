@@ -1,17 +1,24 @@
-import paths from 'path';
-
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { CancellationToken, Emitter, Event, MessageType, path, Schemes } from '@opensumi/ide-core-common';
+import {
+  CancellationToken,
+  Emitter,
+  Event,
+  MessageType,
+  Schemes,
+  URI,
+  path,
+  toDisposable,
+} from '@opensumi/ide-core-common';
 import { FileStat } from '@opensumi/ide-file-service';
 
-import { WorkspaceRootsChangeEvent, IExtHostMessage } from '../../../common/vscode';
 import {
-  MainThreadAPIIdentifier,
-  IMainThreadWorkspace,
-  IExtHostWorkspace,
   ExtensionDocumentDataManager,
+  ExtensionNotebookDocumentManager,
+  IExtHostMessage,
+  IExtHostWorkspace,
+  IMainThreadWorkspace,
+  MainThreadAPIIdentifier,
+  WorkspaceRootsChangeEvent,
 } from '../../../common/vscode';
 import * as TypeConverts from '../../../common/vscode/converter';
 import { Uri, WorkspaceEdit } from '../../../common/vscode/ext-types';
@@ -24,12 +31,15 @@ import { ExtHostFileSystem } from './ext.host.file-system';
 import { ExtHostFileSystemEvent } from './ext.host.file-system-event';
 import { ExtHostPreference } from './ext.host.preference';
 
+import type vscode from 'vscode';
+
 const { Path, relative, normalize } = path;
 
 export function createWorkspaceApiFactory(
   extHostWorkspace: ExtHostWorkspace,
   extHostPreference: ExtHostPreference,
   extHostDocument: ExtensionDocumentDataManager,
+  extHostNotebook: ExtensionNotebookDocumentManager,
   extHostFileSystem: ExtHostFileSystem,
   extHostFileSystemEvent: ExtHostFileSystemEvent,
   extHostTasks: IExtHostTasks,
@@ -69,7 +79,7 @@ export function createWorkspaceApiFactory(
       console.warn(false, '[Deprecated warning]: Use the corresponding function on the `tasks` namespace instead');
       return extHostTasks.registerTaskProvider(type, provider, extension);
     },
-    applyEdit: (edit) => extHostWorkspace.applyEdit(edit),
+    applyEdit: (edit, metadata?: vscode.WorkspaceEditMetadata) => extHostWorkspace.applyEdit(edit, metadata),
     get textDocuments() {
       return extHostDocument.getAllDocument();
     },
@@ -117,6 +127,8 @@ export function createWorkspaceApiFactory(
       disposables?: vscode.Disposable[],
     ) => extHostFileSystemEvent.getOnWillRenameFileEvent(extension)(listener, thisArg, disposables),
     onDidRenameFile: extHostWorkspace.onDidRenameFile,
+    save: (uri) => extHostWorkspace.save(uri),
+    saveAs: (uri) => extHostWorkspace.saveAs(uri),
     saveAll: () => extHostWorkspace.saveAll(),
     findFiles: (include, exclude, maxResults?, token?) =>
       extHostWorkspace.findFiles(
@@ -127,10 +139,18 @@ export function createWorkspaceApiFactory(
         token,
       ),
     // Notebook API
-    onDidOpenNotebookDocument: Event.None,
-    onDidChangeNotebookDocument: Event.None,
-    onDidCloseNotebookDocument: Event.None,
-    notebookDocuments: [],
+    onDidOpenNotebookDocument: extHostNotebook.onDidOpenNotebookDocument.bind(extHostNotebook),
+    onDidChangeNotebookDocument: extHostNotebook.onDidChangeNotebookDocument.bind(extHostNotebook),
+    onDidCloseNotebookDocument: extHostNotebook.onDidCloseNotebookDocument.bind(extHostNotebook),
+    onDidSaveNotebookDocument: extHostNotebook.onDidSaveNotebookDocument.bind(extHostNotebook),
+    get notebookDocuments() {
+      return extHostNotebook.notebookDocuments;
+    },
+    // empty handler for compatibility with the experimental API , see https://github.com/opensumi/core/issues/2424
+    registerTimelineProvider: () => toDisposable(() => {}),
+    registerPortAttributesProvider: () => toDisposable(() => {}),
+    registerEditSessionIdentityProvider: () => toDisposable(() => {}),
+    onWillCreateEditSessionIdentity: () => toDisposable(() => {}),
   };
 
   return workspace;
@@ -345,10 +365,10 @@ export class ExtHostWorkspace implements IExtHostWorkspace {
 
     function dirname(resource: Uri): Uri {
       if (resource.scheme === Schemes.file) {
-        return Uri.file(paths.dirname(resource.fsPath));
+        return Uri.file(path.dirname(resource.fsPath));
       }
       return resource.with({
-        path: paths.dirname(resource.path),
+        path: path.dirname(resource.path),
       });
     }
 
@@ -396,9 +416,17 @@ export class ExtHostWorkspace implements IExtHostWorkspace {
     return this.folders.some((folder) => folder.uri.toString() === uri.toString());
   }
 
-  applyEdit(edit: WorkspaceEdit): Promise<boolean> {
+  applyEdit(edit: WorkspaceEdit, metadata?: vscode.WorkspaceEditMetadata): Promise<boolean> {
     const dto = TypeConverts.WorkspaceEdit.from(edit, this.extHostDoc);
-    return this.proxy.$tryApplyWorkspaceEdit(dto);
+    return this.proxy.$tryApplyWorkspaceEdit(dto, metadata);
+  }
+
+  save(uri: URI): Promise<URI | undefined> {
+    return this.proxy.$save(uri);
+  }
+
+  saveAs(uri: URI): Promise<URI | undefined> {
+    return this.proxy.$saveAs(uri);
   }
 
   saveAll(): Promise<boolean> {
@@ -458,6 +486,6 @@ export class ExtHostWorkspace implements IExtHostWorkspace {
         maxResults,
         token,
       )
-      .then((files) => files.map((file) => Uri.parse(file)));
+      .then((files) => files.map((file) => Uri.file(file)));
   }
 }

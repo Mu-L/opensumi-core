@@ -1,10 +1,9 @@
-import type vscode from 'vscode';
-
 import { IDisposable } from '@opensumi/ide-core-node';
 import { UriComponents } from '@opensumi/ide-editor/lib/common';
 
 import { IExtensionProps } from '../index';
 
+import type vscode from 'vscode';
 
 export interface TaskHandlerData {
   type: string;
@@ -88,6 +87,7 @@ export interface TaskPresentationOptionsDTO {
   panel?: number;
   showReuseMessage?: boolean;
   clear?: boolean;
+  close?: boolean;
   group?: string;
 }
 

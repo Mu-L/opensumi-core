@@ -1,6 +1,4 @@
 declare module 'vscode' {
-  //#region Comments
-
   /**
    * Collapsible state of a [comment thread](#CommentThread)
    */
@@ -89,11 +87,24 @@ declare module 'vscode' {
     label?: string;
 
     /**
+     * The optional state of a comment thread, which may affect how the comment is displayed.
+     */
+    state?: CommentThreadState;
+
+    /**
      * Dispose this comment thread.
      *
      * Once disposed, this comment thread will be removed from visible editors and Comment Panel when approriate.
      */
     dispose(): void;
+  }
+
+  /**
+   * The state of a comment thread.
+   */
+  export enum CommentThreadState {
+    Unresolved = 0,
+    Resolved = 1
   }
 
   /**

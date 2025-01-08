@@ -1,34 +1,20 @@
-import { CancellationToken, CancellationTokenSource, Deferred, Event, Uri } from '@opensumi/ide-core-common';
-// Uri: vscode 中的 uri
-// URI: 在 vscode 中的 uri 基础上包装了一些基础方法
+import {
+  CancellationToken,
+  CancellationTokenSource,
+  Deferred,
+  Event,
+  SerializedError,
+  // Uri: vscode 中的 uri
+  // URI: 在 vscode 中的 uri 基础上包装了一些基础方法
+  Uri,
+  transformErrorForSerialization,
+} from '@opensumi/ide-core-common';
+
+import { IRPCProtocol, ProxyIdentifier } from './rpc/multiplexer';
 
 export enum RPCProtocolEnv {
   MAIN,
   EXT,
-}
-
-export interface SerializedError {
-  readonly $isError: true;
-  readonly name: string;
-  readonly message: string;
-  readonly stack: string;
-}
-
-export function transformErrorForSerialization(error: Error): SerializedError;
-export function transformErrorForSerialization(error: any): any;
-export function transformErrorForSerialization(error: any): any {
-  if (error instanceof Error) {
-    const { name, message } = error;
-    const stack: string = (error as any).stacktrace || (error as any).stack;
-    return {
-      $isError: true,
-      name,
-      message,
-      stack,
-    };
-  }
-
-  return error;
 }
 
 export interface IProxyIdentifier {
@@ -36,16 +22,7 @@ export interface IProxyIdentifier {
   countId: number;
 }
 
-export class ProxyIdentifier<T = any> {
-  public static count = 0;
-
-  public readonly serviceId: string;
-  public readonly countId: number;
-  constructor(serviceId: string) {
-    this.serviceId = serviceId;
-    this.countId = ++ProxyIdentifier.count;
-  }
-}
+export { IRPCProtocol, ProxyIdentifier };
 
 export function createExtHostContextProxyIdentifier<T>(serviceId: string): ProxyIdentifier<T> {
   const identifier = new ProxyIdentifier<T>(serviceId);
@@ -55,9 +32,11 @@ export function createMainContextProxyIdentifier<T>(identifier: string): ProxyId
   const result = new ProxyIdentifier<T>(identifier);
   return result;
 }
+
 export interface IMessagePassingProtocol {
   send(msg): void;
   onMessage: Event<string>;
+  timeout?: number;
 }
 
 const enum MessageType {
@@ -109,6 +88,12 @@ export namespace ObjectTransfer {
         return {
           $type: 'Buffer',
           data: Array.from(new Uint8Array(value)),
+        };
+      } else if (value.type === 'Buffer') {
+        // https://nodejs.org/api/buffer.html#buftojson
+        return {
+          $type: 'Buffer',
+          data: value.data,
         };
       }
     }
@@ -184,24 +169,21 @@ export class MessageIO {
   }
 }
 
-export const IRPCProtocol = Symbol('IRPCProtocol');
-export interface IRPCProtocol {
-  getProxy<T>(proxyId: ProxyIdentifier<T>): T;
-  set<T>(identifier: ProxyIdentifier<T>, instance: T): T;
-  get<T>(identifier: ProxyIdentifier<T>): T;
-}
-
 function canceled(): Error {
   const error = new Error('Canceled');
   error.name = error.message;
   return error;
 }
 
+/**
+ * @deprecated Please use `SumiConnectionMultiplexer` instead.
+ */
 export class RPCProtocol implements IRPCProtocol {
   private readonly _protocol: IMessagePassingProtocol;
   private readonly _locals: Map<string, any>;
   private readonly _proxies: Map<string, any>;
   private readonly _cancellationTokenSources: Map<string, CancellationTokenSource>;
+  private readonly _timeoutHandles: Map<string, NodeJS.Timeout | number>;
   private _lastMessageId: number;
   private _pendingRPCReplies: Map<string, Deferred<any>>;
   private logger;
@@ -212,9 +194,13 @@ export class RPCProtocol implements IRPCProtocol {
     this._proxies = new Map();
     this._pendingRPCReplies = new Map();
     this._cancellationTokenSources = new Map();
+    this._timeoutHandles = new Map();
 
     this._lastMessageId = 0;
     this.logger = logger || console;
+    this.logger.error(
+      "You are using the deprecated class: 'RPCProtocol'. Please use the new one: 'SumiConnectionMultiplexer'",
+    );
     this._protocol.onMessage((msg) => this._receiveOneMessage(msg));
   }
 
@@ -270,11 +256,29 @@ export class RPCProtocol implements IRPCProtocol {
     const msg = MessageIO.serializeRequest(callId, rpcId, methodName, args);
 
     this._protocol.send(msg);
+    // 设置超时回调, -1 即不配置超时时间
+    if (this._protocol.timeout && this._protocol.timeout !== -1) {
+      const timeoutHandle = setTimeout(() => {
+        this._handleTimeout(callId);
+      }, this._protocol.timeout);
+      this._timeoutHandles.set(callId, timeoutHandle);
+    }
+
     return result.promise;
   }
 
   private _receiveOneMessage(rawmsg: string): void {
     const msg = JSON.parse(rawmsg, ObjectTransfer.reviver);
+
+    if (this._timeoutHandles.has(msg.id)) {
+      // 忽略一些 jest 测试场景 clearTimeout not defined 的问题
+      if (typeof clearTimeout === 'function') {
+        // @ts-ignore
+        clearTimeout(this._timeoutHandles.get(msg.id));
+      }
+      this._timeoutHandles.delete(msg.id);
+    }
+
     switch (msg.type) {
       case MessageType.Request:
         this._receiveRequest(msg);
@@ -373,5 +377,16 @@ export class RPCProtocol implements IRPCProtocol {
     this._pendingRPCReplies.delete(callId);
 
     pendingReply.resolve(msg.res);
+  }
+  private _handleTimeout(callId: string) {
+    if (!this._pendingRPCReplies.has(callId) || !this._timeoutHandles.has(callId)) {
+      return;
+    }
+
+    const pendingReply = this._pendingRPCReplies.get(callId) as Deferred<any>;
+    this._pendingRPCReplies.delete(callId);
+    this._timeoutHandles.delete(callId);
+
+    pendingReply.reject(new Error('RPC Timeout: ' + callId));
   }
 }

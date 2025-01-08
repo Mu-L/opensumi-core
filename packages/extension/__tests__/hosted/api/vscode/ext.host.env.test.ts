@@ -1,31 +1,18 @@
-import type vscode from 'vscode';
-
-import { RPCProtocol } from '@opensumi/ide-connection';
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
-import { Emitter, ILoggerManagerClient, Uri, uuid } from '@opensumi/ide-core-common';
+import { Uri, uuid } from '@opensumi/ide-core-common';
 import { MainThreadEnv } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.env';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '@opensumi/ide-extension/lib/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '@opensumi/ide-extension/lib/common/vscode';
 import { UIKind } from '@opensumi/ide-extension/lib/common/vscode/ext-types';
 import { createEnvApiFactory } from '@opensumi/ide-extension/lib/hosted/api/vscode/env/envApiFactory';
 import { ExtHostEnv } from '@opensumi/ide-extension/lib/hosted/api/vscode/env/ext.host.env';
 
 import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
 import { mockService } from '../../../../../../tools/dev-tool/src/mock-injector';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
+import type vscode from 'vscode';
 
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHost: ExtHostEnv;
 let mainThread: MainThreadEnv;
@@ -72,11 +59,11 @@ describe('vscode extHostEnv Test', () => {
 
   it('env is readonly', () => {
     // 加上 any 防止 ts 静态检测
-    expect(() => ((env as any).language = '234')).toThrowError();
-    expect(() => ((env as any).appRoot = '234')).toThrowError();
-    expect(() => ((env as any).appName = '234')).toThrowError();
-    expect(() => ((env as any).machineId = '234')).toThrowError();
-    expect(() => ((env as any).sessionId = '234')).toThrowError();
+    expect(() => ((env as any).language = '234')).toThrow();
+    expect(() => ((env as any).appRoot = '234')).toThrow();
+    expect(() => ((env as any).appName = '234')).toThrow();
+    expect(() => ((env as any).machineId = '234')).toThrow();
+    expect(() => ((env as any).sessionId = '234')).toThrow();
   });
 
   it('get uiKind', () => {
@@ -147,7 +134,7 @@ describe('vscode extHostEnv Test', () => {
         },
       });
 
-    it('用户首次访问时间大于一天', async () => {
+    it("The user's first visit is more than a day old", async () => {
       const envApi = createEnvApiFactory(
         rpcProtocolExt,
         extensionService,
@@ -158,7 +145,7 @@ describe('vscode extHostEnv Test', () => {
       expect(envApi.isNewAppInstall).toBe(false);
     });
 
-    it('用户首次访问时间小于一天', () => {
+    it("The user's first visit is less than a day old", () => {
       const envApi = createEnvApiFactory(
         rpcProtocolExt,
         extensionService,

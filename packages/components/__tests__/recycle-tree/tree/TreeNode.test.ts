@@ -1,6 +1,6 @@
 import { Tree } from '../../../src/recycle-tree/tree/Tree';
-import { TreeNode, CompositeTreeNode } from '../../../src/recycle-tree/tree/TreeNode';
-import { TreeNodeEvent, MetadataChangeType, WatchEvent } from '../../../src/recycle-tree/types';
+import { CompositeTreeNode, TreeNode } from '../../../src/recycle-tree/tree/TreeNode';
+import { MetadataChangeType, TreeNodeEvent, WatchEvent } from '../../../src/recycle-tree/types';
 
 describe('Tree', () => {
   class TreeA extends Tree {
@@ -232,5 +232,51 @@ describe('Tree', () => {
     const d = new File(tree, root, { name: 'd' });
     root.addNode(d);
     expect(root.branchSize).toBe(2);
+  });
+
+  test('should remove the node from TreeNode.idToTreeNode and TreeNode.pathToTreeNode after the node is disposed.', () => {
+    const tree = new TreeA();
+    const root = new Root(tree, undefined, undefined);
+    root.dispose();
+    expect(TreeNode.idToTreeNode.has(root.id)).not.toBeTruthy();
+    expect(TreeNode.pathToTreeNode.has(root.path)).not.toBeTruthy();
+  });
+
+  test('should remove the node from TreeNode.idToTreeNode and TreeNode.pathToTreeNode after the node is removed.', async () => {
+    const tree = new TreeA();
+    const root = new Root(tree, undefined, undefined);
+    const b = new File(tree, root, { name: 'b' });
+    tree.setPresetChildren([new Folder(tree, root, undefined, { name: 'a' }), b]);
+    await root.ensureLoaded();
+
+    root.unlinkItem(b);
+
+    expect(TreeNode.idToTreeNode.has(b.id)).not.toBeTruthy();
+    expect(TreeNode.pathToTreeNode.has(b.path)).not.toBeTruthy();
+  });
+
+  test('should refresh the node from TreeNode.idToTreeNode and TreeNode.pathToTreeNode after the node is refreshed.', async () => {
+    const preA = new Folder(tree, root, undefined, { name: 'a' });
+    const preB = new File(tree, root, { name: 'b' });
+    tree.setPresetChildren([preA, preB]);
+    await root.ensureLoaded();
+    const a = new Folder(tree, root, undefined, { name: 'a' });
+    const b = new File(tree, root, { name: 'b' });
+    tree.setPresetChildren([a, b]);
+    await root.refresh();
+
+    expect(TreeNode.idToTreeNode).toContainEqual([a.id, a]);
+    expect(TreeNode.idToTreeNode).toContainEqual([b.id, b]);
+    expect(TreeNode.pathToTreeNode).toContainEqual([a.path, a]);
+    expect(TreeNode.pathToTreeNode).toContainEqual([b.path, b]);
+
+    expect(TreeNode.idToTreeNode).not.toContainEqual([preA.id, preA]);
+    expect(TreeNode.idToTreeNode).not.toContainEqual([preB.id, preB]);
+    expect(TreeNode.pathToTreeNode).not.toContainEqual([preA.path, preA]);
+    expect(TreeNode.pathToTreeNode).not.toContainEqual([preB.path, preB]);
+
+    // same path node should have the same id
+    expect(preA.id).toEqual(a.id);
+    expect(preB.id).toEqual(b.id);
   });
 });

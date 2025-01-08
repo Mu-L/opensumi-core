@@ -2,29 +2,32 @@ import path from 'path';
 
 import isEqual from 'lodash/isEqual';
 
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { URI, IContextKeyService } from '@opensumi/ide-core-browser';
-import { CorePreferences, MonacoOverrideServiceRegistry } from '@opensumi/ide-core-browser';
+import { CorePreferences, IContextKeyService, MonacoOverrideServiceRegistry, URI } from '@opensumi/ide-core-browser';
 import { injectMockPreferences } from '@opensumi/ide-core-browser/__mocks__/preference';
 import { useMockStorage } from '@opensumi/ide-core-browser/__mocks__/storage';
 import {
-  Emitter,
-  IFileServiceClient,
-  IEventBus,
   CommonServerPath,
-  OS,
-  IApplicationService,
   Deferred,
+  Emitter,
+  IApplicationService,
+  IEventBus,
+  OS,
+  sleep,
 } from '@opensumi/ide-core-common';
-import { IResource, IEditorOpenType } from '@opensumi/ide-editor';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { IEditorOpenType, IResource } from '@opensumi/ide-editor';
 import {
+  TestEditorDocumentProvider,
+  TestResourceResolver,
+} from '@opensumi/ide-editor/__tests__/browser/test-providers';
+import {
+  EditorModule,
+  EditorPreferences,
+  EmptyDocCacheImpl,
   IEditorDecorationCollectionService,
   IEditorDocumentModelContentRegistry,
   IEditorDocumentModelService,
   IEditorFeatureRegistry,
-  EditorModule,
-  EmptyDocCacheImpl,
-  EditorPreferences,
 } from '@opensumi/ide-editor/lib/browser';
 import { EditorComponentRegistryImpl } from '@opensumi/ide-editor/lib/browser/component';
 import {
@@ -38,20 +41,21 @@ import { BaseFileSystemEditorDocumentProvider } from '@opensumi/ide-editor/lib/b
 import { FileSystemResourceProvider } from '@opensumi/ide-editor/lib/browser/fs-resource/fs-resource';
 import { LanguageService } from '@opensumi/ide-editor/lib/browser/language/language.service';
 import { ResourceServiceImpl } from '@opensumi/ide-editor/lib/browser/resource.service';
-import { EditorComponentRegistry } from '@opensumi/ide-editor/lib/browser/types';
 import {
+  EditorComponentRegistry,
   EditorGroupChangeEvent,
-  EditorVisibleChangeEvent,
   EditorGroupIndexChangedEvent,
+  EditorOpenType,
   EditorSelectionChangeEvent,
+  EditorVisibleChangeEvent,
 } from '@opensumi/ide-editor/lib/browser/types';
-import { WorkbenchEditorServiceImpl, EditorGroup } from '@opensumi/ide-editor/lib/browser/workbench-editor.service';
+import { EditorGroup, WorkbenchEditorServiceImpl } from '@opensumi/ide-editor/lib/browser/workbench-editor.service';
 import {
-  WorkbenchEditorService,
   EditorCollectionService,
-  ResourceService,
-  ILanguageService,
   IDocPersistentCacheProvider,
+  ILanguageService,
+  ResourceService,
+  WorkbenchEditorService,
 } from '@opensumi/ide-editor/lib/common';
 import { ExtensionServiceImpl } from '@opensumi/ide-extension/lib/browser/extension.service';
 import { MainThreadExtensionDocumentData } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.doc';
@@ -61,40 +65,28 @@ import * as TypeConverts from '@opensumi/ide-extension/lib/common/vscode/convert
 import { ExtensionDocumentDataManagerImpl } from '@opensumi/ide-extension/lib/hosted/api/vscode/doc';
 import { MockFileServiceClient } from '@opensumi/ide-file-service/__mocks__/file-service-client';
 import { FileServiceContribution } from '@opensumi/ide-file-service/lib/browser/file-service-contribution';
+import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import { MonacoService } from '@opensumi/ide-monaco';
+import * as monaco from '@opensumi/ide-monaco';
+import { MockContextKeyService } from '@opensumi/ide-monaco/__mocks__/monaco.context-key.service';
 import MonacoServiceImpl from '@opensumi/ide-monaco/lib/browser/monaco.service';
 import { MonacoOverrideServiceRegistryImpl } from '@opensumi/ide-monaco/lib/browser/override.service.registry';
 import { IDialogService } from '@opensumi/ide-overlay';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { MockWorkspaceService } from '@opensumi/ide-workspace/lib/common/mocks';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 import {
-  IConfigurationService,
-  IConfigurationChangeEvent,
   ConfigurationTarget,
+  IConfigurationChangeEvent,
+  IConfigurationService,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/configuration/common/configuration';
 
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { TestEditorDocumentProvider, TestResourceResolver } from '../../../editor/__tests__/browser/test-providers';
-import { MockContextKeyService } from '../../../monaco/__mocks__/monaco.context-key.service';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { MainThreadEditorService } from '../../src/browser/vscode/api/main.thread.editor';
 import * as types from '../../src/common/vscode/ext-types';
 import { ExtensionHostEditorService } from '../../src/hosted/api/vscode/editor/editor.host';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
 const preferences: Map<string, any> = new Map();
 const emitter = new Emitter<IConfigurationChangeEvent>();
 
@@ -104,13 +96,12 @@ const mockConfigurationService: any = {
   setValue: (k, v) => {
     emitter.fire({
       source: ConfigurationTarget.USER,
-      affectedKeys: [k],
+      affectedKeys: new Set(k),
       change: {
         keys: [k],
         overrides: [],
       },
       affectsConfiguration: (() => {}) as any,
-      sourceConfig: {},
     });
     preferences.set(k, v);
   },
@@ -121,7 +112,6 @@ describe('MainThreadEditor Test Suites', () => {
   let extEditor: ExtensionHostEditorService;
   let workbenchEditorService: WorkbenchEditorService;
   let eventBus: IEventBus;
-  let monacoservice: MonacoService;
 
   const disposables: types.OutputChannel[] = [];
   beforeAll(async () => {
@@ -229,7 +219,6 @@ describe('MainThreadEditor Test Suites', () => {
         'editor.previewMode': true,
       },
     });
-    monacoservice = injector.get(MonacoService);
     workbenchEditorService = injector.get(WorkbenchEditorService);
     const extHostDocs = rpcProtocolExt.set(
       ExtHostAPIIdentifier.ExtHostDocuments,
@@ -293,9 +282,9 @@ describe('MainThreadEditor Test Suites', () => {
     const ref = await editorDocModelService.createModelReference(
       URI.file(path.join(__dirname, 'main.thread.output.test.ts')),
     );
-    await group.codeEditor.open(ref);
+    group.codeEditor.open(ref);
     const openType: IEditorOpenType = {
-      type: 'code',
+      type: EditorOpenType.code,
       componentId: 'test-v-component',
       title: 'test-file',
     };
@@ -351,36 +340,75 @@ describe('MainThreadEditor Test Suites', () => {
         editorUri: resource.uri,
       }),
     );
-  });
 
-  it('should receive onDidChangeTextEditorVisibleRanges event when editor visible range has changed', (done) => {
-    const resource: IResource = {
-      name: 'test-file',
-      uri: URI.file(path.join(__dirname, 'main.thread.output.test2.ts')),
-      icon: 'file',
-    };
-    const disposer = extEditor.onDidChangeTextEditorVisibleRanges((e) => {
-      disposer.dispose();
-      const converted = e.visibleRanges.map((v) => TypeConverts.Range.from(v));
-      expect(converted.length).toBe(1);
-      expect(converted[0]).toEqual(range);
-      done();
-    });
-    const range = {
-      startLineNumber: 1,
-      startColumn: 12,
-      endLineNumber: 1,
-      endColumn: 12,
-    };
     eventBus.fire(
-      new EditorVisibleChangeEvent({
+      new EditorGroupChangeEvent({
         group: workbenchEditorService.currentEditorGroup,
-        resource: (workbenchEditorService.currentResource as IResource) || resource,
-        visibleRanges: [new monaco.Range(1, 12, 1, 12)],
-        editorUri: workbenchEditorService.currentResource!.uri!,
+        newOpenType: workbenchEditorService.currentEditorGroup.currentOpenType,
+        newResource: resource,
+        oldOpenType: null,
+        oldResource: null,
       }),
     );
   });
+
+  it(
+    'should receive onDidChangeTextEditorVisibleRanges event when editor visible range has changed',
+    async () => {
+      const editorDocModelService: IEditorDocumentModelService = injector.get(IEditorDocumentModelService);
+      await editorDocModelService.createModelReference(URI.file(path.join(__dirname, 'main.thread.output.test2.ts')));
+
+      const resource: IResource = {
+        name: 'test-file1',
+        uri: URI.file(path.join(__dirname, 'main.thread.output.test2.ts')),
+        icon: 'file',
+      };
+
+      const defered = new Deferred<void>();
+      const disposer = extEditor.onDidChangeTextEditorVisibleRanges((e) => {
+        // e.payload.uri 是 mock 的，这里用 textEditor.id 来判断
+        if (!(e.textEditor as any).id.includes(resource.uri.toString())) {
+          return;
+        }
+
+        disposer.dispose();
+        const converted = e.visibleRanges.map((v) => TypeConverts.Range.from(v));
+        expect(converted.length).toBe(1);
+        expect(converted[0]).toEqual({
+          startLineNumber: 1,
+          startColumn: 12,
+          endLineNumber: 1,
+          endColumn: 12,
+        });
+
+        defered.resolve();
+      });
+
+      eventBus.fire(
+        new EditorGroupChangeEvent({
+          group: workbenchEditorService.currentEditorGroup,
+          newOpenType: workbenchEditorService.currentEditorGroup.currentOpenType,
+          newResource: resource,
+          oldOpenType: null,
+          oldResource: null,
+        }),
+      );
+
+      await sleep(3 * 1000);
+
+      eventBus.fire(
+        new EditorVisibleChangeEvent({
+          group: workbenchEditorService.currentEditorGroup,
+          resource,
+          visibleRanges: [new monaco.Range(1, 12, 1, 12)],
+          editorUri: resource.uri,
+        }),
+      );
+
+      await defered.promise;
+    },
+    10 * 1000,
+  );
 
   it.skip('should receive onDidChangeTextEditorViewColumn event when editor view column has changed', (done) => {
     extEditor.onDidChangeTextEditorViewColumn((e) => {

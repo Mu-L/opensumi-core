@@ -1,4 +1,4 @@
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import * as monaco from '@opensumi/ide-monaco';
 
 export const STICKINESS = monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges;
 
@@ -25,6 +25,13 @@ export const TOP_STACK_FRAME_DECORATION: monaco.editor.IModelDecorationOptions =
   description: 'debug-top-stack-frame-line',
   isWholeLine: true,
   className: 'sumi-debug-top-stack-frame-line',
+  stickiness: STICKINESS,
+};
+
+export const FOCUS_BREAKPOINTS_STACK_FRAME_DECORATION: monaco.editor.IModelDecorationOptions = {
+  description: 'focus-breakpoints-stack-frame-line',
+  isWholeLine: true,
+  className: 'sumi-focus-breakpoints-stack-frame-line',
   stickiness: STICKINESS,
 };
 

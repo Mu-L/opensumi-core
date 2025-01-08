@@ -1,40 +1,27 @@
 import Ajv from 'ajv';
 
-import { Injectable, Autowired, Injector } from '@opensumi/di';
+import { Autowired, Injectable, Injector } from '@opensumi/di';
 import {
-  Mutable,
   ContributionProvider,
+  Disposable,
   Emitter,
   Event,
-  ILogger,
-  Disposable,
   IDisposable,
+  ILogger,
+  Mutable,
 } from '@opensumi/ide-core-common';
 import {
-  PreferenceSchema,
-  PreferenceSchemaProperties,
+  PreferenceDataProperty,
   PreferenceDataSchema,
   PreferenceItem,
-  PreferenceSchemaProperty,
-  PreferenceDataProperty,
-  JsonType,
+  PreferenceSchema,
 } from '@opensumi/ide-core-common/lib/preferences/preference-schema';
 
 import { AppConfig } from '../react-providers/config-provider';
 
 import { PreferenceConfigurations, injectPreferenceConfigurations } from './preference-configurations';
-import { PreferenceProvider, PreferenceProviderDataChange, IResolvedPreferences } from './preference-provider';
+import { IResolvedPreferences, PreferenceProvider, PreferenceProviderDataChange } from './preference-provider';
 import { PreferenceScope } from './preference-scope';
-
-export {
-  PreferenceSchema,
-  PreferenceSchemaProperties,
-  PreferenceDataSchema,
-  PreferenceItem,
-  PreferenceSchemaProperty,
-  PreferenceDataProperty,
-  JsonType,
-};
 
 export const PreferenceContribution = Symbol('PreferenceContribution');
 export interface PreferenceContribution {
@@ -68,6 +55,8 @@ export namespace OverridePreferenceName {
 const OVERRIDE_PROPERTY = '\\[(.*)\\]$';
 export const OVERRIDE_PROPERTY_PATTERN = new RegExp(OVERRIDE_PROPERTY);
 
+const getDefaultSchema = () => ({ type: 'object', properties: {}, patternProperties: {} });
+
 @Injectable()
 export class PreferenceSchemaProvider extends PreferenceProvider {
   @Autowired(PreferenceContribution)
@@ -84,7 +73,7 @@ export class PreferenceSchemaProvider extends PreferenceProvider {
   protected readonly appConfig: AppConfig;
 
   protected preferences: { [name: string]: any } = {};
-  protected combinedSchema: PreferenceDataSchema = { properties: {}, patternProperties: {} };
+  protected combinedSchema: PreferenceDataSchema = getDefaultSchema();
   protected readonly onDidPreferenceSchemaChangedEmitter = new Emitter<void>();
   public readonly onDidPreferenceSchemaChanged: Event<void> = this.onDidPreferenceSchemaChangedEmitter.event;
 
@@ -98,7 +87,7 @@ export class PreferenceSchemaProvider extends PreferenceProvider {
     if (!this._validateFunction) {
       this.doUpdateValidate();
     }
-    return this._validateFunction!;
+    return this._validateFunction as Ajv.ValidateFunction;
   }
 
   constructor() {
@@ -109,7 +98,7 @@ export class PreferenceSchemaProvider extends PreferenceProvider {
       Disposable.create(() => {
         this.preferences = {};
         this.validationFunctions.clear();
-        this.combinedSchema = { properties: {}, patternProperties: {} };
+        this.combinedSchema = getDefaultSchema();
       }),
     );
 
@@ -205,21 +194,8 @@ export class PreferenceSchemaProvider extends PreferenceProvider {
     if (property.default !== undefined) {
       return property.default;
     }
-    const type = Array.isArray(property.type) ? property.type[0] : property.type;
-    switch (type) {
-      case 'boolean':
-        return false;
-      case 'integer':
-      case 'number':
-        return 0;
-      case 'string':
-        return '';
-      case 'array':
-        return [];
-      case 'object':
-        return {};
-    }
-    return null;
+    // 当不存在默认值时，返回 `undefined`，便于使用后续传入的 `defaultValue` 作为默认值
+    return undefined;
   }
 
   protected updateValidate(): void {

@@ -1,39 +1,39 @@
 import * as fuzzy from 'fuzzy';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  Disposable,
-  IDisposable,
-  ScopedKeybinding,
-  KeybindingRegistry,
-  URI,
-  Emitter,
-  Keybinding,
-  KeybindingScope,
-  CommandService,
-  EDITOR_COMMANDS,
   CommandRegistry,
-  localize,
-  KeySequence,
-  KeybindingService,
-  ILogger,
-  Event,
-  KeybindingWeight,
-  ThrottledDelayer,
-  FileStat,
+  CommandService,
+  Deferred,
+  Disposable,
   DisposableCollection,
-  ProgressLocation,
+  EDITOR_COMMANDS,
+  Emitter,
+  Event,
+  FileStat,
+  IDisposable,
+  ILogger,
   IProgress,
   IProgressStep,
-  Deferred,
-  Throttler,
+  KeySequence,
+  Keybinding,
+  KeybindingRegistry,
+  KeybindingScope,
+  KeybindingService,
+  KeybindingWeight,
+  ProgressLocation,
   Schemes,
+  ScopedKeybinding,
+  ThrottledDelayer,
+  Throttler,
+  URI,
+  localize,
   runWhenIdle,
 } from '@opensumi/ide-core-browser';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
-import { KEYMAPS_FILE_NAME, IKeymapService, KEYMAPS_SCHEME, KeybindingItem, KeymapItem } from '../common';
+import { IKeymapService, KEYMAPS_FILE_NAME, KEYMAPS_SCHEME, KeybindingItem, KeymapItem } from '../common';
 
 import { KeymapsParser } from './keymaps-parser';
 
@@ -221,7 +221,6 @@ export class KeymapService implements IKeymapService {
       kb.command = kb.command.slice(1);
       this.unregisterDefaultKeybinding(kb, true);
     });
-    this.updateKeybindings();
   }
 
   private unregisterUserKeybinding(kb: Keybinding) {
@@ -288,7 +287,7 @@ export class KeymapService implements IKeymapService {
   /**
    * 更新keybindings列表
    */
-  private updateKeybindings() {
+  public updateKeybindings = () => {
     if (this.currentSearchValue) {
       this.doSearchKeybindings(this.currentSearchValue);
     } else {
@@ -297,7 +296,7 @@ export class KeymapService implements IKeymapService {
         this.keymapChangeEmitter.fire(this.keybindings);
       });
     }
-  }
+  };
 
   /**
    * 解析快捷键数据
@@ -581,7 +580,7 @@ export class KeymapService implements IKeymapService {
   searchKeybindings = (search: string) => {
     this.currentSearchValue = search;
     // throttle
-    if (!this.searchDelayer.isTriggered) {
+    if (!this.searchDelayer.isTriggered()) {
       this.searchDelayer.cancel();
     }
     this.searchDelayer.trigger(async () => {

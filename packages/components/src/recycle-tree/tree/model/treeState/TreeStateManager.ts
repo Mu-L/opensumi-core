@@ -1,6 +1,6 @@
-import { Event, Emitter, path } from '@opensumi/ide-utils';
+import { Emitter, Event, path } from '@opensumi/ide-utils';
 
-import { TreeNodeEvent, ITreeNodeOrCompositeTreeNode } from '../../../types';
+import { ITreeNodeOrCompositeTreeNode, TreeNodeEvent } from '../../../types';
 import { CompositeTreeNode, TreeNode } from '../../TreeNode';
 
 import { ISerializableState } from './types';
@@ -89,7 +89,7 @@ export class TreeStateManager {
       }
       for (const relPath of state.expandedDirectories.atSurface) {
         try {
-          const node = await this.root.loadTreeNodeByPath(relPath);
+          const node = await this.root.loadTreeNodeByPath(relPath, true);
           if (!node) {
             break;
           }
@@ -99,6 +99,7 @@ export class TreeStateManager {
         typeof state.scrollPosition === 'number' && state.scrollPosition > -1
           ? state.scrollPosition
           : this._scrollOffset;
+      this.root.watcher.notifyDidUpdateBranch();
       this.onDidLoadStateEmitter.fire();
     }
   }

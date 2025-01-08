@@ -1,16 +1,22 @@
 import fs from 'fs-extra';
 import temp from 'temp';
 
-import { FileUri, UTF8 } from '@opensumi/ide-core-common';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { DisposableCollection, FileUri, UTF8 } from '@opensumi/ide-core-common';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { FileService } from '@opensumi/ide-file-service/lib/node';
 import { DiskFileSystemProvider } from '@opensumi/ide-file-service/lib/node/disk-file-system.provider';
+import { WatcherProcessManagerToken } from '@opensumi/ide-file-service/lib/node/watcher-process-manager';
 
-import { IFileServiceClient, FileServicePath, IDiskFileProvider } from '../../src';
+import { FileServicePath, IDiskFileProvider, IFileServiceClient } from '../../src';
 import { FileServiceClientModule } from '../../src/browser';
+import { FileSystemWatcherServer } from '../../src/node/hosted/recursive/file-service-watcher';
 
 describe('FileServiceClient should be work', () => {
+  jest.setTimeout(10000);
+
   const injector = createBrowserInjector([FileServiceClientModule]);
+  const toDispose = new DisposableCollection();
   let fileServiceClient: IFileServiceClient;
   const track = temp.track();
   const tempDir = FileUri.create(fs.realpathSync(temp.mkdirSync('file-service-client-test')));
@@ -24,15 +30,33 @@ describe('FileServiceClient should be work', () => {
       token: IDiskFileProvider,
       useClass: DiskFileSystemProvider,
     },
+    {
+      token: WSChannelHandler,
+      useValue: {
+        clientId: 'test_client_id',
+      },
+    },
+    {
+      token: WatcherProcessManagerToken,
+      useValue: {
+        setClient: () => void 0,
+        watch: (() => 1) as any,
+        unWatch: () => void 0,
+        createProcess: () => void 0,
+        setWatcherFileExcludes: () => void 0,
+      },
+    },
   );
 
   beforeAll(() => {
-    jest.setTimeout(10000);
+    // @ts-ignore
+    injector.mock(FileSystemWatcherServer, 'isEnableNSFW', () => false);
     fileServiceClient = injector.get(IFileServiceClient);
-    fileServiceClient.registerProvider('file', injector.get(IDiskFileProvider));
+    toDispose.push(fileServiceClient.registerProvider('file', injector.get(IDiskFileProvider)));
   });
 
   afterAll(async () => {
+    toDispose.dispose();
     await injector.disposeAll();
     track.cleanupSync();
   });
@@ -125,7 +149,6 @@ describe('FileServiceClient should be work', () => {
   });
 
   it('watch file change', async () => {
-    expect.assertions(1);
     const newTempDir = FileUri.create(fs.realpathSync(track.mkdirSync('watch-file-change')));
 
     const watcher = await fileServiceClient.watchFileChanges(newTempDir);
@@ -152,8 +175,6 @@ describe('FileServiceClient should be work', () => {
   });
 
   it('set watchExcludes', async () => {
-    expect.assertions(2);
-
     const targetDir = tempDir.resolve('watch-exclude-temp-dir');
     await fs.ensureDir(targetDir.codeUri.fsPath);
 

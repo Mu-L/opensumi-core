@@ -1,18 +1,18 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { replaceLocalizePlaceholder } from '@opensumi/ide-core-browser';
 import {
-  LifeCyclePhase,
   IJSONSchema,
-  IJSONSchemaSnippet,
-  objects,
-  localize,
   IJSONSchemaMap,
+  IJSONSchemaSnippet,
+  LifeCyclePhase,
+  localize,
+  objects,
 } from '@opensumi/ide-core-common';
 import { IDebugService, IDebuggerContribution } from '@opensumi/ide-debug';
 import { DebugConfigurationManager } from '@opensumi/ide-debug/lib/browser/debug-configuration-manager';
-import { DebugSchemaUpdater } from '@opensumi/ide-debug/lib/browser/debug-schema-updater';
+import { DebugSchemaManager } from '@opensumi/ide-debug/lib/browser/debug-schema-manager';
 
-import { VSCodeContributePoint, Contributes, LifeCycle } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 import { Extension } from '../../extension';
 import { AbstractExtInstanceManagementService } from '../../types';
 
@@ -190,8 +190,8 @@ export class DebuggersContributionPoint extends VSCodeContributePoint<DebuggersC
   @Autowired(DebugConfigurationManager)
   private debugConfigurationManager: DebugConfigurationManager;
 
-  @Autowired(DebugSchemaUpdater)
-  protected readonly debugSchemaUpdater: DebugSchemaUpdater;
+  @Autowired(DebugSchemaManager)
+  protected readonly debugSchemaManager: DebugSchemaManager;
 
   @Autowired(AbstractExtInstanceManagementService)
   protected readonly extensionManageService: AbstractExtInstanceManagementService;
@@ -208,7 +208,7 @@ export class DebuggersContributionPoint extends VSCodeContributePoint<DebuggersC
         this.resolveDebuggers(contributes, extension) as IJSONSchema[],
       );
     }
-    this.debugSchemaUpdater.update();
+    this.debugSchemaManager.update();
   }
 
   private resolveDebuggers(
@@ -242,6 +242,9 @@ export class DebuggersContributionPoint extends VSCodeContributePoint<DebuggersC
           }
           if (config.description) {
             config.description = replaceLocalizePlaceholder(config.description, extension.id);
+          }
+          if (config.markdownDescription) {
+            config.markdownDescription = replaceLocalizePlaceholder(config.markdownDescription, extension.id);
           }
           return config;
         },
@@ -279,7 +282,12 @@ export class DebuggersContributionPoint extends VSCodeContributePoint<DebuggersC
         if (prop[name].properties) {
           recursionPropertiesDescription(prop[name].properties!);
         }
+        // 避免某些不规范的 json 配置打挂整个 debug 功能，做个防御
+        if (typeof prop[name] !== 'object') {
+          return;
+        }
         prop[name].description = replaceLocalizePlaceholder(prop[name].description, extension.id);
+        prop[name].markdownDescription = replaceLocalizePlaceholder(prop[name].markdownDescription, extension.id);
       });
     };
 

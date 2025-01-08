@@ -1,10 +1,12 @@
-import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { Deferred } from '@opensumi/ide-core-common';
+import { BaseConnection } from '@opensumi/ide-connection/lib/common/connection';
+import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpc/multiplexer';
+import { Deferred, ExtHostSpawnOptions } from '@opensumi/ide-core-common';
 
 import { ActivatedExtensionJSON } from './activator';
-import type { SumiWorkerExtensionService, VSCodeExtensionService } from './vscode';
 
 import { IExtension } from './index';
+
+import type { SumiWorkerExtensionService, VSCodeExtensionService } from './vscode';
 
 type ExtensionChangeKind = 'install' | 'uninstall' | 'upgrade' | 'enable' | 'disable';
 
@@ -16,6 +18,7 @@ export interface IExtensionChangeEvent {
 abstract class BaseExtProcessService {
   public ready: Deferred<void>;
   abstract protocol: IRPCProtocol;
+  abstract connection: BaseConnection<Uint8Array>;
   abstract disposeApiFactory(): void;
   abstract disposeProcess(): void | Promise<void>;
   abstract activate(): Promise<IRPCProtocol>;
@@ -26,6 +29,8 @@ export abstract class AbstractNodeExtProcessService<T = any>
   extends BaseExtProcessService
   implements VSCodeExtensionService
 {
+  abstract getSpawnOptions(): ExtHostSpawnOptions;
+
   /**
    * 更新插件进程中的插件列表数据
    */

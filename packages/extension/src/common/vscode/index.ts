@@ -1,11 +1,8 @@
-import type vscode from 'vscode';
-
-import { createMainContextProxyIdentifier, createExtHostContextProxyIdentifier } from '@opensumi/ide-connection';
+import { createExtHostContextProxyIdentifier, createMainContextProxyIdentifier } from '@opensumi/ide-connection';
 import { Emitter, IExtensionProps } from '@opensumi/ide-core-common';
 
 import { IExtension, IExtensionHostService } from '..';
 // eslint-disable-next-line import/no-restricted-paths
-import type { MainThreadWindowState } from '../../browser/vscode/api/main.thread.window-state';
 import { ExtHostFileSystem } from '../../hosted/api/vscode/ext.host.file-system';
 import { ExtHostFileSystemEvent } from '../../hosted/api/vscode/ext.host.file-system-event';
 import { ExtHostFileSystemInfo } from '../../hosted/api/vscode/ext.host.file-system-info';
@@ -14,48 +11,54 @@ import { ExtHostStorage } from '../../hosted/api/vscode/ext.host.storage';
 import { ISumiExtHostWebviews } from '../sumi/webview';
 
 import { IExtHostAuthentication, IMainThreadAuthentication } from './authentication';
-import { IMainThreadCommands, IExtHostCommands } from './command';
+import { IExtHostCommands, IMainThreadCommands } from './command';
 import { IExtHostComments, IMainThreadComments } from './comments';
-import { IExtHostConnection, IMainThreadConnection } from './connection';
+import { IInterProcessConnection } from './connection';
 import { IExtHostDebug, IMainThreadDebug } from './debug';
 import { IExtHostDecorationsShape, IMainThreadDecorationsShape } from './decoration';
-import { IMainThreadDocumentsShape, ExtensionDocumentDataManager } from './doc';
+import { ExtensionDocumentDataManager, IMainThreadDocumentsShape } from './doc';
 import {
-  IMainThreadEditorsService,
+  IExtHostCustomEditor,
   IExtensionHostEditorService,
   IMainThreadCustomEditor,
-  IExtHostCustomEditor,
+  IMainThreadEditorsService,
 } from './editor';
 import { IExtHostEditorTabs, IMainThreadEditorTabsShape } from './editor-tabs';
-import { IMainThreadEnv, IExtHostEnv } from './env';
+import { IExtHostEnv, IMainThreadEnv } from './env';
 import { IMainThreadFileSystemShape } from './file-system';
 import { IMainThreadLanguages } from './languages';
-import { IMainThreadPreference, IExtHostPreference } from './preference';
+import { IExtHostLocalization, IMainThreadLocalization } from './localization';
+import { ExtensionNotebookDocumentManager, IMainThreadNotebookDocumentsShape } from './notebook';
+import { IExtHostPreference, IMainThreadPreference } from './preference';
 import { IExtHostProgress, IMainThreadProgress } from './progress';
-import { IMainThreadSCMShape, IExtHostSCMShape } from './scm';
+import { IExtHostSCMShape, IMainThreadSCMShape } from './scm';
 import { IExtHostSecret, IMainThreadSecret } from './secret';
-import { IMainThreadStorage, IExtHostStorage } from './storage';
+import { IExtHostStorage, IMainThreadStorage } from './storage';
 import { IExtHostTasks, IMainThreadTasks } from './tasks';
 import { IExtHostTerminal, IMainThreadTerminal } from './terminal';
-import { IExtHostTests, IMainThreadTesting } from './tests';
+import { IExtHostTests } from './tests';
 import { IExtHostTheming, IMainThreadTheming } from './theming';
 import { IExtHostTreeView, IMainThreadTreeView } from './treeview';
-import { IMainThreadUrls, IExtHostUrls } from './urls';
-import { IMainThreadWebview, IExtHostWebview, IMainThreadWebviewView, IExtHostWebviewView } from './webview';
+import { IExtHostUrls, IMainThreadUrls } from './urls';
+import { IExtHostWebview, IExtHostWebviewView, IMainThreadWebview, IMainThreadWebviewView } from './webview';
 import {
-  IMainThreadMessage,
   IExtHostMessage,
+  IExtHostOutput,
   IExtHostQuickOpen,
+  IExtHostStatusBar,
+  IExtHostWindow,
+  IExtHostWindowState,
+  IMainThreadMessage,
+  IMainThreadOutput,
   IMainThreadQuickOpen,
   IMainThreadStatusBar,
-  IExtHostStatusBar,
-  IMainThreadOutput,
-  IExtHostOutput,
-  IExtHostWindowState,
-  IExtHostWindow,
   IMainThreadWindow,
 } from './window';
-import { IMainThreadWorkspace, IExtHostWorkspace } from './workspace';
+import { IExtHostWorkspace, IMainThreadWorkspace } from './workspace';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { MainThreadWindowState } from '../../browser/vscode/api/main.thread.window-state';
+import type vscode from 'vscode';
 
 export const VSCodeExtensionService = Symbol('VSCodeExtensionService');
 export interface VSCodeExtensionService {
@@ -75,6 +78,7 @@ export const MainThreadAPIIdentifier = {
   MainThreadLanguages: createMainContextProxyIdentifier<IMainThreadLanguages>('MainThreadLanguages'),
   MainThreadExtensionService: createMainContextProxyIdentifier<VSCodeExtensionService>('MainThreadExtensionService'),
   MainThreadDocuments: createMainContextProxyIdentifier<IMainThreadDocumentsShape>('MainThreadDocuments'),
+  MainThreadNotebook: createMainContextProxyIdentifier<IMainThreadNotebookDocumentsShape>('MainThreadNotebook'),
   MainThreadEditors: createMainContextProxyIdentifier<IMainThreadEditorsService>('MainThreadEditors'),
   MainThreadMessages: createMainContextProxyIdentifier<IMainThreadMessage>('MainThreadMessage'),
   MainThreadWorkspace: createMainContextProxyIdentifier<IMainThreadWorkspace>('MainThreadWorkspace'),
@@ -90,7 +94,7 @@ export const MainThreadAPIIdentifier = {
   MainThreadWindowState: createMainContextProxyIdentifier<MainThreadWindowState>('MainThreadWindowState'),
   MainThreadDecorations: createMainContextProxyIdentifier<IMainThreadDecorationsShape>('MainThreadDecorations'),
   MainThreadDebug: createMainContextProxyIdentifier<IMainThreadDebug>('MainThreadDebug'),
-  MainThreadConnection: createMainContextProxyIdentifier<IMainThreadConnection>('MainThreadConnection'),
+  MainThreadConnection: createMainContextProxyIdentifier<IInterProcessConnection>('MainThreadConnection'),
   MainThreadTerminal: createMainContextProxyIdentifier<IMainThreadTerminal>('MainThreadTerminal'),
   MainThreadWindow: createMainContextProxyIdentifier<IMainThreadWindow>('MainThreadWindow'),
   MainThreadProgress: createMainContextProxyIdentifier<IMainThreadProgress>('MainThreadProgress'),
@@ -104,6 +108,7 @@ export const MainThreadAPIIdentifier = {
   MainThreadReporter: createMainContextProxyIdentifier<IMainThreadSecret>('MainThreadReporter'),
   MainThreadTests: createMainContextProxyIdentifier<IMainThreadSecret>('MainThreadTests'),
   MainThreadEditorTabs: createMainContextProxyIdentifier<IMainThreadEditorTabsShape>('MainThreadEditorTabs'),
+  MainThreadLocalization: createMainContextProxyIdentifier<IMainThreadLocalization>('MainThreadLocalization'),
 };
 
 export const ExtHostAPIIdentifier = {
@@ -113,6 +118,7 @@ export const ExtHostAPIIdentifier = {
   ExtHostCommands: createExtHostContextProxyIdentifier<IExtHostCommands>('ExtHostCommandsRegistry'),
   ExtHostExtensionService: createExtHostContextProxyIdentifier<IExtensionHostService>('ExtHostExtensionService'),
   ExtHostDocuments: createExtHostContextProxyIdentifier<ExtensionDocumentDataManager>('ExtHostDocuments'),
+  ExtHostNotebook: createExtHostContextProxyIdentifier<ExtensionNotebookDocumentManager>('ExtHostNotebook'),
   ExtHostEditors: createExtHostContextProxyIdentifier<IExtensionHostEditorService>('ExtHostEditors'),
   ExtHostMessage: createExtHostContextProxyIdentifier<IExtHostMessage>('ExtHostMessage'),
   ExtHostWorkspace: createExtHostContextProxyIdentifier<IExtHostWorkspace>('ExtHostWorkspace'),
@@ -131,7 +137,7 @@ export const ExtHostAPIIdentifier = {
   ExtHostWindowState: createExtHostContextProxyIdentifier<IExtHostWindowState>('ExtHostWindowState'),
   ExtHostDecorations: createExtHostContextProxyIdentifier<IExtHostDecorationsShape>('ExtHostDecorations'),
   ExtHostDebug: createExtHostContextProxyIdentifier<IExtHostDebug>('ExtHostDebug'),
-  ExtHostConnection: createExtHostContextProxyIdentifier<IExtHostConnection>('ExtHostConnection'),
+  ExtHostConnection: createExtHostContextProxyIdentifier<IInterProcessConnection>('ExtHostConnection'),
   ExtHostTerminal: createExtHostContextProxyIdentifier<IExtHostTerminal>('ExtHostTerminal'),
   ExtHostWindow: createExtHostContextProxyIdentifier<IExtHostWindow>('ExtHostWindow'),
   ExtHostProgress: createExtHostContextProxyIdentifier<IExtHostProgress>('ExtHostProgress'),
@@ -145,6 +151,7 @@ export const ExtHostAPIIdentifier = {
   ExtHostSecret: createExtHostContextProxyIdentifier<IExtHostSecret>('ExtHostSecret'),
   ExtHostTests: createExtHostContextProxyIdentifier<IExtHostTests>('ExtHostTests'),
   ExtHostEditorTabs: createExtHostContextProxyIdentifier<IExtHostEditorTabs>('ExtHostEditorTabs'),
+  ExtHostLocalization: createExtHostContextProxyIdentifier<IExtHostLocalization>('ExtHostLocalization'),
 };
 
 export abstract class VSCodeExtensionNodeService {
@@ -165,33 +172,33 @@ export interface IExtensionProcessService {
   storage: ExtHostStorage;
 }
 
-export * from './doc';
+export * from './authentication';
 export * from './command';
+export * from './comments';
+export * from './connection';
+export * from './debug';
+export * from './decoration';
+export * from './doc';
+export * from './editor';
+export * from './editor-tabs';
+export * from './env';
+export * from './extension';
+export * from './languages';
+export * from './localization';
+export * from './notebook';
+export * from './preference';
+export * from './progress';
+export * from './scm';
+export * from './secret';
+export * from './storage';
+export * from './strings';
+export * from './tasks';
+export * from './terminal';
+export * from './tests';
+export * from './theming';
+export * from './treeview';
+export * from './urls';
+export * from './walkthrough';
+export * from './webview';
 export * from './window';
 export * from './workspace';
-export * from './editor';
-export * from './preference';
-export * from './strings';
-export * from './storage';
-export * from './env';
-export * from './languages';
-export * from './webview';
-export * from './treeview';
-export * from './debug';
-export * from './extension';
-export * from './connection';
-export * from './extension-message-reader';
-export * from './extension-message-writer';
-export * from './terminal';
-export * from './progress';
-export * from './tasks';
-export * from './comments';
-export * from './urls';
-export * from './theming';
-export * from './authentication';
-export * from './secret';
-export * from './tests';
-export * from './editor-tabs';
-export * from './scm';
-export * from './decoration';
-export * from './walkthrough';

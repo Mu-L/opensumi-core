@@ -1,21 +1,23 @@
-import { ISelection, IRange, ILineChange } from '@opensumi/ide-core-common';
+import { ILineChange, IRange, ISelection, MaybePromise } from '@opensumi/ide-core-common';
 import {
-  IUndoStopOptions,
-  ISingleEditOperation,
-  IDecorationRenderOptions,
   IDecorationApplyOptions,
+  IDecorationRenderOptions,
   IResourceOpenOptions,
+  ISingleEditOperation,
+  IUndoStopOptions,
 } from '@opensumi/ide-editor';
-// eslint-disable-next-line import/no-restricted-paths
-import type { EndOfLineSequence } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import type { RenderLineNumbersType as MonacoRenderLineNumbersType } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
 
+// eslint-disable-next-line import/no-restricted-paths
 import { ViewColumn } from './enums';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { EndOfLineSequence, RenderLineNumbersType } from './models';
+
 export * from './custom-editor';
 export * from './enums';
 export interface IExtensionHostEditorService {
-  $acceptChange(change: IEditorChangeDTO);
-  $acceptPropertiesChange(change: IEditorStatusChangeDTO);
+  $acceptChange(change: IEditorChangeDTO): MaybePromise<void>;
+  $acceptPropertiesChanges(changes: IEditorStatusChangeDTO[]): MaybePromise<void>;
 }
 
 export interface IMainThreadEditorsService {
@@ -82,7 +84,7 @@ export interface IResolvedTextEditorConfiguration {
   indentSize: number;
   insertSpaces: boolean;
   cursorStyle: TextEditorCursorStyle;
-  lineNumbers: MonacoRenderLineNumbersType;
+  lineNumbers: RenderLineNumbersType;
 }
 
 export interface ITextEditorUpdateConfiguration {
@@ -90,12 +92,8 @@ export interface ITextEditorUpdateConfiguration {
   indentSize?: number | 'tabSize';
   insertSpaces?: boolean | 'auto';
   cursorStyle?: TextEditorCursorStyle;
-  lineNumbers?: MonacoRenderLineNumbersType;
+  lineNumbers?: RenderLineNumbersType;
 }
-
-// 继承自 MonacoRenderLineNumbersType#enum
-// export const RenderLineNumbersType = MonacoRenderLineNumbersType;
-export type RenderLineNumbersType = MonacoRenderLineNumbersType;
 
 /**
  * The style in which the editor's cursor should be rendered.

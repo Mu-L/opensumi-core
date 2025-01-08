@@ -1,25 +1,22 @@
-import { Emitter as Dispatcher } from 'event-kit';
-
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { WSChannelHandler as IWSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
-import { AppConfig, electronEnv, PreferenceService, OperatingSystem } from '@opensumi/ide-core-browser';
-import { Emitter, ILogger, Event } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { OperatingSystem, PreferenceService } from '@opensumi/ide-core-browser';
+import { Dispatcher, Disposable, Emitter, Event, IApplicationService, ILogger } from '@opensumi/ide-core-common';
 
 import {
-  generateSessionId,
-  ITerminalService,
+  IDetectProfileOptionsPreference,
+  INodePtyInstance,
+  IPtyExitEvent,
+  IPtyProcessChangeEvent,
+  IShellLaunchConfig,
+  ITerminalConnection,
   ITerminalError,
+  ITerminalProfile,
+  ITerminalService,
   ITerminalServiceClient,
   ITerminalServicePath,
-  ITerminalConnection,
-  IPtyExitEvent,
-  INodePtyInstance,
-  isTerminalError,
-  ITerminalProfile,
-  IShellLaunchConfig,
-  IDetectProfileOptionsPreference,
-  IPtyProcessChangeEvent,
   TERMINAL_ID_SEPARATOR,
+  generateSessionId,
+  isTerminalError,
 } from '../common';
 import { CodeTerminalSettingPrefix } from '../common/preference';
 
@@ -29,7 +26,7 @@ export interface EventMessage {
   data: string;
 }
 @Injectable()
-export class NodePtyTerminalService implements ITerminalService {
+export class NodePtyTerminalService extends Disposable implements ITerminalService {
   static countId = 1;
 
   private backendOs: OperatingSystem | undefined;
@@ -46,38 +43,28 @@ export class NodePtyTerminalService implements ITerminalService {
   @Autowired(PreferenceService)
   private preferenceService: PreferenceService;
 
-  @Autowired(AppConfig)
-  private readonly appConfig: AppConfig;
+  @Autowired(IApplicationService)
+  protected readonly applicationService: IApplicationService;
 
-  private _onError = new Emitter<ITerminalError>();
+  private _onError = this.registerDispose(new Emitter<ITerminalError>());
   public onError: Event<ITerminalError> = this._onError.event;
 
-  private _onExit = new Emitter<IPtyExitEvent>();
+  private _onExit = this.registerDispose(new Emitter<IPtyExitEvent>());
   public onExit: Event<IPtyExitEvent> = this._onExit.event;
 
-  private _onProcessChange = new Emitter<IPtyProcessChangeEvent>();
+  private _onProcessChange = this.registerDispose(new Emitter<IPtyProcessChangeEvent>());
   public onProcessChange = this._onProcessChange.event;
 
-  private _onDataDispatcher = new Dispatcher<void, { [key: string]: string }>();
-  private _onExitDispatcher = new Dispatcher<
-    void,
-    {
-      [key: string]: {
-        code?: number;
-        signal?: number;
-      };
-    }
-  >();
+  private _onDataDispatcher = this.registerDispose(new Dispatcher<string>());
+  private _onExitDispatcher = this.registerDispose(
+    new Dispatcher<{
+      code?: number;
+      signal?: number;
+    }>(),
+  );
 
   generateSessionId() {
-    // Electron 环境下，未指定 isRemote 时默认使用本地连接
-    // 否则使用 WebSocket 连接
-    if (this.appConfig.isElectronRenderer && !this.appConfig.isRemote) {
-      return electronEnv.metadata.windowClientId + TERMINAL_ID_SEPARATOR + generateSessionId();
-    } else {
-      const WSChannelHandler = this.injector.get(IWSChannelHandler);
-      return WSChannelHandler.clientId + TERMINAL_ID_SEPARATOR + generateSessionId();
-    }
+    return this.applicationService.clientId + TERMINAL_ID_SEPARATOR + generateSessionId();
   }
 
   async check(ids: string[]) {
@@ -88,9 +75,9 @@ export class NodePtyTerminalService implements ITerminalService {
   private _createCustomWebSocket = (sessionId: string, pty: INodePtyInstance): ITerminalConnection => ({
     name: pty.name,
     readonly: false,
-    onData: (handler: (value: string | ArrayBuffer) => void) => this._onDataDispatcher.on(sessionId, handler),
+    onData: (handler: (value: string | ArrayBuffer) => void) => this._onDataDispatcher.on(sessionId)(handler),
     onExit: (handler: (exitCode: number | undefined) => void) =>
-      this._onExitDispatcher.on(sessionId, (e) => {
+      this._onExitDispatcher.on(sessionId)((e) => {
         handler(e.code);
       }),
     sendData: (message: string) => {
@@ -168,7 +155,7 @@ export class NodePtyTerminalService implements ITerminalService {
    * @param message
    */
   onMessage(sessionId: string, message: string) {
-    this._onDataDispatcher.emit(sessionId, message);
+    this._onDataDispatcher.dispatch(sessionId, message);
   }
 
   /**
@@ -185,11 +172,11 @@ export class NodePtyTerminalService implements ITerminalService {
       this._onError.fire(data);
     } else if (typeof data === 'number') {
       // 说明是 pty 报出来的正常退出
-      this._onExitDispatcher.emit(sessionId, { code: data, signal });
+      this._onExitDispatcher.dispatch(sessionId, { code: data, signal });
       this._onExit.fire({ sessionId, code: data, signal });
     } else if (data) {
       // 说明是 pty 报出来的正常退出
-      this._onExitDispatcher.emit(sessionId, { code: data.code, signal: data.signal });
+      this._onExitDispatcher.dispatch(sessionId, { code: data.code, signal: data.signal });
       this._onExit.fire({ sessionId, code: data.code, signal: data.signal });
     }
   }
@@ -218,12 +205,15 @@ export class NodePtyTerminalService implements ITerminalService {
     });
   }
 
-  async getDefaultSystemShell(): Promise<string> {
-    return await this.serviceClientRPC.getDefaultSystemShell(await this.getOS());
+  async getCwd(sessionId: string) {
+    try {
+      return await this.serviceClientRPC.getCwd(sessionId);
+    } catch {
+      return undefined;
+    }
   }
 
-  dispose() {
-    this._onDataDispatcher.dispose();
-    this._onExitDispatcher.dispose();
+  async getDefaultSystemShell(): Promise<string> {
+    return await this.serviceClientRPC.getDefaultSystemShell(await this.getOS());
   }
 }

@@ -1,11 +1,11 @@
-import type vscode from 'vscode';
-
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { MessageType } from '@opensumi/ide-core-common';
 import { IDialogService, IMessageService } from '@opensumi/ide-overlay';
 
-import { IMainThreadMessage, IExtHostMessage, ExtHostAPIIdentifier } from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtHostMessage, IMainThreadMessage } from '../../../common/vscode';
+
+import type vscode from 'vscode';
 
 @Injectable({ multiple: true })
 export class MainThreadMessage implements IMainThreadMessage {
@@ -31,8 +31,8 @@ export class MainThreadMessage implements IMainThreadMessage {
     from,
   ): Promise<number | undefined> {
     const action = options.modal
-      ? await this.dialogService.open(message, type, actions)
-      : await this.messageService.open(message, type, actions, true, from);
+      ? await this.dialogService.open({ message, type, buttons: actions, options })
+      : await this.messageService.open({ message, type, buttons: actions, closable: true, from });
     return action ? actions.indexOf(action) : undefined;
   }
 }

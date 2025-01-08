@@ -2,7 +2,7 @@ import os from 'os';
 
 import { Injector } from '@opensumi/di';
 import { normalizedIpcHandlerPath } from '@opensumi/ide-core-common/lib/utils/ipc';
-import { createNodeInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 
 import { TerminalNodePtyModule } from '../../src/node';
 import { PtyService } from '../../src/node/pty';
@@ -10,7 +10,7 @@ import { PtyServiceManagerToken } from '../../src/node/pty.manager';
 import { PtyServiceManagerRemote } from '../../src/node/pty.manager.remote';
 import { PtyServiceProxyRPCProvider } from '../../src/node/pty.proxy';
 
-// 使用Remote模式（非Local模式）来测试PtyService
+// test PtyService remote mode
 describe('PtyService function should be valid', () => {
   jest.setTimeout(20000);
 
@@ -34,7 +34,7 @@ describe('PtyService function should be valid', () => {
     proxyProvider.initServer();
     injector.overrideProviders({
       token: PtyServiceManagerToken,
-      useValue: injector.get(PtyServiceManagerRemote, [{ path: ipcPath }]),
+      useValue: injector.get(PtyServiceManagerRemote, [{ socketConnectOpts: { path: ipcPath } }]),
     });
     await delay(2000);
   });

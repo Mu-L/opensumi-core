@@ -1,3 +1,5 @@
+import { Emitter } from '@opensumi/ide-utils/lib/event';
+
 export enum REPORT_NAME {
   ACTIVE_EXTENSION = 'activateExtension',
   RUNTIME_ERROR_EXTENSION = 'runtimeErrorExtension',
@@ -29,6 +31,7 @@ export enum REPORT_NAME {
   PROVIDE_IMPLEMENTATION = 'provideImplementation',
   PROVIDE_CODE_ACTIONS = 'provideCodeActions',
   PROVIDE_RENAME_EDITS = 'provideRenameEdits',
+  PROVIDE_NEW_SYMBOL_NAMES = 'provideNewSymbolNames',
   PROVIDE_SIGNATURE_HELP = 'provideSignatureHelp',
   PROVIDE_CODE_LENSES = 'provideCodeLenses',
   RESOLVE_CODE_LENS = 'resolveCodeLens',
@@ -37,6 +40,7 @@ export enum REPORT_NAME {
   TERMINAL_MEASURE = 'terminalMeasure',
   SEARCH_MEASURE = 'searchMeasure',
   QUICK_OPEN_MEASURE = 'quickOpenMeasure',
+  RPC_TIMMING_MEASURE = 'rpcTimingMeasure',
 }
 
 export enum REPORT_HOST {
@@ -68,11 +72,18 @@ export interface PerformanceData extends PointData {
   duration: number;
 }
 
-// ide-framework 调用
 export const IReporterService = Symbol('IReporterService');
 
+export interface IReporterTimerEndOptions {
+  /**
+   * 上报的最小时间阈值，单位毫秒
+   * 经过的时间要大于这个值才会上报
+   */
+  minimumReportThresholdTime?: number;
+}
+
 export interface IReporterTimer {
-  timeEnd(msg?: string, extra?: any): number;
+  timeEnd(msg?: string, extra?: any, options?: IReporterTimerEndOptions): number;
 }
 
 export interface IReporterService {
@@ -93,4 +104,24 @@ export interface ReporterProcessMessage {
   reportType: REPORT_TYPE;
   name: string;
   data: PerformanceData | PointData;
+}
+
+export class CommonProcessReporter implements IReporter {
+  constructor(private emitter: Emitter<ReporterProcessMessage>) {}
+
+  performance(name: string, data: PerformanceData): void {
+    this.emitter.fire({
+      reportType: REPORT_TYPE.PERFORMANCE,
+      name,
+      data,
+    });
+  }
+
+  point(name: string, data: PointData): void {
+    this.emitter.fire({
+      reportType: REPORT_TYPE.POINT,
+      name,
+      data,
+    });
+  }
 }

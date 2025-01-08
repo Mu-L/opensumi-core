@@ -1,27 +1,34 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
   Disposable,
+  ILogger,
   KeybindingRegistry,
   MonacoOverrideServiceRegistry,
   ServiceNames,
-  ILogger,
 } from '@opensumi/ide-core-browser';
-import { SimpleKeybinding } from '@opensumi/monaco-editor-core/esm/vs/base/common/keybindings';
-import { IDisposable } from '@opensumi/monaco-editor-core/esm/vs/base/common/lifecycle';
+import { IMergeEditorEditor } from '@opensumi/ide-core-browser/lib/monaco/merge-editor-widget';
+import { KeyCodeChord } from '@opensumi/monaco-editor-core/esm/vs/base/common/keybindings';
 import { IEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/config/editorConfiguration';
-import { isDiffEditor, MouseTargetType } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
-import { IDiffEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
+import {
+  IDiffEditorConstructionOptions,
+  MouseTargetType,
+  isDiffEditor,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
+import { ShowLightbulbIconMode } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/editor.main';
 import { IStandaloneEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor';
+import { StandaloneKeybindingService } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
 import { MonacoService } from '../common';
 
+import { MergeEditorWidget } from './contrib/merge-editor/merge-editor-widget';
 import { ITextmateTokenizer, ITextmateTokenizerService } from './contrib/tokenizer';
 import { monaco } from './monaco-api';
 import { ICodeEditor, IDiffEditor } from './monaco-api/types';
 import { MonacoResolvedKeybinding } from './monaco.resolved-keybinding';
 
 // const SUMI_OVERFLOW_WIDGETS_CONTAINER_ID = 'sumi-overflow-widgets-container';
+type IEditorType = IDiffEditor | ICodeEditor | IMergeEditorEditor;
 
 @Injectable()
 export default class MonacoServiceImpl extends Disposable implements MonacoService {
@@ -42,32 +49,16 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
 
   get monacoBaseOptions() {
     return {
-      // revert because https://github.com/opensumi/core/issues/124
-      // Monaco 默认会将 overflowWidgets（如 hover） 放置在编辑器内部的 DOM 中
-      // 但是 Monaco 在计算 overflowWidgets 的位置时是使用整个 body 的高度来计算定位的
-      // 但我们会在顶部增加我们自己的业务组件，就会导致遮挡这些 overflowWidgets
-      // 所以此处将 overflowWidget 放置在 body 下构造的一个专门的 container 中
-      // overflowWidgetsDomNode: document.getElementById(SUMI_OVERFLOW_WIDGETS_CONTAINER_ID)!,
       glyphMargin: true,
       lightbulb: {
-        enabled: true,
+        enabled: ShowLightbulbIconMode.OnCode,
       },
-      automaticLayout: true,
-      model: null,
-      wordBasedSuggestions: false,
+      model: undefined,
+      wordBasedSuggestions: 'off',
       renderLineHighlight: 'none',
+      automaticLayout: true,
+      ignoreTrimWhitespace: false,
     } as IStandaloneEditorConstructionOptions;
-  }
-
-  constructor() {
-    super();
-
-    // revert because https://github.com/opensumi/core/issues/124
-    // const overflowWidgetsContainer = document.createElement('div');
-    // 让该容器的子元素都能被应用到 monaco-editor 中的样式
-    // overflowWidgetsContainer.className = 'monaco-editor';
-    // overflowWidgetsContainer.id = SUMI_OVERFLOW_WIDGETS_CONTAINER_ID;
-    // document.body.appendChild(overflowWidgetsContainer);
   }
 
   public createCodeEditor(
@@ -81,7 +72,10 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
         ...this.monacoBaseOptions,
         ...options,
       },
-      { ...this.overrideServiceRegistry.all(), ...overrides },
+      {
+        ...this.overrideServiceRegistry.all(),
+        ...overrides,
+      },
     );
     this.overrideMonacoKeybindingService(editor);
 
@@ -111,7 +105,7 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
     );
   }
 
-  private addClickEventListener(editor: IDiffEditor | ICodeEditor) {
+  private addClickEventListener(editor: IEditorType) {
     if (isDiffEditor(editor)) {
       const originalEditor = editor.getOriginalEditor();
       const modifiedEditor = editor.getModifiedEditor();
@@ -119,7 +113,7 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
       this.doAddClickEventListener(originalEditor);
       this.doAddClickEventListener(modifiedEditor);
     } else {
-      this.doAddClickEventListener(editor);
+      this.doAddClickEventListener(editor as ICodeEditor);
     }
   }
 
@@ -132,7 +126,6 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
       monacoContainer,
       {
         ...this.monacoBaseOptions,
-        ignoreTrimWhitespace: false,
         ...options,
       } as any,
       { ...this.overrideServiceRegistry.all(), ...overrides },
@@ -142,39 +135,28 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
     return editor;
   }
 
-  private overrideMonacoKeybindingService(editor: IDiffEditor | ICodeEditor) {
-    this.removeMonacoKeybindingListener(editor);
-    this.overrideKeybindingResolver(editor);
+  public createMergeEditor(
+    monacoContainer: HTMLElement,
+    options?: IDiffEditorConstructionOptions,
+    overrides: { [key: string]: any } = {},
+  ): IMergeEditorEditor {
+    return this.injector.get(MergeEditorWidget, [
+      monacoContainer,
+      options,
+      { ...this.overrideServiceRegistry.all(), ...overrides },
+    ]);
   }
 
-  /**
-   * 移除 Monaco 中默认的快捷键
-   * 防止用户修改编辑器快捷键后依然会命中默认的快捷键
-   * @param editor
-   */
-  private removeMonacoKeybindingListener(editor: IDiffEditor | ICodeEditor) {
-    let keydownListener: IDisposable | undefined;
-    const keybindingService = editor['_standaloneKeybindingService'];
-    if (!keybindingService) {
-      return;
-    }
-    for (const listener of keybindingService._store._toDispose) {
-      if ('_type' in listener && listener['_type'] === 'keydown') {
-        keydownListener = listener;
-        break;
-      }
-    }
-    if (keydownListener) {
-      keydownListener.dispose();
-    }
+  private overrideMonacoKeybindingService(editor: IEditorType) {
+    this.overrideKeybindingResolver(editor);
   }
 
   /**
    * 重载 Monaco 中 `_standaloneKeybindingService` 对应处理快捷键及快捷键事件的方法
    * @param editor
    */
-  private overrideKeybindingResolver(editor: IDiffEditor | ICodeEditor) {
-    const keybindingService = editor['_standaloneKeybindingService'];
+  private overrideKeybindingResolver(editor: IEditorType) {
+    const keybindingService = editor['_standaloneKeybindingService'] as StandaloneKeybindingService;
     if (!keybindingService) {
       return;
     }
@@ -182,13 +164,13 @@ export default class MonacoServiceImpl extends Disposable implements MonacoServi
       new MonacoResolvedKeybinding(MonacoResolvedKeybinding.keySequence(keybinding), this.keybindingRegistry),
     ];
     keybindingService.resolveKeyboardEvent = (keyboardEvent) => {
-      const keybinding = new SimpleKeybinding(
+      const keybinding = new KeyCodeChord(
         keyboardEvent.ctrlKey,
         keyboardEvent.shiftKey,
         keyboardEvent.altKey,
         keyboardEvent.metaKey,
         keyboardEvent.keyCode,
-      ).toChord();
+      ).toKeybinding();
       return new MonacoResolvedKeybinding(MonacoResolvedKeybinding.keySequence(keybinding), this.keybindingRegistry);
     };
   }

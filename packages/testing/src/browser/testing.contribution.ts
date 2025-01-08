@@ -1,38 +1,40 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
   ClientAppContribution,
   CommandContribution,
   CommandRegistry,
   CommandService,
-  ComponentContribution,
-  ComponentRegistry,
   Domain,
   EDITOR_COMMANDS,
   Event,
   FileType,
-  getIcon,
   KeybindingContribution,
   KeybindingRegistry,
   MaybePromise,
   TabBarToolbarContribution,
   ToolbarRegistry,
   URI,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
+import { TEST_RESULT_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 import { TestingCanRefreshTests, TestingIsPeekVisible } from '@opensumi/ide-core-browser/lib/contextkey/testing';
 import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { Emitter, IMarkdownString } from '@opensumi/ide-core-common';
 import {
   BrowserEditorContribution,
-  IEditorFeatureRegistry,
-  IEditorDocumentModelContentRegistry,
-  IEditorDocumentModelContentProvider,
-  WorkbenchEditorService,
   EditorComponentRegistry,
-  ResourceService,
+  EditorOpenType,
+  IEditorDocumentModelContentProvider,
+  IEditorDocumentModelContentRegistry,
+  IEditorFeatureRegistry,
   IResource,
+  ResourceService,
+  WorkbenchEditorService,
 } from '@opensumi/ide-editor/lib/browser';
 import { IEditor } from '@opensumi/ide-editor/lib/common';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
+import { IMainLayoutService } from '@opensumi/ide-main-layout';
 import { MARKDOWN_EDITOR_COMPONENT_ID } from '@opensumi/ide-markdown/lib/browser/contribution';
 import { MarkdownEditorComponent } from '@opensumi/ide-markdown/lib/browser/editor.markdown';
 
@@ -62,6 +64,7 @@ import { ITestTreeViewModel, TestTreeViewModelToken } from '../common/tree-view.
 import { TEST_DATA_SCHEME } from './../common/testingUri';
 import { TestOutputPeekContribution } from './outputPeek/test-output-peek';
 import { TestingPeekOpenerServiceImpl } from './outputPeek/test-peek-opener.service';
+import { TestResultPanel } from './outputPeek/test-peek-widget';
 import { TestDecorationsContribution } from './test-decorations';
 import { TestResultServiceImpl } from './test.result.service';
 import { TestServiceImpl } from './test.service';
@@ -105,7 +108,6 @@ export class TestingOutputPeekDocumentProvider implements IEditorDocumentModelCo
 @Injectable()
 @Domain(
   ClientAppContribution,
-  ComponentContribution,
   CommandContribution,
   BrowserEditorContribution,
   MenuContribution,
@@ -115,7 +117,6 @@ export class TestingOutputPeekDocumentProvider implements IEditorDocumentModelCo
 export class TestingContribution
   implements
     ClientAppContribution,
-    ComponentContribution,
     CommandContribution,
     BrowserEditorContribution,
     MenuContribution,
@@ -149,11 +150,47 @@ export class TestingContribution
   @Autowired(TestResultServiceToken)
   private readonly testResultService: TestResultServiceImpl;
 
+  @Autowired(IMainLayoutService)
+  private readonly layoutService: IMainLayoutService;
+
   initialize(): void {
     this.testTreeViewModel.initTreeModel();
   }
 
-  registerComponent(registry: ComponentRegistry): void {}
+  public registerTestResultPanel() {
+    // 面板只注册一次
+    if (this.layoutService.getTabbarHandler(TEST_RESULT_CONTAINER_ID)) {
+      return;
+    }
+
+    // 第一次注册 Test Results 视图之后，向用户主动展示一次
+    const containerId = this.layoutService.collectTabbarComponent(
+      [
+        {
+          id: TEST_RESULT_CONTAINER_ID,
+          component: TestResultPanel,
+        },
+      ],
+      {
+        containerId: TEST_RESULT_CONTAINER_ID,
+        title: localize('test.results'),
+        hidden: false,
+      },
+      'bottom',
+    );
+    const tabbarHandler = this.layoutService.getTabbarHandler(containerId);
+    tabbarHandler?.activate(); // 主动展示
+  }
+
+  onDidStart(): MaybePromise<void> {
+    // 在用户触发了测试之后，再展示测试面板，此面板无需常驻
+    this.testResultService.onResultsChanged(() => {
+      this.registerTestResultPanel();
+    });
+    this.testResultService.onTestChanged(() => {
+      this.registerTestResultPanel();
+    });
+  }
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand(RuntTestCommand, {
@@ -450,7 +487,7 @@ export class TestingContribution
 
     componentRegistry.registerEditorComponentResolver(TEST_DATA_SCHEME, (_, results) => {
       results.push({
-        type: 'component',
+        type: EditorOpenType.component,
         componentId: MARKDOWN_EDITOR_COMPONENT_ID,
         weight: 10,
       });

@@ -1,5 +1,4 @@
-import { RPCProtocol } from '@opensumi/ide-connection';
-import { Emitter, Disposable } from '@opensumi/ide-core-common';
+import { Disposable } from '@opensumi/ide-core-common';
 import { IQuickInputService, QuickOpenService, QuickPickService } from '@opensumi/ide-quick-open';
 import { QuickInputService } from '@opensumi/ide-quick-open/lib/browser/quick-input-service';
 import { QuickTitleBar } from '@opensumi/ide-quick-open/lib/browser/quick-title-bar';
@@ -8,27 +7,15 @@ import { IIconService, IThemeService } from '@opensumi/ide-theme/lib/common/them
 
 import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/injector-helper';
 import { mockService } from '../../../../../../tools/dev-tool/src/mock-injector';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
 import { MainThreadQuickOpen } from '../../../../src/browser/vscode/api/main.thread.quickopen';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '../../../../src/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '../../../../src/common/vscode';
 import { InputBoxValidationSeverity, QuickPickItemKind } from '../../../../src/common/vscode/ext-types';
 import { ExtHostQuickOpen } from '../../../../src/hosted/api/vscode/ext.host.quickopen';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHost: ExtHostQuickOpen;
 let mainThread: MainThreadQuickOpen;
@@ -61,6 +48,8 @@ describe('ext host quickopen test', () => {
       token: QuickOpenService,
       useValue: {
         open: () => Promise.resolve(),
+        updateOptions: () => {},
+        refresh: () => {},
       },
     },
     {
@@ -90,7 +79,7 @@ describe('ext host quickopen test', () => {
     expect(item).toBe('a');
   });
 
-  it('get quickpick separator item ', async () => {
+  it('get quickpick separator item', async () => {
     const $showQuickPick = jest.spyOn(mainThread, '$showQuickPick');
     await extHost.showQuickPick([
       {
@@ -101,7 +90,7 @@ describe('ext host quickopen test', () => {
         label: 'bbb',
       },
     ]);
-    expect($showQuickPick).toBeCalledWith(
+    expect($showQuickPick).toHaveBeenCalledWith(
       expect.anything(),
       [
         {
@@ -144,18 +133,18 @@ describe('ext host quickopen test', () => {
     expect(quickPick.items.length).toBe(1);
   });
 
-  it('set input validation message severity by default ', async () => {
+  it('set input validation message severity by default', async () => {
     const $createOrUpdateInputBox = jest.spyOn(mainThread, '$createOrUpdateInputBox');
     const quickInput = extHost.createInputBox();
     quickInput.validationMessage = 'test';
     await sleep(10);
-    expect($createOrUpdateInputBox).toBeCalledWith(expect.anything(), {
+    expect($createOrUpdateInputBox).toHaveBeenCalledWith(expect.anything(), {
       validationMessage: 'test',
       severity: InputBoxValidationSeverity.Error,
     });
   });
 
-  it('set input validation message severity is warning  ', async () => {
+  it('set input validation message severity is warning', async () => {
     const $createOrUpdateInputBox = jest.spyOn(mainThread, '$createOrUpdateInputBox');
     const quickInput = extHost.createInputBox();
     quickInput.validationMessage = {
@@ -163,9 +152,17 @@ describe('ext host quickopen test', () => {
       severity: InputBoxValidationSeverity.Warning,
     };
     await sleep(10);
-    expect($createOrUpdateInputBox).toBeCalledWith(expect.anything(), {
+    expect($createOrUpdateInputBox).toHaveBeenCalledWith(expect.anything(), {
       validationMessage: 'test',
       severity: InputBoxValidationSeverity.Warning,
+    });
+
+    quickInput.validationMessage = undefined;
+    await sleep(50);
+
+    expect($createOrUpdateInputBox).toHaveBeenCalledWith(expect.anything(), {
+      validationMessage: null,
+      severity: InputBoxValidationSeverity.Ignore,
     });
   });
 });

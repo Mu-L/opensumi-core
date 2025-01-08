@@ -2,9 +2,8 @@ import { IRPCProtocol } from '@opensumi/ide-connection';
 import { Emitter } from '@opensumi/ide-core-common';
 
 import { MainThreadSumiAPIIdentifier } from '../../../common/sumi';
-import { ITabbarHandler, IMainThreadLayout, IExtHostLayout } from '../../../common/sumi/layout';
-import { IExtHostCommands, IExtensionDescription } from '../../../common/vscode';
-
+import { IExtHostLayout, IMainThreadLayout, ITabbarHandler } from '../../../common/sumi/layout';
+import { IExtHostCommands, IExtensionDescription, type ViewBadge } from '../../../common/vscode';
 
 export class TabbarHandler implements ITabbarHandler {
   public readonly onActivateEmitter = new Emitter<void>();
@@ -39,7 +38,7 @@ export class TabbarHandler implements ITabbarHandler {
     this.proxy.$setVisible(this.id, visible);
   }
 
-  setBadge(badge: string) {
+  setBadge(badge?: string | ViewBadge) {
     this.proxy.$setBadge(this.id, badge);
   }
 

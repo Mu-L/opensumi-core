@@ -1,10 +1,10 @@
 import path from 'path';
 import stream from 'stream';
 
-import { createNodeInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 
-import { IProcessManage, IProcessFactory } from '../../src/';
-import { ProcessErrorEvent, IProcessStartEvent } from '../../src/common';
+import { IProcessFactory, IProcessManage } from '../../src/';
+import { IProcessStartEvent, ProcessErrorEvent } from '../../src/common';
 import { ProcessModule } from '../../src/node';
 
 const FORK_TEST_FILE = path.join(__dirname, '../../scripts/process-fork-test.js');

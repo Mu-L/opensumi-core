@@ -1,10 +1,11 @@
 import { ConstructorOf } from '@opensumi/di';
-import { ApplicationConfig, UrlProvider } from '@opensumi/ide-core-common';
 
 import { BrowserModule } from '../browser-module';
 import { ClientAppContribution } from '../common/common.define';
+import { AppConfig } from '../react-providers';
 
 export type ModuleConstructor = ConstructorOf<BrowserModule>;
+
 export type ContributionConstructor = ConstructorOf<ClientAppContribution>;
 export type Direction = 'left-to-right' | 'right-to-left' | 'top-to-bottom' | 'bottom-to-top';
 
@@ -22,18 +23,23 @@ export interface IconInfo {
   iconMap: IconMap;
 }
 
-export interface IClientAppOpts extends Partial<ApplicationConfig> {
+export interface IClientAppOpts extends Partial<AppConfig> {
+  // 模块声明
   modules: ModuleConstructor[];
+  // 贡献点声明
   contributions?: ContributionConstructor[];
+  // 前端模块实例声明
   modulesInstances?: BrowserModule[];
-  connectionPath?: UrlProvider;
-  connectionProtocols?: string[];
+
+  // 定义用于 OpenSumi 视图插件内的图标集合
   iconStyleSheets?: IconInfo[];
-  useCdnIcon?: boolean;
-  editorBackgroundImage?: string;
   /**
-   * 插件开发模式下指定的插件路径
+   * 是否使用 CDN 版本的图标资源
+   * Electron - 默认为 false
+   * Web - 默认为 true
    */
+  useCdnIcon?: boolean;
+  // 插件开发模式下指定的插件路径
   extensionDevelopmentPath?: string | string[];
 }
 

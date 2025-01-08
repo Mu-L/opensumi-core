@@ -1,12 +1,14 @@
-/* eslint-disable no-console */
+import childProcess from 'child_process';
 import fs from 'fs';
 import net, { ListenOptions, Server } from 'net';
+import { promisify } from 'util';
 
 import * as pty from 'node-pty';
 
 import { RPCServiceCenter, initRPCService } from '@opensumi/ide-connection';
-import { createSocketConnection } from '@opensumi/ide-connection/lib/node';
+import { SumiConnection } from '@opensumi/ide-connection/lib/common/rpc/connection';
 import { DisposableCollection, getDebugLogger } from '@opensumi/ide-core-node';
+import { isLinux, isMacintosh } from '@opensumi/ide-utils/lib/platform';
 
 import {
   IPtyProxyRPCService,
@@ -16,6 +18,9 @@ import {
   PTY_SERVICE_PROXY_SERVER_PORT,
   TERMINAL_ID_SEPARATOR,
 } from '../common';
+
+const readLinkAsync = promisify(fs.readlink);
+const execAsync = promisify(childProcess.exec);
 
 const PTY_LINE_DATA_CACHE_DEFAULT_SIZE = 500;
 
@@ -169,7 +174,7 @@ export class PtyServiceProxy implements IPtyProxyRPCService {
     });
 
     const onDataDisposable = ptyInstance?.onData((e) => {
-      this.debugLogger.debug('ptyServiceCenter: onData', JSON.stringify(e), 'pid:', pid, 'callId', callId);
+      this.debugLogger.debug('ptyServiceCenter: onData', e, 'pid:', pid, 'callId', callId);
       if (typeof e === 'string') {
         // 缓存数据的时候只存放前1024个字符，因为正常情况下也不会超过1024个，如果超过的话，基本上是用户误操作导致的cat 二进制文件或者其他未知问题
         // 比如说某个程序一直通过CSI转义命令来以用户不可见的方式增加终端输出内容
@@ -195,16 +200,14 @@ export class PtyServiceProxy implements IPtyProxyRPCService {
     }
   }
 
-  $on(callId: number, pid: number, event: any): void {
-    const ptyInstance = this.ptyInstanceMap.get(pid);
-    ptyInstance?.on(event, (e) => {
-      this.$callback(callId, e);
-    });
-  }
-
   $resize(pid: number, columns: number, rows: number): void {
     const ptyInstance = this.ptyInstanceMap.get(pid);
     ptyInstance?.resize(columns, rows);
+  }
+
+  $clear(pid: number): void {
+    const ptyInstance = this.ptyInstanceMap.get(pid);
+    ptyInstance?.clear();
   }
 
   $write(pid: number, data: string): void {
@@ -235,22 +238,27 @@ export class PtyServiceProxy implements IPtyProxyRPCService {
     const ptyInstance = this.ptyInstanceMap.get(pid);
     return ptyInstance?.process || '';
   }
+
+  $getCwd(pid: number): Promise<string | undefined> {
+    return getPidCwd(pid);
+  }
 }
 
 // 需要单独运行PtyServer的时候集成此Class然后运行initServer
 export class PtyServiceProxyRPCProvider {
   private ptyServiceProxy: PtyServiceProxy;
   private readonly ptyServiceCenter: RPCServiceCenter;
-  private readonly debugLogger = getDebugLogger();
+  private readonly logger = getDebugLogger();
   private serverListenOptions: ListenOptions; // HOST + PORT or UNIX SOCK PATH
   private server: Server;
 
   constructor(listenOptions: ListenOptions = { port: PTY_SERVICE_PROXY_SERVER_PORT }) {
     this.serverListenOptions = listenOptions;
     this.ptyServiceCenter = new RPCServiceCenter();
-    const { createRPCService, getRPCService } = initRPCService(this.ptyServiceCenter);
-    const $callback: (callId: number, ...args) => void = (getRPCService(PTY_SERVICE_PROXY_CALLBACK_PROTOCOL) as any)
-      .$callback;
+    const { createRPCService, getRPCService } = initRPCService<{
+      $callback: (callId: number, ...args: any[]) => void;
+    }>(this.ptyServiceCenter);
+    const $callback = getRPCService(PTY_SERVICE_PROXY_CALLBACK_PROTOCOL).$callback;
 
     this.ptyServiceProxy = new PtyServiceProxy($callback);
 
@@ -265,7 +273,7 @@ export class PtyServiceProxyRPCProvider {
   private createSocket() {
     this.server = net.createServer();
     this.server.on('connection', (connection) => {
-      this.debugLogger.log('ptyServiceCenter: new connections coming in');
+      this.logger.log('ptyServiceCenter: new connections coming in');
       this.setProxyConnection(connection);
     });
     // const ipcPath = normalizedIpcHandlerPath()
@@ -274,7 +282,7 @@ export class PtyServiceProxyRPCProvider {
       fs.unlinkSync(this.serverListenOptions.path); // 兜底逻辑，如果之前Server没有清除掉SOCK文件的话，那就先清除
     }
     this.server.listen(this.serverListenOptions);
-    this.debugLogger.log('ptyServiceCenter: listening on', this.serverListenOptions);
+    this.logger.log('ptyServiceCenter: listening on', this.serverListenOptions);
   }
 
   // Close Server, release UNIX DOMAIN SOCKET
@@ -293,15 +301,30 @@ export class PtyServiceProxyRPCProvider {
     });
   }
 
-  private setProxyConnection(connection: net.Socket) {
-    const serverConnection = createSocketConnection(connection);
-    this.ptyServiceCenter.setConnection(serverConnection);
-    connection.on('close', () => {
-      this.ptyServiceCenter.removeConnection(serverConnection);
+  private setProxyConnection(socket: net.Socket) {
+    const connection = SumiConnection.forNetSocket(socket, {
+      logger: this.logger,
+    });
+    const remove = this.ptyServiceCenter.setSumiConnection(connection);
+    socket.on('close', () => {
+      remove.dispose();
     });
   }
 
   public get $ptyServiceProxy(): PtyServiceProxy {
     return this.ptyServiceProxy;
   }
+}
+
+async function getPidCwd(pid: number): Promise<string | undefined> {
+  if (isLinux) {
+    return await readLinkAsync(`/proc/${pid}/cwd`);
+  }
+  if (isMacintosh) {
+    const result = await execAsync(`lsof -a -d cwd -p ${pid} | tail -1 | awk '{print $9}'`);
+    if (result.stdout) {
+      return result.stdout.trim();
+    }
+  }
+  return undefined;
 }

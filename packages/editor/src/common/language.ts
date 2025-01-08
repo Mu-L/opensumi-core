@@ -1,9 +1,8 @@
 import LSTypes from 'vscode-languageserver-types';
 
-import { MarkerSeverity } from '@opensumi/ide-core-common';
-import { CancellationToken, IDisposable, IRelativePattern } from '@opensumi/ide-core-common';
-import { URI as Uri } from '@opensumi/monaco-editor-core/esm/vs/base/common/uri';
-import { editor } from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { CancellationToken, IDisposable, IRelativePattern, MarkerSeverity, Uri } from '@opensumi/ide-core-common';
+import { editor } from '@opensumi/ide-monaco';
+
 import type { IRelatedInformation } from '@opensumi/monaco-editor-core/esm/vs/platform/markers/common/markers';
 
 export const ILanguageService = Symbol('ILanguageService');
@@ -62,18 +61,33 @@ export enum DiagnosticSeverity {
 export interface Diagnostic {
   /**
    * The range at which the message applies
-   * TODO 类型声明
    */
   range: LSTypes.Range;
   /**
    * The diagnostic's severity. Can be omitted. If omitted it is up to the
    * client to interpret diagnostics as error, warning, info or hint.
    */
-  severity?: DiagnosticSeverity;
+  severity: DiagnosticSeverity;
+
   /**
-   * The diagnostic's code, which might appear in the user interface.
+   * A code or identifier for this diagnostic.
+   * Should be used for later processing, e.g. when providing {@link CodeActionContext code actions}.
    */
-  code?: number | string;
+  code?:
+    | string
+    | number
+    | {
+        /**
+         * A code or identifier for this diagnostic.
+         * Should be used for later processing, e.g. when providing {@link CodeActionContext code actions}.
+         */
+        value: string | number;
+
+        /**
+         * A target URI to open with more information about the diagnostic error.
+         */
+        target: Uri;
+      };
   /**
    * A human-readable string describing the source of this
    * diagnostic, e.g. 'typescript' or 'super lint'.
@@ -128,19 +142,28 @@ export function asRelatedInformation(relatedInformation: DiagnosticRelatedInform
     message: relatedInformation.message,
   };
 }
-export function asDiagnostics(diagnostics: Diagnostic[] | undefined): editor.IMarkerData[] | undefined {
+export function asMonacoDiagnostics(diagnostics: Diagnostic[] | undefined): editor.IMarkerData[] | undefined {
   if (!diagnostics) {
     return undefined;
   }
-  return diagnostics.map((diagnostic) => asDiagnostic(diagnostic));
+  return diagnostics.map((diagnostic) => asMonacoDiagnostic(diagnostic));
 }
 
-export function asDiagnostic(diagnostic: Diagnostic): editor.IMarkerData {
+export function asMonacoDiagnostic(diagnostic: Diagnostic): editor.IMarkerData {
   return {
-    code: typeof diagnostic.code === 'number' ? diagnostic.code.toString() : diagnostic.code,
+    code:
+      typeof diagnostic.code === 'number'
+        ? diagnostic.code.toString()
+        : typeof diagnostic.code === 'object'
+        ? {
+            value: diagnostic.code.value.toString(),
+            target: diagnostic.code.target,
+          }
+        : diagnostic.code,
     severity: asSeverity(diagnostic.severity),
     message: diagnostic.message,
     source: diagnostic.source,
+    // language server range is 0-based, marker is 1-based
     startLineNumber: diagnostic.range.start.line + 1,
     startColumn: diagnostic.range.start.character + 1,
     endLineNumber: diagnostic.range.end.line + 1,
@@ -177,6 +200,7 @@ export interface LanguageFilter {
   scheme?: string;
   pattern?: string | IRelativePattern;
   hasAccessToAllModels?: boolean;
+  notebookType?: string;
 }
 
 export type LanguageSelector = string | LanguageFilter | (string | LanguageFilter)[];

@@ -1,31 +1,31 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { MessageType } from '@opensumi/ide-components';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { PreferenceService } from '@opensumi/ide-core-browser';
 import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import {
-  Disposable,
-  URI,
   CancellationTokenSource,
-  raceCancellation,
-  ProgressLocation,
-  localize,
+  Disposable,
   ILogger,
+  ProgressLocation,
+  URI,
+  Uri,
   formatLocalize,
+  localize,
+  raceCancellation,
 } from '@opensumi/ide-core-common';
-import { IFileServiceClient, FileChangeType } from '@opensumi/ide-file-service';
+import { FileChangeType, IFileServiceClient } from '@opensumi/ide-file-service';
 import { ResourceEdit } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 import { IDialogService } from '@opensumi/ide-overlay';
 import {
-  IBulkEditServiceShape,
   FileOperation,
+  IBulkEditServiceShape,
   IWorkspaceFileOperationParticipant,
   IWorkspaceFileService,
 } from '@opensumi/ide-workspace-edit';
 
 import { ExtHostAPIIdentifier } from '../../../common/vscode';
-import { IExtHostFileSystemEvent, FileSystemEvents } from '../../../common/vscode/file-system';
-
+import { FileSystemEvents, IExtHostFileSystemEvent } from '../../../common/vscode/file-system';
 
 @Injectable({ multiple: true })
 export class MainThreadFileSystemEvent extends Disposable {
@@ -78,15 +78,15 @@ export class MainThreadFileSystemEvent extends Disposable {
         for (const change of changes) {
           switch (change.type) {
             case FileChangeType.ADDED:
-              events.created.push(new URI(change.uri).codeUri);
+              events.created.push(Uri.parse(change.uri));
               hasResult = true;
               break;
             case FileChangeType.UPDATED:
-              events.changed.push(new URI(change.uri).codeUri);
+              events.changed.push(Uri.parse(change.uri));
               hasResult = true;
               break;
             case FileChangeType.DELETED:
-              events.deleted.push(new URI(change.uri).codeUri);
+              events.deleted.push(Uri.parse(change.uri));
               hasResult = true;
               break;
           }
@@ -199,7 +199,7 @@ export class MainThreadFileSystemEvent extends Disposable {
           localize('refactoring-changes.msg.skipChanges'),
         ];
         // edit#metadata.needsConfirmation#true --> show dialog
-        const answer = await this.dialogService.open(message, MessageType.Info, choices);
+        const answer = await this.dialogService.open({ message, type: MessageType.Info, buttons: choices });
         showPreview = 'show';
         if (answer === choices[1]) {
           // Skip changes
@@ -211,7 +211,7 @@ export class MainThreadFileSystemEvent extends Disposable {
           localize('refactoring-changes.msg.skipChanges'),
           localize('component.modal.okText'),
         ];
-        const answer = await this.dialogService.open(message, MessageType.Info, choices);
+        const answer = await this.dialogService.open({ message, type: MessageType.Info, buttons: choices });
         if (answer === choices[1]) {
           // Skip changes
           return;

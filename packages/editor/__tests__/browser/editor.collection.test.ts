@@ -1,17 +1,17 @@
 import { Injectable } from '@opensumi/di';
-import { MonacoService, Emitter, URI } from '@opensumi/ide-core-browser';
+import { Emitter, MonacoService, URI } from '@opensumi/ide-core-browser';
 import { EditorCollectionService, EditorType } from '@opensumi/ide-editor';
 import { IEditorDecorationCollectionService, IEditorFeatureRegistry } from '@opensumi/ide-editor/lib/browser';
-import { BrowserCodeEditor, BaseMonacoEditorWrapper } from '@opensumi/ide-editor/lib/browser/editor-collection.service';
+import { BaseMonacoEditorWrapper, BrowserCodeEditor } from '@opensumi/ide-editor/lib/browser/editor-collection.service';
 import { EditorDecorationCollectionService } from '@opensumi/ide-editor/lib/browser/editor.decoration.service';
+import * as monaco from '@opensumi/ide-monaco';
 import { MockedMonacoService } from '@opensumi/ide-monaco/__mocks__/monaco.service.mock';
 import { monaco as monacoAPI } from '@opensumi/ide-monaco/lib/browser/monaco-api';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 import {
-  IConfigurationService,
+  ConfigurationTarget,
   IConfigurationChangeEvent,
   IConfigurationOverrides,
-  ConfigurationTarget,
+  IConfigurationService,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/configuration/common/configuration';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
@@ -62,15 +62,15 @@ describe('editor collection service test', () => {
     mockEditor.setSelections = setSelections;
 
     codeEditor.updateOptions({}, {});
-    expect(updateOptions).toBeCalled();
+    expect(updateOptions).toHaveBeenCalled();
 
     expect(codeEditor.getType()).toBe(EditorType.CODE);
 
     codeEditor.getSelections();
-    expect(getSelections).toBeCalled();
+    expect(getSelections).toHaveBeenCalled();
 
     codeEditor.setSelections([]);
-    expect(setSelections).toBeCalled();
+    expect(setSelections).toHaveBeenCalled();
   });
 
   it('options level test', () => {
@@ -83,13 +83,12 @@ describe('editor collection service test', () => {
       prefs[key] = value;
       emitter.fire({
         source: ConfigurationTarget.USER,
-        affectedKeys: [key],
+        affectedKeys: new Set([key]),
         change: {
           keys: [key],
           overrides: [],
         },
         affectsConfiguration: (() => {}) as any,
-        sourceConfig: {},
       });
     };
     const mockConfigurationService: Partial<IConfigurationService> = {
@@ -147,6 +146,9 @@ describe('editor collection service test', () => {
 
     open(new URI('file:///test/test.js'));
 
+    setPref('editor.fontSize', 20);
+    setPref('editor.readOnly', false);
+
     expect(options['fontSize']).toBe(20);
 
     testEditor.updateOptions({ fontSize: 40 });
@@ -158,7 +160,7 @@ describe('editor collection service test', () => {
 
     // 切换后仍然有这个option
     expect(options['fontSize']).toBe(40);
-
+    setPref('editor.readOnly', true);
     expect(options['readOnly']).toBeTruthy();
 
     testEditor.updateOptions({ fontSize: undefined });
@@ -170,6 +172,7 @@ describe('editor collection service test', () => {
     expect(options['fontSize']).toBe(35);
 
     open(new URI('file:///test/test3.js'));
+    setPref('editor.readOnly', false);
     expect(options['readOnly']).toBeFalsy();
 
     setPref('editor.forceReadOnly', true);

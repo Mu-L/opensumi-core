@@ -1,26 +1,33 @@
 import { Autowired } from '@opensumi/di';
+import { getIcon } from '@opensumi/ide-components';
 import {
   CommandContribution,
-  CommandService,
-  PreferenceSchema,
   CommandRegistry,
-  localize,
+  CommandService,
   Domain,
   Event,
+  PreferenceSchema,
+  localize,
   replaceLocalizePlaceholder,
 } from '@opensumi/ide-core-common';
 
-import { IContextKeyService, IContextKey } from '../context-key';
+import { IContextKey, IContextKeyService } from '../context-key';
 import { corePreferenceSchema } from '../core-preferences';
 import { trackFocus } from '../dom';
 import { KeybindingContribution, KeybindingRegistry } from '../keybinding';
-import { LAYOUT_VIEW_SIZE } from '../layout/constants';
-import { MenuContribution, IMenuRegistry } from '../menu/next/base';
+import { LayoutViewSizeConfig } from '../layout/constants';
+import { IMenuRegistry, MenuContribution } from '../menu/next/base';
 import { MenuId } from '../menu/next/menu-id';
 import { PreferenceContribution } from '../preferences';
 import { AppConfig } from '../react-providers/config-provider';
 
-import { FILE_COMMANDS, COMMON_COMMANDS, EDITOR_COMMANDS, TERMINAL_COMMANDS, LAYOUT_COMMANDS } from './common.command';
+import {
+  COMMON_COMMANDS,
+  EDITOR_COMMANDS,
+  FILE_COMMANDS,
+  TERMINAL_COMMANDS,
+  WORKSPACE_COMMANDS,
+} from './common.command';
 import { ClientAppContribution } from './common.define';
 
 export const inputFocusedContextKey = 'inputFocus';
@@ -46,13 +53,16 @@ export class ClientCommonContribution
   @Autowired(AppConfig)
   private appConfig: AppConfig;
 
+  @Autowired(LayoutViewSizeConfig)
+  private layoutViewSize: LayoutViewSizeConfig;
+
   schema: PreferenceSchema = corePreferenceSchema;
 
   constructor() {
     const overridePropertiesDefault = {
       'application.supportsOpenFolder': !!this.appConfig.isElectronRenderer && !this.appConfig.isRemote,
       'application.supportsOpenWorkspace': !!this.appConfig.isElectronRenderer && !this.appConfig.isRemote,
-      'debug.toolbar.top': this.appConfig.isElectronRenderer ? 0 : LAYOUT_VIEW_SIZE.MENUBAR_HEIGHT,
+      'debug.toolbar.top': this.appConfig.isElectronRenderer ? 0 : this.layoutViewSize.menubarHeight,
     };
     const keys = Object.keys(this.schema.properties);
     for (const key of keys) {
@@ -103,20 +113,41 @@ export class ClientCommonContribution
   }
 
   registerMenus(menus: IMenuRegistry): void {
-    // 注册 Menubar
-    if (this.appConfig.isElectronRenderer) {
-      menus.registerMenubarItem(MenuId.MenubarAppMenu, {
-        label: localize('app.name', this.appConfig.appName),
-        order: 0,
-      });
-    }
-    menus.registerMenubarItem(MenuId.MenubarFileMenu, { label: localize('menu-bar.title.file'), order: 1 });
-    menus.registerMenubarItem(MenuId.MenubarEditMenu, { label: localize('menu-bar.title.edit'), order: 2 });
-    menus.registerMenubarItem(MenuId.MenubarSelectionMenu, { label: localize('menu-bar.title.selection'), order: 3 });
-    menus.registerMenubarItem(MenuId.MenubarViewMenu, { label: localize('menu-bar.title.view'), order: 4 });
-    menus.registerMenubarItem(MenuId.MenubarGoMenu, { label: localize('menu-bar.title.go'), order: 5 });
-    menus.registerMenubarItem(MenuId.MenubarTerminalMenu, { label: localize('menu-bar.title.terminal'), order: 5 });
-    menus.registerMenubarItem(MenuId.MenubarHelpMenu, { label: localize('menu-bar.title.help'), order: 999 });
+    menus.registerMenubarItem(MenuId.MenubarFileMenu, {
+      label: localize('menu-bar.title.file'),
+      order: 1,
+      iconClass: getIcon('menubar-file'),
+    });
+    menus.registerMenubarItem(MenuId.MenubarEditMenu, {
+      label: localize('menu-bar.title.edit'),
+      order: 2,
+      iconClass: getIcon('menubar-edit'),
+    });
+    menus.registerMenubarItem(MenuId.MenubarSelectionMenu, {
+      label: localize('menu-bar.title.selection'),
+      order: 3,
+      iconClass: getIcon('menubar-selection'),
+    });
+    menus.registerMenubarItem(MenuId.MenubarViewMenu, {
+      label: localize('menu-bar.title.view'),
+      order: 4,
+      iconClass: getIcon('menubar-view'),
+    });
+    menus.registerMenubarItem(MenuId.MenubarGoMenu, {
+      label: localize('menu-bar.title.go'),
+      order: 5,
+      iconClass: getIcon('menubar-go'),
+    });
+    menus.registerMenubarItem(MenuId.MenubarTerminalMenu, {
+      label: localize('menu-bar.title.terminal'),
+      order: 5,
+      iconClass: getIcon('terminal'),
+    });
+    menus.registerMenubarItem(MenuId.MenubarHelpMenu, {
+      label: localize('menu-bar.title.help'),
+      order: 999,
+      iconClass: getIcon('question-circle'),
+    });
 
     // File 菜单
     menus.registerMenuItems(MenuId.MenubarFileMenu, [
@@ -129,6 +160,16 @@ export class ClientCommonContribution
         command: FILE_COMMANDS.OPEN_WORKSPACE.id,
         group: '1_open',
         when: 'config.application.supportsOpenWorkspace',
+      },
+      {
+        command: WORKSPACE_COMMANDS.ADD_WORKSPACE_FOLDER.id,
+        group: '1_open',
+        when: 'config.workspace.supportMultiRootWorkspace',
+      },
+      {
+        command: WORKSPACE_COMMANDS.SAVE_WORKSPACE_AS_FILE.id,
+        group: '1_open',
+        when: 'config.workspace.supportMultiRootWorkspace',
       },
       {
         command: EDITOR_COMMANDS.NEW_UNTITLED_FILE.id,
@@ -232,90 +273,6 @@ export class ClientCommonContribution
         group: '1_terminal',
       },
     ]);
-
-    // Edit 菜单
-    if (this.appConfig.isElectronRenderer) {
-      menus.registerMenuItems(MenuId.MenubarEditMenu, [
-        {
-          command: {
-            id: 'electron.undo',
-            label: localize('editor.undo'),
-          },
-          nativeRole: 'undo',
-          group: '1_undo',
-        },
-        {
-          command: {
-            id: 'electron.redo',
-            label: localize('editor.redo'),
-          },
-          group: '1_undo',
-          nativeRole: 'redo',
-        },
-        {
-          command: {
-            label: localize('edit.cut'),
-            id: 'electron.cut',
-          },
-          nativeRole: 'cut',
-          group: '2_clipboard',
-        },
-        {
-          command: {
-            label: localize('edit.copy'),
-            id: 'electron.copy',
-          },
-          nativeRole: 'copy',
-          group: '2_clipboard',
-        },
-        {
-          command: {
-            label: localize('edit.paste'),
-            id: 'electron.paste',
-          },
-          nativeRole: 'paste',
-          group: '2_clipboard',
-        },
-        {
-          command: {
-            label: localize('edit.selectAll'),
-            id: 'electron.selectAll',
-          },
-          nativeRole: 'selectAll',
-          group: '2_clipboard',
-        },
-      ]);
-      menus.registerMenuItems(MenuId.MenubarAppMenu, [
-        {
-          command: {
-            id: 'electron.quit',
-            label: localize('app.quit'),
-          },
-          nativeRole: 'quit',
-          group: '4_quit',
-        },
-      ]);
-    } else {
-      menus.registerMenuItems(MenuId.MenubarEditMenu, [
-        {
-          command: EDITOR_COMMANDS.REDO.id,
-          group: '1_undo',
-        },
-        {
-          command: EDITOR_COMMANDS.UNDO.id,
-          group: '1_undo',
-        },
-      ]);
-      // 帮助菜单
-      menus.registerMenuItem(MenuId.MenubarHelpMenu, {
-        command: {
-          id: COMMON_COMMANDS.ABOUT_COMMAND.id,
-          label: COMMON_COMMANDS.ABOUT_COMMAND.label!,
-        },
-        nativeRole: 'about',
-        group: '0_about',
-      });
-    }
   }
 
   registerKeybindings(keybindings: KeybindingRegistry): void {

@@ -1,4 +1,4 @@
-import { URI, IDisposable, Event } from '@opensumi/ide-core-common';
+import { Event, IDisposable, URI } from '@opensumi/ide-core-common';
 
 import { PreferenceProvider } from './preference-provider';
 import { PreferenceScope } from './preference-scope';
@@ -26,6 +26,15 @@ export const PreferenceService = Symbol('PreferenceService');
 
 export interface PreferenceService extends IDisposable {
   readonly ready: Promise<void>;
+
+  /**
+   * 查询是否有对应配置
+   * @param {string} preferenceName
+   * @param {string} [resourceUri]
+   * @returns {boolean}
+   */
+  has(preferenceName: string, resourceUri?: string, language?: string): boolean;
+
   /**
    * 获取一个配置的值
    * @param preferenceName  配置名称
@@ -35,6 +44,14 @@ export interface PreferenceService extends IDisposable {
    */
   get<T>(preferenceName: string, defaultValue: T, resourceUri?: string, overrideIdentifier?: string): T;
   get<T>(preferenceName: string, defaultValue?: T, resourceUri?: string, overrideIdentifier?: string): T | undefined;
+
+  /**
+   * 简单通过 `preferenceName` 获取到有效的配置值，防止异常数据导致逻辑问题
+   * @param preferenceName 配置名称
+   * @param defaultValue 默认值
+   */
+  getValid<T>(preferenceName: string, defaultValue: T): T;
+  getValid<T>(preferenceName: string, defaultValue?: T): T | undefined;
 
   /**
    * 是否一个配置在指定 scope 存在针对语言的配置
@@ -102,9 +119,8 @@ export interface PreferenceService extends IDisposable {
   /**
    * 都走 onPreferenceChanged 再用if判断性能太差了
    * TODO: 将只监听一个偏好的使用这个方法
-   * @param preferenceName
    */
-  onSpecificPreferenceChange(preferenceName, listener: (change: PreferenceChange) => void): IDisposable;
+  onSpecificPreferenceChange(preferenceName: string, listener: (change: PreferenceChange) => void): IDisposable;
 }
 
 export const PreferenceProviderProvider = Symbol('PreferenceProviderProvider');

@@ -1,47 +1,51 @@
 import os from 'os';
 import paths from 'path';
+import { Readable } from 'stream';
 
-import fileType from 'file-type';
 import * as fse from 'fs-extra';
 import trash from 'trash';
 import writeFileAtomic from 'write-file-atomic';
 
-import { Injectable, INJECTOR_TOKEN, Autowired, Injector } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { RPCService } from '@opensumi/ide-connection';
-import { Deferred, ILogService, ILogServiceManager, SupportLogNamespace, path } from '@opensumi/ide-core-node';
 import {
-  isLinux,
-  UriComponents,
-  Uri,
-  Event,
-  IDisposable,
-  URI,
-  Emitter,
-  isUndefined,
   DisposableCollection,
+  Emitter,
+  Event,
   FileUri,
+  IDisposable,
+  IFileStatOptions,
+  ILogService,
+  ILogServiceManager,
+  IReadFileStreamOptions,
+  SupportLogNamespace,
+  URI,
+  Uri,
+  UriComponents,
+  isLinux,
+  isUndefined,
   uuid,
 } from '@opensumi/ide-core-node';
 
 import {
-  FileChangeEvent,
-  FileStat,
-  FileType,
   DidFilesChangedParams,
-  FileSystemError,
+  FileAccess,
+  FileChangeEvent,
   FileMoveOptions,
+  FileStat,
+  FileSystemError,
+  FileSystemProviderCapabilities,
+  FileType,
+  IDiskFileProvider,
+  IWatcherProcessManager,
+  handleError,
   isErrnoException,
   notEmpty,
-  IDiskFileProvider,
-  FileAccess,
-  FileSystemProviderCapabilities,
-  EXT_LIST_VIDEO,
-  EXT_LIST_IMAGE,
 } from '../common/';
 
-import { ParcelWatcherServer } from './file-service-watcher';
+import { getFileType } from './hosted/shared/file-type';
+import { WatcherProcessManagerToken } from './watcher-process-manager';
 
-const { Path } = path;
 const UNSUPPORTED_NODE_MODULES_EXCLUDE = '**/node_modules/*/**';
 const DEFAULT_NODE_MODULES_EXCLUDE = '**/node_modules/**';
 
@@ -53,6 +57,7 @@ export interface IWatcher {
   id: number;
   options?: {
     excludes?: string[];
+    recursive?: boolean;
   };
   disposable: IDisposable;
 }
@@ -60,32 +65,52 @@ export interface IWatcher {
 @Injectable({ multiple: true })
 export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvider> implements IDiskFileProvider {
   private fileChangeEmitter = new Emitter<FileChangeEvent>();
-  private watcherServer: ParcelWatcherServer;
+
   readonly onDidChangeFile: Event<FileChangeEvent> = this.fileChangeEmitter.event;
   protected watcherServerDisposeCollection: DisposableCollection;
 
-  protected readonly watcherCollection = new Map<string, IWatcher>();
   protected watchFileExcludes: string[] = [];
-
-  private _whenReadyDeferred: Deferred<void> = new Deferred();
-  private isInitialized = false;
-
-  @Autowired(INJECTOR_TOKEN)
-  private readonly injector: Injector;
 
   @Autowired(ILogServiceManager)
   private readonly loggerManager: ILogServiceManager;
 
+  @Autowired(WatcherProcessManagerToken)
+  private readonly watcherProcessManager: IWatcherProcessManager;
+
   private logger: ILogService;
 
-  constructor() {
+  private ignoreNextChangesEvent: Set<string> = new Set();
+
+  private recursive: boolean;
+
+  constructor(@Optional() recursive = true) {
     super();
     this.logger = this.loggerManager.getLogger(SupportLogNamespace.Node);
-    this.initWatchServer();
+    this.recursive = recursive;
+
+    this.watcherProcessManager.setClient({
+      onDidFilesChanged: (events: DidFilesChangedParams) => {
+        if (events.changes.length > 0) {
+          const changes = events.changes.filter((c) => !this.ignoreNextChangesEvent.has(c.uri));
+          this.fileChangeEmitter.fire(changes);
+          if (Array.isArray(this.rpcClient)) {
+            this.rpcClient.forEach((client) => {
+              client.onDidFilesChanged({
+                changes,
+              });
+            });
+          }
+        }
+      },
+    });
+  }
+
+  async initialize(clientId: string) {
+    await this.watcherProcessManager.createProcess(clientId);
   }
 
   get whenReady() {
-    return this._whenReadyDeferred.promise;
+    return this.watcherProcessManager.whenReady;
   }
 
   onDidChangeCapabilities: Event<void> = Event.None;
@@ -108,8 +133,9 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     return this._capabilities;
   }
 
-  dispose(): void {
+  async dispose() {
     this.watcherServerDisposeCollection?.dispose();
+    this.watcherProcessManager.dispose();
   }
 
   /**
@@ -117,34 +143,30 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
    * @param {{ excludes: string[] }}
    * @memberof DiskFileSystemProvider
    */
-  async watch(uri: UriComponents, options?: { excludes?: string[] }): Promise<number> {
+  async watch(uri: UriComponents, options?: { excludes?: string[]; recursive?: boolean }): Promise<number> {
     await this.whenReady;
     const _uri = Uri.revive(uri);
-    const id = await this.watcherServer.watchFileChanges(_uri.toString(), {
+
+    const id = await this.watcherProcessManager.watch(_uri, {
       excludes: options?.excludes ?? [],
+      recursive: options?.recursive ?? this.recursive,
     });
-    const disposable = {
-      dispose: () => {
-        this.watcherServer.unwatchFileChanges(id);
-      },
-    };
-    this.watcherCollection.set(_uri.toString(), { id, options, disposable });
+
     return id;
   }
 
   unwatch(watcherId: number) {
-    for (const [_uri, { id, disposable }] of this.watcherCollection) {
-      if (watcherId === id) {
-        disposable.dispose();
-      }
-    }
+    this.watcherProcessManager.unWatch(watcherId);
   }
 
-  async stat(uri: UriComponents) {
+  async stat(uri: UriComponents, options?: IFileStatOptions): Promise<FileStat> {
     const _uri = Uri.revive(uri);
     try {
-      const stat = await this.doGetStat(_uri, 1);
-      return stat;
+      const stat = await this.doGetStat(_uri, 1, options);
+      if (stat) {
+        return stat;
+      }
+      throw FileSystemError.Unavailable(uri.path, 'Error occurred while getting the file stat.');
     } catch (e) {
       this.logger.error(e);
       throw e;
@@ -159,6 +181,7 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
 
       dirList.forEach((name) => {
         const filePath = paths.join(_uri.fsPath, name);
+        // eslint-disable-next-line import/namespace
         result.push([name, this.getFileStatType(fse.statSync(filePath))]);
       });
       return result;
@@ -181,7 +204,7 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     if (newStat) {
       return newStat;
     }
-    throw FileSystemError.FileNotFound(uri.path, 'Error occurred while creating the directory.');
+    throw FileSystemError.Unavailable(uri.path, 'Error occurred while creating the directory.');
   }
 
   async readFile(uri: UriComponents, encoding = 'utf8'): Promise<Uint8Array> {
@@ -191,25 +214,35 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
       const buffer = await fse.readFile(FileUri.fsPath(new URI(_uri)));
       return buffer;
     } catch (error) {
-      if (isErrnoException(error)) {
-        if (error.code === 'ENOENT') {
-          throw FileSystemError.FileNotFound(uri.path, 'Error occurred while reading file');
-        }
+      this.handleReadFileError(error, uri);
+    }
+  }
 
-        if (error.code === 'EISDIR') {
-          throw FileSystemError.FileIsDirectory(uri.path, 'Error occurred while reading file: path is a directory.');
-        }
+  async readFileStream(uri: UriComponents, opts: IReadFileStreamOptions): Promise<Readable> {
+    const _uri = Uri.revive(uri);
+    try {
+      return fse.createReadStream(FileUri.fsPath(new URI(_uri)));
+    } catch (error) {
+      this.handleReadFileError(error, uri);
+    }
+  }
 
-        if (error.code === 'EPERM') {
-          throw FileSystemError.FileIsNoPermissions(
-            uri.path,
-            'Error occurred while reading file: path is a directory.',
-          );
-        }
+  protected handleReadFileError(error: Error, uri: UriComponents): never {
+    if (isErrnoException(error)) {
+      if (error.code === 'ENOENT') {
+        throw FileSystemError.FileNotFound(uri.path, 'Error occurred while reading file');
       }
 
-      throw error;
+      if (error.code === 'EISDIR') {
+        throw FileSystemError.FileIsADirectory(uri.path, 'Error occurred while reading file: path is a directory.');
+      }
+
+      if (error.code === 'EPERM') {
+        throw FileSystemError.FileIsNoPermissions(uri.path, 'Error occurred while reading file: path is a directory.');
+      }
     }
+
+    throw error;
   }
 
   async writeFile(
@@ -232,18 +265,23 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     }
 
     try {
+      this.ignoreNextChangesEvent.add(_uri.toString());
       await writeFileAtomic(FileUri.fsPath(new URI(_uri)), buffer);
     } catch (e) {
-      this.logger.warn('writeFileAtomicSync 出错，使用 fs', e);
       await fse.writeFile(FileUri.fsPath(new URI(_uri)), buffer);
+      this.logger.warn('Error using writeFileAtomicSync, using fs instead.', e);
+    } finally {
+      this.ignoreNextChangesEvent.delete(_uri.toString());
     }
   }
 
-  access(uri: UriComponents, mode: number = FileAccess.Constants.F_OK): Promise<boolean> {
-    return fse
-      .access(FileUri.fsPath(URI.from(uri)), mode)
-      .then(() => true)
-      .catch(() => false);
+  async access(uri: UriComponents, mode: number = FileAccess.Constants.F_OK): Promise<boolean> {
+    try {
+      await fse.access(FileUri.fsPath(URI.from(uri)), mode);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async delete(uri: UriComponents, options: { recursive?: boolean; moveToTrash?: boolean }): Promise<void> {
@@ -255,25 +293,14 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     if (!isUndefined(options.recursive)) {
       this.logger.warn('DiskFileSystemProvider not support options.recursive!');
     }
-    // Windows 10.
-    // Deleting an empty directory throws `EPERM error` instead of `unlinkDir`.
-    // https://github.com/paulmillr/chokidar/issues/566
-    // Force moveToTrash
-    const moveToTrash = !!options.moveToTrash;
-    if (moveToTrash) {
+
+    if (options.moveToTrash) {
       return trash([FileUri.fsPath(new URI(_uri))]);
     } else {
       const filePath = FileUri.fsPath(new URI(_uri));
       const outputRootPath = paths.join(os.tmpdir(), uuid());
       try {
-        await new Promise<void>((resolve, reject) => {
-          fse.rename(filePath, outputRootPath, async (error) => {
-            if (error) {
-              return reject(error);
-            }
-            resolve();
-          });
-        });
+        await fse.rename(filePath, outputRootPath);
         // There is no reason for the promise returned by this function not to resolve
         // as soon as the move is complete.  Clearing up the temporary files can be
         // done in the background.
@@ -289,34 +316,46 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     return result;
   }
 
-  async copy(
-    sourceUri: UriComponents,
-    targetUri: UriComponents,
-    options: { overwrite: boolean; recursive?: boolean },
-  ): Promise<FileStat> {
+  async copy(sourceUri: UriComponents, targetUri: UriComponents, options: { overwrite: boolean }): Promise<FileStat> {
     const _sourceUri = Uri.revive(sourceUri);
     const _targetUri = Uri.revive(targetUri);
     const [sourceStat, targetStat] = await Promise.all([this.doGetStat(_sourceUri, 0), this.doGetStat(_targetUri, 0)]);
-    const { overwrite, recursive } = options;
+    const { overwrite } = options;
 
     if (!sourceStat) {
       throw FileSystemError.FileNotFound(sourceUri.path);
     }
-    if (targetStat && !overwrite) {
-      throw FileSystemError.FileExists(targetUri.path, "Did you set the 'overwrite' flag to true?");
+
+    if (targetStat) {
+      if (!overwrite) {
+        throw FileSystemError.FileExists(targetUri.path, "Did you set the 'overwrite' flag to true?");
+      }
+
+      await this.validateMoveCopy(_sourceUri, _targetUri);
     }
-    if (targetStat && targetStat.uri === sourceStat.uri) {
-      throw FileSystemError.FileExists(targetUri.path, 'Cannot perform copy, source and destination are the same.');
-    }
+
     await fse.copy(FileUri.fsPath(_sourceUri.toString()), FileUri.fsPath(_targetUri.toString()), {
       overwrite,
-      recursive,
     });
     const newStat = await this.doGetStat(_targetUri, 1);
     if (newStat) {
       return newStat;
     }
     throw FileSystemError.FileNotFound(targetUri.path, `Error occurred while copying ${sourceUri} to ${targetUri}.`);
+  }
+
+  private async validateMoveCopy(sourceUri: Uri, targetUri: Uri) {
+    if (sourceUri.toString() === targetUri.toString()) {
+      throw FileSystemError.FileExists(targetUri.path, 'Cannot perform copy, source and destination are the same.');
+    }
+
+    if (await this.access(targetUri)) {
+      // Special case: if the target is a parent of the source, we cannot delete
+      // it as it would delete the source as well. In this case we have to throw
+      if (FileUri.isEqualOrParent(targetUri, sourceUri)) {
+        throw FileSystemError.FileExists(targetUri.path, 'Cannot perform copy, source is a parent of the destination.');
+      }
+    }
   }
 
   async getCurrentUserHome(): Promise<FileStat | undefined> {
@@ -333,7 +372,8 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     // 每次调用之后都需要重新初始化 WatcherServer，保证最新的规则生效
     this.logger.log('Set watcher exclude:', watchExcludes);
     this.watchFileExcludes = watchExcludes;
-    this.initWatchServer(this.watchFileExcludes);
+
+    this.watcherProcessManager.setWatcherFileExcludes(watchExcludes);
   }
 
   getWatchFileExcludes() {
@@ -342,63 +382,6 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
 
   getWatchExcludes(excludes?: string[]): string[] {
     return Array.from(new Set(this.watchFileExcludes.concat(excludes || [])));
-  }
-
-  protected initWatchServer(excludes?: string[]) {
-    if (!this.injector) {
-      return;
-    }
-    if (this.watcherServerDisposeCollection) {
-      this.watcherServerDisposeCollection.dispose();
-    }
-    this.watcherServerDisposeCollection = new DisposableCollection();
-    this.watcherServer = this.injector.get(ParcelWatcherServer, [excludes]);
-    this.watcherServer.setClient({
-      onDidFilesChanged: (events: DidFilesChangedParams) => {
-        if (events.changes.length > 0) {
-          this.fileChangeEmitter.fire(events.changes);
-          if (Array.isArray(this.rpcClient)) {
-            this.rpcClient.forEach((client) => {
-              client.onDidFilesChanged({
-                changes: events.changes,
-              });
-            });
-          }
-        }
-      },
-    });
-    this.watcherServerDisposeCollection.push({
-      dispose: () => {
-        this.watcherServer.dispose();
-      },
-    });
-    if (this.isInitialized) {
-      // 当服务已经初始化一次后，重新初始化时需要重新绑定原有的监听服务
-      this.rewatch();
-    } else {
-      this._whenReadyDeferred.resolve();
-    }
-    this.isInitialized = true;
-  }
-
-  private async rewatch() {
-    let tasks: {
-      id: number;
-      uri: string;
-      options?: { excludes?: string[] };
-    }[] = [];
-    for (const [uri, { id, options }] of this.watcherCollection) {
-      tasks.push({
-        id,
-        uri,
-        options,
-      });
-    }
-    // 需要针对缓存根据路径深度排序，防止过度监听
-    tasks = tasks.sort((a, b) => Path.pathDepth(a.uri) - Path.pathDepth(b.uri));
-    for (const { uri, options } of tasks) {
-      await this.watch(Uri.parse(uri), { excludes: this.getWatchExcludes(options?.excludes) });
-    }
   }
 
   protected async createFile(uri: UriComponents, options: { content: Buffer }): Promise<FileStat> {
@@ -468,12 +451,12 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
     // Different types. Files <-> Directory.
     if (targetStat && sourceStat.isDirectory !== targetStat.isDirectory) {
       if (targetStat.isDirectory) {
-        throw FileSystemError.FileIsDirectory(
+        throw FileSystemError.FileIsADirectory(
           targetStat.uri,
           `Cannot move '${sourceStat.uri}' file to an existing location.`,
         );
       }
-      throw FileSystemError.FileNotDirectory(
+      throw FileSystemError.FileNotADirectory(
         targetStat.uri,
         `Cannot move '${sourceStat.uri}' directory to an existing location.`,
       );
@@ -521,33 +504,43 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
       await this.delete(sourceUri, { moveToTrash: false });
       return newStat;
     } else {
+      await this.validateMoveCopy(_sourceUri, _targetUri);
+
       await fse.move(FileUri.fsPath(_sourceUri.toString()), FileUri.fsPath(_targetUri.toString()), { overwrite });
-      const stat = await this.doGetStat(_targetUri, 1);
+      const stat = await this.doGetStat(_targetUri, 1, {
+        throwError: true,
+      });
+
       if (stat) {
         return stat;
       } else {
-        throw FileSystemError.FileNotFound(_targetUri.path);
+        // never reached
+        throw FileSystemError.FileNotFound(
+          targetUri.path,
+          `Error occurred when moving resource from '${sourceUri.toString()}' to '${targetUri.toString()}'.`,
+        );
       }
     }
   }
 
-  protected async doGetStat(uri: Uri, depth: number): Promise<FileStat | undefined> {
+  protected async doGetStat(uri: Uri, depth: number, options?: IFileStatOptions): Promise<FileStat | undefined> {
     try {
       const filePath = uri.fsPath;
       const lstat = await fse.lstat(filePath);
 
       if (lstat.isSymbolicLink()) {
-        let realPath;
+        let realPath: string;
         try {
           realPath = await fse.realpath(FileUri.fsPath(new URI(uri)));
         } catch (e) {
+          this.logger.warn('Cannot resolve symbolic link', uri.toString(), e);
           return undefined;
         }
         const stat = await fse.stat(filePath);
         const realURI = FileUri.create(realPath);
         const realStat = await fse.lstat(realPath);
 
-        let realStatData;
+        let realStatData: FileStat;
         if (stat.isDirectory()) {
           realStatData = await this.doCreateDirectoryStat(realURI.codeUri, realStat, depth);
         } else {
@@ -556,6 +549,7 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
 
         return {
           ...realStatData,
+          realUri: realStatData.uri,
           type: FileType.SymbolicLink,
           isSymbolicLink: true,
           uri: uri.toString(),
@@ -569,6 +563,11 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
         return fileStat;
       }
     } catch (error) {
+      this.logger.error('Error occurred when getting file stat', uri, error);
+      if (options?.throwError) {
+        handleError(error);
+      }
+
       if (isErrnoException(error)) {
         if (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EBUSY' || error.code === 'EPERM') {
           return undefined;
@@ -626,51 +625,6 @@ export class DiskFileSystemProvider extends RPCService<IRPCDiskFileSystemProvide
   }
 
   async getFileType(uri: string): Promise<string | undefined> {
-    try {
-      // 兼容性处理，本质 disk-file 不支持非 file 协议的文件头嗅探
-      if (!uri.startsWith('file:/')) {
-        return this._getFileType('');
-      }
-      // const lstat = await fs.lstat(FileUri.fsPath(uri));
-      const stat = await fse.stat(FileUri.fsPath(uri));
-
-      let ext = '';
-      if (!stat.isDirectory()) {
-        // if(lstat.isSymbolicLink){
-
-        // }else {
-        if (stat.size) {
-          const type = await fileType.stream(fse.createReadStream(FileUri.fsPath(uri)));
-          // 可以拿到 type.fileType 说明为二进制文件
-          if (type.fileType) {
-            ext = type.fileType.ext;
-          }
-        }
-        return this._getFileType(ext);
-        // }
-      } else {
-        return 'directory';
-      }
-    } catch (error) {
-      if (isErrnoException(error)) {
-        if (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EBUSY' || error.code === 'EPERM') {
-          return undefined;
-        }
-      }
-    }
-  }
-
-  private _getFileType(ext: string) {
-    let type = 'text';
-
-    if (EXT_LIST_IMAGE.indexOf(ext) !== -1) {
-      type = 'image';
-    } else if (EXT_LIST_VIDEO.indexOf(ext) !== -1) {
-      type = 'video';
-    } else if (ext && ['xml'].indexOf(ext) === -1) {
-      type = 'binary';
-    }
-
-    return type;
+    return await getFileType(uri);
   }
 }

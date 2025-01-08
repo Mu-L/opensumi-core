@@ -1,5 +1,5 @@
 import { Autowired, Injectable, Optional } from '@opensumi/di';
-import { Disposable, ILineChange } from '@opensumi/ide-core-browser';
+import { Disposable } from '@opensumi/ide-core-browser';
 import { OverviewRulerLane } from '@opensumi/ide-editor';
 import { IEditorDocumentModel } from '@opensumi/ide-editor/lib/browser';
 import { themeColorFromId } from '@opensumi/ide-theme';
@@ -7,12 +7,12 @@ import * as model from '@opensumi/monaco-editor-core/esm/vs/editor/common/model'
 import * as textModel from '@opensumi/monaco-editor-core/esm/vs/editor/common/model/textModel';
 
 import {
-  overviewRulerModifiedForeground,
-  overviewRulerDeletedForeground,
-  overviewRulerAddedForeground,
   minimapGutterAddedBackground,
-  minimapGutterModifiedBackground,
   minimapGutterDeletedBackground,
+  minimapGutterModifiedBackground,
+  overviewRulerAddedForeground,
+  overviewRulerDeletedForeground,
+  overviewRulerModifiedForeground,
 } from '../scm-color';
 import { SCMPreferences } from '../scm-preference';
 

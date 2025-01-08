@@ -1,20 +1,20 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   Emitter,
-  URI,
+  EncodingRegistry,
   Event,
-  IApplicationService,
   FileChangeType,
-  OperatingSystem,
+  IApplicationService,
   IEditorDocumentChange,
   IEditorDocumentModelSaveResult,
+  OperatingSystem,
   PreferenceService,
-  getLanguageIdFromMonaco,
-  EncodingRegistry,
-  UTF8_with_bom,
-  UTF8,
-  detectEncodingFromBuffer,
   SaveTaskResponseState,
+  URI,
+  UTF8,
+  UTF8_with_bom,
+  detectEncodingFromBuffer,
+  getLanguageIdFromMonaco,
 } from '@opensumi/ide-core-browser';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { EOL } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
@@ -48,6 +48,7 @@ export class BaseFileSystemEditorDocumentProvider implements IEditorDocumentMode
   protected _fileContentMd5OnBrowserFs: Set<string> = new Set();
 
   private _detectedEncodingMap = new Map<string, string>();
+  private _detectedEolMap = new Map<string, EOL>();
 
   @Autowired(IFileServiceClient)
   protected readonly fileServiceClient: IFileServiceClient;
@@ -85,21 +86,15 @@ export class BaseFileSystemEditorDocumentProvider implements IEditorDocumentMode
   }
 
   async provideEOL(uri: URI) {
-    const backendOS = await this.applicationService.getBackendOS();
-    const eol = this.preferenceService.get<EOL | 'auto'>(
-      'files.eol',
-      'auto',
-      uri.toString(),
-      getLanguageIdFromMonaco(uri)!,
-    )!;
-
-    if (eol !== 'auto') {
-      return eol;
+    const cache = this._detectedEolMap.get(uri.toString());
+    if (cache) {
+      return cache;
     }
+    const backendOS = await this.applicationService.getBackendOS();
     return backendOS === OperatingSystem.Windows ? EOL.CRLF : EOL.LF;
   }
 
-  async read(uri: URI, options: ReadEncodingOptions): Promise<{ encoding: string; content: string }> {
+  async read(uri: URI, options: ReadEncodingOptions): Promise<{ encoding: string; content: string; eol: EOL }> {
     const { content: buffer } = await this.fileServiceClient.readFile(uri.toString());
 
     const guessEncoding =
@@ -110,28 +105,76 @@ export class BaseFileSystemEditorDocumentProvider implements IEditorDocumentMode
         uri.toString(),
         getLanguageIdFromMonaco(uri)!,
       );
+
+    // TODO: 应该挪到后端去做
     const detected = await detectEncodingFromBuffer(buffer, guessEncoding);
+
     detected.encoding = await this.getReadEncoding(uri, options, detected.encoding);
 
     const content = buffer.toString(detected.encoding);
 
+    const eol = await this.getEol(uri, content);
     const uriString = uri.toString();
 
     this._detectedEncodingMap.set(uriString, detected.encoding);
+    this._detectedEolMap.set(uriString, eol);
 
-    // 记录表示这个文档被[这个editorDocumentProvider]引用了
+    // 记录表示这个文档被引用了
     this._fileContentMd5OnBrowserFs.add(uriString);
 
     return {
       encoding: detected.encoding || UTF8,
       content,
+      eol,
     };
+  }
+
+  private async getEol(uri: URI, content: string) {
+    const MAX_DETECT_LENGTH = 2000;
+    let cr = 0;
+    let lf = 0;
+    let crlf = 0;
+    const len = Math.min(MAX_DETECT_LENGTH, content.length);
+    for (let i = 0; i < len; i++) {
+      if (content[i] === '\r') {
+        if (content[i + 1] === '\n') {
+          crlf++;
+          // 跳过后续 \n
+          i++;
+        } else {
+          cr++;
+        }
+      } else if (content[i] === '\n') {
+        lf++;
+      }
+    }
+
+    const totalEOLCount = cr + lf + crlf;
+    const totalCRCount = cr + crlf;
+    const eol = this.preferenceService.get<EOL | 'auto'>(
+      'files.eol',
+      'auto',
+      uri.toString(),
+      getLanguageIdFromMonaco(uri)!,
+    )!;
+    if (eol !== 'auto') {
+      return eol;
+    }
+    const defaultEOL = await this.provideEOL(uri);
+    if (totalEOLCount === 0) {
+      return defaultEOL;
+    }
+    if (totalCRCount > totalEOLCount / 2) {
+      return EOL.CRLF;
+    }
+    return EOL.LF;
   }
 
   async provideEditorDocumentModelContent(uri: URI, encoding: string) {
     // TODO: 这部分要优化成buffer获取（长期来看是stream获取，encoding在哪一层做？）
     // 暂时还是使用 resolveContent 内提供的 decode 功能
     // 之后 encoding 做了分层之后和其他的需要 decode 的地方一起改
+
     return (await this.read(uri, { encoding })).content;
   }
 

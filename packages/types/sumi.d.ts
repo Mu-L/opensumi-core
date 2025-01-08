@@ -1,19 +1,34 @@
-/* tslint:disable callable-types */
 /**
  * @deprecated `kaitian` was deprecated, Please use `sumi` instead.
  */
 declare module 'kaitian' {
+  // eslint-disable-next-line import/no-unresolved
   export * from 'sumi';
 }
 declare module 'sumi' {
+  // eslint-disable-next-line import/no-unresolved
   export * from 'vscode';
-
   import {
-    ExtensionContext as VSCodeExtensionContext,
+    CancellationToken,
+    ChatAgent2,
+    ChatAgentContent,
+    ChatAgentContext,
+    ChatAgentFileTree,
+    ChatAgentMarkdownContent,
+    ChatAgentReplyFollowup,
+    ChatAgentRequest,
+    ChatAgentResult2,
+    ChatAgentTask,
     Disposable,
+    ExtensionKind,
+    MarkdownString,
+    Progress,
+    ProviderResult,
     TextEditor,
     TextEditorEdit,
-    ExtensionKind,
+    ExtensionContext as VSCodeExtensionContext,
+    ViewBadge,
+    // eslint-disable-next-line import/no-unresolved
   } from 'vscode';
 
   /**
@@ -458,10 +473,12 @@ declare module 'sumi' {
      * @example
      * ```ts
      *  const tabbar = kaitian.layout.getTabbarHandler('TabbarIconTest');
-     *  tabbar.setBadge('12');
+     *  tabbar.setBadge({value:20,tooltip:'20'});
+     *  or
+     *  tabbar.setBadge('20');
      * ```
      */
-    setBadge(badge: string): void;
+    setBadge(badge?: string | ViewBadge): void;
 
     activate(): void;
 
@@ -577,7 +594,7 @@ declare module 'sumi' {
 
       /**
        * 设置 Button 的 State
-       * state 需要对应在 kaitianContributes 中配置
+       * state 需要对应在 sumiContributes 中配置
        * @param state
        * @param 额外改变的 title
        */
@@ -610,7 +627,7 @@ declare module 'sumi' {
       onStateChanged: Event<{ from: string; to: string }>;
 
       /**
-       * 显示 button 元素对应的 popover 元素，需要在 kaitianContributes 中配置
+       * 显示 button 元素对应的 popover 元素，需要在 sumiContributes 中配置
        */
       showPopover(): Promise<void>;
 
@@ -620,7 +637,7 @@ declare module 'sumi' {
     export interface IToolbarSelectActionHandle<T> {
       /**
        * 设置 Select 的 State
-       * state 需要对应在 kaitianContributes 中配置
+       * state 需要对应在 sumiContributes 中配置
        * @param state
        */
       setState(state: string): Promise<void>;
@@ -840,5 +857,68 @@ declare module 'sumi' {
      * @param id
      */
     export function getToolbarActionSelectHandle<T = any>(id: string): Promise<IToolbarSelectActionHandle<T>>;
+  }
+
+  export interface ChatAgentSampleQuestionProvider {
+    provideSampleQuestions(token: CancellationToken): ProviderResult<ChatAgentReplyFollowup[]>;
+  }
+
+  export interface ChatAgentWelcomeMessage {
+    content: string | MarkdownString;
+    sampleQuestions?: ChatAgentReplyFollowup[];
+  }
+
+  export interface ChatAgentWelcomeMessageProvider {
+    provideChatWelcomeMessage(token: CancellationToken): ProviderResult<ChatAgentWelcomeMessage>;
+  }
+
+  export interface ChatAgentPopulateInputParam {
+    command?: string;
+    prompt: string;
+  }
+
+  export interface ChatAgentComponent {
+    component: string;
+    value?: unknown;
+  }
+
+  export type ChatAgentProgress =
+    | ChatAgentContent
+    | ChatAgentMarkdownContent
+    | ChatAgentFileTree
+    | ChatAgentTask
+    | ChatAgentComponent;
+
+  export type ChatAgentHandler = (
+    request: ChatAgentRequest,
+    context: ChatAgentContext,
+    progress: Progress<ChatAgentProgress>,
+    token: CancellationToken,
+  ) => ProviderResult<ChatAgentResult2>;
+
+  // proposed api
+  export interface InlineChatAgent {
+    dispose(): void;
+  }
+
+  export interface ChatAgent extends ChatAgent2 {
+    sampleQuestionProvider?: ChatAgentSampleQuestionProvider;
+    chatWelcomMessageProvider?: ChatAgentWelcomeMessageProvider;
+    populateChatInput?: (param: ChatAgentPopulateInputParam) => void;
+    isDefault?: boolean;
+  }
+
+  export type ChatAgentCustomReplyMessage = ChatAgentContent | ChatAgentComponent;
+
+  export namespace chat {
+    /**
+     * create chat agent
+     */
+    export function createChatAgent(name: string, handler: ChatAgentHandler): ChatAgent;
+
+    export function sendMessage(chunk: ChatAgentCustomReplyMessage): void;
+
+    // proposed api
+    export function createInlineChatAgent(name: string, handler: ChatAgentHandler): InlineChatAgent;
   }
 }

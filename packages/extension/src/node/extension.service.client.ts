@@ -1,26 +1,27 @@
 import os from 'os';
 import path from 'path';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { RPCService } from '@opensumi/ide-connection';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
-import { uuid, INodeLogger, Uri, AppConfig } from '@opensumi/ide-core-node';
+import { AppConfig, INodeLogger, Uri, pMemoize, retry, uuid } from '@opensumi/ide-core-node';
 import { IFileService } from '@opensumi/ide-file-service';
 
 import {
-  IExtraMetaData,
-  IExtensionMetaData,
-  IExtensionNodeService,
-  IExtensionNodeClientService,
   ICreateProcessOptions,
+  IExtensionMetaData,
+  IExtensionNodeClientService,
+  IExtensionNodeService,
+  IExtraMetaData,
 } from '../common';
+import { IExtensionLanguagePackMetadata } from '../common/vscode';
 
 import * as lp from './languagePack';
 
 export const DEFAULT_NLS_CONFIG_DIR = path.join(os.homedir(), '.sumi');
 
 interface IRPCExtensionService {
-  $processNotExist(id: string): void;
+  $processNotExist(id: string): Promise<string>;
   $processCrashRestart(id: string): void;
   $restartExtProcess(): void;
 }
@@ -40,12 +41,13 @@ export class ExtensionServiceClientImpl
   private readonly hashCalculateService: IHashCalculateService;
 
   @Autowired(AppConfig)
-  private appConfig: AppConfig;
+  private readonly appConfig: AppConfig;
 
   @Autowired(INodeLogger)
-  logger: INodeLogger;
+  private readonly logger: INodeLogger;
 
   private clientId: string;
+  private languagePackCache: IExtensionLanguagePackMetadata | null = null;
 
   public setConnectionClientId(clientId: string) {
     this.clientId = clientId;
@@ -56,9 +58,41 @@ export class ExtensionServiceClientImpl
     return this.appConfig.marketplace.endpoint;
   }
 
+  async pid(): Promise<number | null> {
+    return this.extensionService.getExtProcessId(this.clientId);
+  }
+
+  @pMemoize()
   public infoProcessNotExist() {
     if (this.client) {
-      this.client.$processNotExist(this.clientId);
+      return retry(
+        async () => {
+          if (!this.client) {
+            throw new Error('Client not exist');
+          }
+          const pid = await this.pid();
+          if (pid) {
+            this.logger.log('Process exist, clientId:', this.clientId, 'pid:', pid);
+            return true;
+          }
+
+          this.logger.log('Process not exist, try to restart, clientId:', this.clientId);
+          const result = await this.client.$processNotExist(this.clientId);
+          if (result === 'ok') {
+            this.logger.log('Process restart success, clientId:', this.clientId);
+            return true;
+          } else {
+            throw new Error('Process not exist');
+          }
+        },
+        {
+          delay: 1000,
+          retries: 60 * 20,
+          onFailedAttempt: (error) => {
+            this.logger.error('error when info browser that process not exists', error);
+          },
+        },
+      );
     }
   }
 
@@ -134,7 +168,7 @@ export class ExtensionServiceClientImpl
       name,
       version,
     } = packageJson;
-    const languagePacks: { [key: string]: any } = {};
+    const languagePacks: IExtensionLanguagePackMetadata = {};
     for (const localization of localizations) {
       // 这里需要添加languagePack路径作为id一部分，因为可能存在多个
       const id = `${languagePackPath}-${publisher.toLocaleLowerCase()}.${name.toLocaleLowerCase()}`;
@@ -160,8 +194,20 @@ export class ExtensionServiceClientImpl
     return languagePacks;
   }
 
+  public async setupNLSConfig(languageId: string, storagePath: string): Promise<void> {
+    const nlsConfig = await lp.getNLSConfiguration(
+      // This commit is used to generate the path for caching language packs.
+      // In VSCode, it use its head ref commit. here we just use a fixed commit.
+      'f06011ac164ae4dc8e753a3fe7f9549844d15e35',
+      storagePath,
+      languageId.toLowerCase(),
+    );
+    nlsConfig['_languagePackSupport'] = true;
+    process.env.VSCODE_NLS_CONFIG = JSON.stringify(nlsConfig);
+  }
+
   public async updateLanguagePack(languageId: string, languagePack: string, storagePath: string): Promise<void> {
-    let languagePacks: { [key: string]: any } = {};
+    let languagePacks: IExtensionLanguagePackMetadata = {};
     storagePath = storagePath || DEFAULT_NLS_CONFIG_DIR;
     this.logger.log(`find ${languageId}， storagePath：${storagePath}`);
     const languagePath = Uri.file(path.join(storagePath, 'languagepacks.json')).toString();
@@ -192,17 +238,14 @@ export class ExtensionServiceClientImpl
         ...this.convertLanguagePack(packageJson, languagePack),
       };
     }
-
     const languagePackJson = await this.fileService.getFileStat(languagePath);
+    this.languagePackCache = languagePacks;
     await this.fileService.setContent(languagePackJson!, JSON.stringify(languagePacks));
+    await this.setupNLSConfig(languageId, storagePath);
+  }
 
-    const nlsConfig = await lp.getNLSConfiguration(
-      'f06011ac164ae4dc8e753a3fe7f9549844d15e35',
-      storagePath,
-      languageId.toLowerCase(),
-    );
-    // tslint:disable-next-line: no-string-literal
-    nlsConfig['_languagePackSupport'] = true;
-    process.env.VSCODE_NLS_CONFIG = JSON.stringify(nlsConfig);
+  public getLanguagePack(languageId: string) {
+    const languagePacks = this.languagePackCache?.[languageId];
+    return Promise.resolve(languagePacks);
   }
 }

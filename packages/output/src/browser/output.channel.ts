@@ -1,11 +1,12 @@
-import { Optional, Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { PreferenceService } from '@opensumi/ide-core-browser';
 import { OUTPUT_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
-import { Disposable, uuid, URI, localize, Deferred, IEventBus, strings, Schemes } from '@opensumi/ide-core-common';
-import { IEditorDocumentModelService, IEditorDocumentModelRef } from '@opensumi/ide-editor/lib/browser';
+import { Deferred, Disposable, IEventBus, Schemes, URI, localize, strings, uuid } from '@opensumi/ide-core-common';
+import { IEditorDocumentModelRef, IEditorDocumentModelService } from '@opensumi/ide-editor/lib/browser';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
+import * as monaco from '@opensumi/ide-monaco';
 import { ITextModel } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { EditOperation } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/editOperation';
 
 import { ContentChangeEvent, ContentChangeEventPayload, ContentChangeType } from '../common';
 
@@ -79,7 +80,7 @@ export class OutputChannel extends Disposable {
     this.documentService.createModelReference(uri).then((model) => {
       this.outputModel = model;
       this.monacoModel = this.outputModel.instance.getMonacoModel();
-      this.monacoModel.setValue(localize('output.channel.none', '还没有任何输出'));
+      this.monacoModel.setValue(localize('output.channel.none', '<no output yet>'));
 
       if (this.enableHighlight) {
         this.outputModel.instance.languageId = 'log';
@@ -117,21 +118,11 @@ export class OutputChannel extends Disposable {
     this.monacoModel.setValue(value);
   }
 
-  private pushEditOperations(value: string): void {
-    const lineCount = this.monacoModel.getLineCount();
-    const character = value.length;
-    // 用 pushEditOperations 插入文本，直接替换 content 会触发重新计算高亮
-    this.monacoModel.pushEditOperations(
-      [],
-      [
-        {
-          range: new monaco.Range(lineCount, 0, lineCount + 1, character),
-          text: value,
-          forceMoveMarkers: true,
-        },
-      ],
-      () => [],
-    );
+  private applyEdits(value: string): void {
+    const lastLine = this.monacoModel.getLineCount();
+    const lastLineMaxColumn = this.monacoModel.getLineMaxColumn(lastLine);
+    const edits = [EditOperation.insert(new monaco.Position(lastLine, lastLineMaxColumn), value)];
+    this.monacoModel.applyEdits(edits);
   }
 
   private isEmptyChannel(): boolean {
@@ -149,7 +140,7 @@ export class OutputChannel extends Disposable {
       if (this.isEmptyChannel() || needSlice) {
         this.doReplace(this.outputLines.join('') + value);
       } else {
-        this.pushEditOperations(value);
+        this.applyEdits(value);
       }
       this.outputLines.push(value);
     });
@@ -214,6 +205,11 @@ export class OutputChannel extends Disposable {
         handler.activate();
       }
     }
+  }
+
+  async setLanguageId(languageId: string): Promise<void> {
+    await this.modelReady.promise;
+    this.outputModel.instance.languageId = languageId;
   }
 
   get isVisible(): boolean {

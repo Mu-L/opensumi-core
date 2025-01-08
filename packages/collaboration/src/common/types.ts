@@ -1,17 +1,19 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+import { ICodeEditor } from '@opensumi/ide-monaco';
+
 // @ts-ignore
 import type { Text } from 'yjs';
-
-import { ICodeEditor } from '@opensumi/ide-monaco';
 
 export const ICollaborationService = Symbol('ICollaborationService');
 
 export interface ICollaborationService {
   initialize(): void;
+  initFileWatch(): void;
   destroy(): void;
   undoOnFocusedTextModel(): void;
   redoOnFocusedTextModel(): void;
   registerContribution(contribution: CollaborationModuleContribution): void;
+  registerUserInfo(): void;
 }
 
 export interface ITextModelBinding {

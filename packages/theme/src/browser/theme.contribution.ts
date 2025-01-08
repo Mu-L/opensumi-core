@@ -1,42 +1,52 @@
 import { Autowired } from '@opensumi/di';
 import {
-  Domain,
+  ClientAppContribution,
+  Command,
   CommandContribution,
   CommandRegistry,
-  Command,
-  localize,
-  PreferenceService,
-  replaceLocalizePlaceholder,
-  PreferenceScope,
-  QuickOpenService,
-  QuickOpenOptions,
-  QuickOpenItem,
-  Mode,
-  ClientAppContribution,
+  Domain,
   GeneralSettingsId,
+  ILogger,
+  Mode,
+  PreferenceScope,
+  PreferenceService,
+  QuickOpenItem,
+  QuickOpenOptions,
+  QuickOpenService,
+  localize,
+  replaceLocalizePlaceholder,
 } from '@opensumi/ide-core-browser';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 
 import {
-  IThemeService,
-  IIconService,
-  BuiltinThemeComparator,
-  getThemeTypeName,
   BuiltinTheme,
+  BuiltinThemeComparator,
   DEFAULT_THEME_ID,
+  IIconService,
+  IProductIconService,
+  IThemeService,
+  IThemeStore,
+  IconThemeInfo,
+  ThemeInfo,
+  getThemeTypeName,
 } from '../common';
 import { ISemanticTokenRegistry, ProbeScope } from '../common/semantic-tokens-registry';
+
+import { ThemeStore } from './theme-store';
 
 export const THEME_TOGGLE_COMMAND: Command = {
   id: 'theme.toggle',
   label: '%theme.toggle%',
-  alias: 'Color Theme',
 };
 
 export const ICON_THEME_TOGGLE_COMMAND: Command = {
   id: 'theme.icon.toggle',
   label: '%theme.icon.toggle%',
-  alias: 'File Icon Theme',
+};
+
+export const PRODUCT_ICON_THEME_TOGGLE_COMMAND: Command = {
+  id: 'theme.productIcon.toggle',
+  label: '%theme.productIcon.toggle%',
 };
 
 @Domain(MenuContribution, CommandContribution, ClientAppContribution)
@@ -47,6 +57,9 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
   @Autowired(IIconService)
   iconService: IIconService;
 
+  @Autowired(IProductIconService)
+  productIconService: IProductIconService;
+
   @Autowired(QuickOpenService)
   private quickOpenService: QuickOpenService;
 
@@ -56,8 +69,15 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
   @Autowired(ISemanticTokenRegistry)
   protected readonly semanticTokenRegistry: ISemanticTokenRegistry;
 
+  @Autowired(IThemeStore)
+  private themeStore: ThemeStore;
+
+  @Autowired(ILogger)
+  protected readonly logger: ILogger;
+
   async initialize() {
     this.registerDefaultColorTheme();
+
     this.registerDefaultTokenStyles();
     this.registerDefaultTokenType();
     this.registerDefaultTokenModifier();
@@ -68,12 +88,16 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
    * 如果没有设置默认 theme 或者 设置的 theme 为 dark 类型，为了有体感上的加速，设置默认的 theme
    */
   private registerDefaultColorTheme() {
-    const themeId = this.preferenceService.get<string>('general.theme');
+    const themeId = this.preferenceService.get<string>(GeneralSettingsId.Theme);
     const shouldApplyDefaultThemeId = !themeId || themeId.includes('dark');
 
     if (shouldApplyDefaultThemeId) {
-      this.themeService.applyTheme(DEFAULT_THEME_ID);
+      this.themeService.applyTheme(this.themeStore.getDefaultThemeID());
     }
+
+    this.themeService.ensureValidTheme().then((validTheme) => {
+      this.themeService.applyTheme(validTheme);
+    });
   }
 
   private registerDefaultTokenModifier() {
@@ -193,7 +217,7 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
       const selector = this.semanticTokenRegistry.parseTokenSelector(selectorString);
       this.semanticTokenRegistry.registerTokenStyleDefault(selector, { scopesToProbe });
     } catch (e) {
-      // ignore error
+      this.logger.error('Failed to register token style default', e);
     }
   }
 
@@ -220,34 +244,77 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
       command: ICON_THEME_TOGGLE_COMMAND.id,
       group: '4_theme',
     });
+    menus.registerMenuItem(MenuId.SettingsIconMenu, {
+      command: PRODUCT_ICON_THEME_TOGGLE_COMMAND.id,
+      group: '4_theme',
+    });
   }
 
   registerCommands(commands: CommandRegistry) {
     commands.registerCommand(THEME_TOGGLE_COMMAND, {
-      execute: async () => {
-        const themeInfos = this.themeService.getAvailableThemeInfos();
-        themeInfos.sort((a, b) => BuiltinThemeComparator[a.base] - BuiltinThemeComparator[b.base]);
-        let prevBase: BuiltinTheme;
-        const items = themeInfos.map((themeInfo) => {
-          if (prevBase !== themeInfo.base && !prevBase?.startsWith('hc')) {
-            prevBase = themeInfo.base;
+      execute: async (options: { extensionId?: string } = {}) => {
+        const { extensionId } = options;
+        const getPickItems = (extensionId?: string) => {
+          const themeInfos = this.themeService.getAvailableThemeInfos();
+          if (extensionId) {
+            const items: {
+              label: string;
+              value: string;
+              groupLabel?: string;
+            }[] = [];
+            let currentTheme: ThemeInfo | undefined;
+            for (const themeInfo of themeInfos) {
+              if (themeInfo.themeId === this.themeService.currentThemeId) {
+                currentTheme = themeInfo;
+              } else if (themeInfo.extensionId === extensionId) {
+                items.push({
+                  label: replaceLocalizePlaceholder(themeInfo.name)!,
+                  value: themeInfo.themeId,
+                });
+              }
+            }
+            if (currentTheme) {
+              items.push({
+                label: replaceLocalizePlaceholder(currentTheme.name)!,
+                value: currentTheme?.themeId,
+                groupLabel: localize('theme.current', 'Current'),
+              });
+            }
+            return {
+              items,
+              defaultSelected: 0,
+            };
+          }
+          themeInfos.sort((a, b) => BuiltinThemeComparator[a.base] - BuiltinThemeComparator[b.base]);
+          let prevBase: BuiltinTheme;
+          const items = themeInfos.map((themeInfo) => {
+            if (prevBase !== themeInfo.base && !prevBase?.startsWith('hc')) {
+              prevBase = themeInfo.base;
+              return {
+                label: replaceLocalizePlaceholder(themeInfo.name)!,
+                value: themeInfo.themeId,
+                groupLabel: localize(getThemeTypeName(prevBase)),
+              };
+            }
             return {
               label: replaceLocalizePlaceholder(themeInfo.name)!,
               value: themeInfo.themeId,
-              groupLabel: localize(getThemeTypeName(prevBase)),
             };
-          }
+          });
+          const defaultSelected = items.findIndex((opt) => opt.value === this.themeService.currentThemeId);
           return {
-            label: replaceLocalizePlaceholder(themeInfo.name)!,
-            value: themeInfo.themeId,
+            items,
+            defaultSelected,
           };
-        });
-        const defaultSelected = items.findIndex((opt) => opt.value === this.themeService.currentThemeId);
+        };
+
+        const { items, defaultSelected } = getPickItems(extensionId);
+
         const prevThemeId = this.themeService.currentThemeId;
         const themeId = await this.showPickWithPreview(
           items,
           {
-            selectIndex: () => defaultSelected,
+            selectIndex: (lookFor) => (lookFor ? -1 : defaultSelected), // 默认展示当前主题，如果有输入，则选择第一个，否则 selectIndex 一直不变导致显示有问题
             placeholder: localize('theme.quickopen.plh'),
           },
           (value) => {
@@ -262,19 +329,58 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
       },
     });
     commands.registerCommand(ICON_THEME_TOGGLE_COMMAND, {
-      execute: async () => {
-        const themeInfos = this.iconService.getAvailableThemeInfos();
-        const items = themeInfos.map((themeInfo) => ({
-          label: themeInfo.name,
-          value: themeInfo.themeId,
-        }));
-        const defaultSelected = items.findIndex((opt) => opt.value === this.iconService.currentThemeId);
+      execute: async (options: { extensionId?: string } = {}) => {
+        const { extensionId } = options;
+        const getPickItems = (extensionId?: string) => {
+          const themeInfos = this.iconService.getAvailableThemeInfos();
+          if (extensionId) {
+            const items: {
+              label: string;
+              value: string;
+              groupLabel?: string;
+            }[] = [];
+
+            let currentTheme: IconThemeInfo | undefined;
+            for (const themeInfo of themeInfos) {
+              if (themeInfo.themeId === this.iconService.currentThemeId) {
+                currentTheme = themeInfo;
+              } else if (themeInfo.extensionId === extensionId) {
+                items.push({
+                  label: themeInfo.name,
+                  value: themeInfo.themeId,
+                });
+              }
+            }
+            if (currentTheme) {
+              items.push({
+                label: currentTheme.name,
+                value: currentTheme.themeId,
+                groupLabel: localize('theme.current', 'Current'),
+              });
+            }
+            return {
+              items,
+              defaultSelected: 0,
+            };
+          }
+          const items = themeInfos.map((themeInfo) => ({
+            label: themeInfo.name,
+            value: themeInfo.themeId,
+          }));
+          const defaultSelected = items.findIndex((opt) => opt.value === this.iconService.currentThemeId);
+          return {
+            items,
+            defaultSelected,
+          };
+        };
+
+        const { items, defaultSelected } = getPickItems(extensionId);
         const prevThemeId = this.iconService.currentThemeId;
         const themeId = await this.showPickWithPreview(
           items,
           {
-            selectIndex: () => defaultSelected,
-            placeholder: localize('icon.quickopen.plh'),
+            selectIndex: (lookFor) => (lookFor ? -1 : defaultSelected),
+            placeholder: localize('theme.icon.quickopen.plh'),
           },
           (value) => {
             this.updateTopPreference(GeneralSettingsId.Icon, value);
@@ -284,6 +390,33 @@ export class ThemeContribution implements MenuContribution, CommandContribution,
           await this.updateTopPreference(GeneralSettingsId.Icon, themeId);
         } else {
           await this.updateTopPreference(GeneralSettingsId.Icon, prevThemeId);
+        }
+      },
+    });
+
+    commands.registerCommand(PRODUCT_ICON_THEME_TOGGLE_COMMAND, {
+      execute: async () => {
+        const productIcons = this.productIconService.getAvailableThemeInfos();
+        const items = productIcons.map((productIcon) => ({
+          label: productIcon.name,
+          value: productIcon.themeId,
+        }));
+        const defaultSelected = items.findIndex((opt) => opt.value === this.productIconService.currentThemeId);
+        const prevThemeId = this.productIconService.currentThemeId;
+        const themeId = await this.showPickWithPreview(
+          items,
+          {
+            selectIndex: () => defaultSelected,
+            placeholder: localize('theme.productIcon.quickopen.plh'),
+          },
+          (value) => {
+            this.updateTopPreference(GeneralSettingsId.ProductIconTheme, value);
+          },
+        );
+        if (themeId) {
+          await this.updateTopPreference(GeneralSettingsId.ProductIconTheme, themeId);
+        } else {
+          await this.updateTopPreference(GeneralSettingsId.ProductIconTheme, prevThemeId);
         }
       },
     });

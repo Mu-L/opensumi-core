@@ -1,12 +1,12 @@
 import {
-  FILE_COMMANDS,
+  COMMON_COMMANDS,
   Command,
   EDITOR_COMMANDS,
-  COMMON_COMMANDS,
-  TERMINAL_COMMANDS,
+  FILE_COMMANDS,
+  LAYOUT_COMMANDS,
   MARKER_COMMANDS,
   SEARCH_COMMANDS,
-  LAYOUT_COMMANDS,
+  TERMINAL_COMMANDS,
 } from '@opensumi/ide-core-browser';
 import { DEBUG_COMMANDS } from '@opensumi/ide-debug';
 import { THEME_TOGGLE_COMMAND } from '@opensumi/ide-theme/lib/browser/theme.contribution';
@@ -128,7 +128,12 @@ export const EVEN_EDITOR_WIDTH: Command = {
 
 export const CLOSE_OTHER_GROUPS: Command = {
   id: 'workbench.action.closeEditorsInOtherGroups',
-  delegate: EDITOR_COMMANDS.EVEN_EDITOR_GROUPS.id,
+  delegate: EDITOR_COMMANDS.CLOSE_OTHER_GROUPS.id,
+};
+
+export const CLOSE_UNMODIFIED_EDITORS: Command = {
+  id: 'workbench.action.closeUnmodifiedEditors',
+  delegate: EDITOR_COMMANDS.CLOSE_SAVED.id,
 };
 
 export const OPEN_EDITOR_AT_INDEX: Command = {
@@ -263,6 +268,11 @@ export const SETTINGS_COMMAND_OPEN_SETTINGS_JSON: Command = {
   delegate: 'preference.open.source',
 };
 
+export const SETTINGS_COMMAND_OPEN_GLOBAL_OPEN_KEYMAPS: Command = {
+  id: 'workbench.action.openGlobalKeybindings',
+  delegate: COMMON_COMMANDS.OPEN_KEYMAPS.id,
+};
+
 export const EDITOR_NAVIGATE_BACK: Command = {
   id: 'workbench.action.navigateBack',
   delegate: EDITOR_COMMANDS.GO_BACK.id,
@@ -369,4 +379,20 @@ export const LAYOUT_COMMAND_MAXIMIZE_EDITOR: Command = {
 
 export const WALKTHROUGHS_COMMAND_GET_STARTED: Command = {
   id: 'walkthroughs.get.started',
+};
+
+export const OPEN_MERGEEDITOR: Command = {
+  id: '_open.mergeEditor',
+  delegate: EDITOR_COMMANDS.OPEN_MERGEEDITOR.id,
+  label: 'Open Merge Editor',
+};
+
+export const DEBUG_START: Command = {
+  id: 'workbench.action.debug.selectandstart',
+  delegate: 'debug.start',
+};
+
+export const DEBUG_ADD: Command = {
+  id: 'debug.addConfiguration',
+  delegate: 'debug.showAllAutomaticDebugConfigurations',
 };

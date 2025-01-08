@@ -1,30 +1,29 @@
 import cls from 'classnames';
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
-import { IRecycleTreeHandle, RecycleTree, INodeRendererWrapProps, TreeNodeEvent } from '@opensumi/ide-components';
+import { INodeRendererWrapProps, IRecycleTreeHandle, RecycleTree, TreeNodeEvent } from '@opensumi/ide-components';
 import { useInjectable } from '@opensumi/ide-core-browser';
 import { IDisposable } from '@opensumi/ide-core-common';
 
 import {
-  ExpressionNode,
-  ExpressionContainer,
   DebugHoverVariableRoot,
   DebugVariable,
+  ExpressionContainer,
+  ExpressionNode,
 } from '../tree/debug-tree-node.define';
-import { DebugVariableRenderedNode, DEBUG_VARIABLE_TREE_NODE_HEIGHT } from '../view/variables/debug-variables.view';
+import { DEBUG_VARIABLE_TREE_NODE_HEIGHT, DebugVariableRenderedNode } from '../view/variables/debug-variables.view';
 
 import { DebugHoverModel } from './debug-hover-model';
 import { DebugHoverTreeModelService, IDebugHoverUpdateData } from './debug-hover-tree.model.service';
 import styles from './debug-hover.module.less';
 
-export const DebugHoverView = observer(() => {
+export const DebugHoverView = () => {
   const debugHoverTreeModelService: DebugHoverTreeModelService = useInjectable(DebugHoverTreeModelService);
-  const DEFAULT_LAYOUT_HEIGHT = 250;
 
+  const DEFAULT_LAYOUT_HEIGHT = 250;
   const [model, setModel] = React.useState<{ treeModel?: DebugHoverModel; variable?: DebugVariable }>({});
   const [treeLayoutHeight, setTreeLayoutHeight] = React.useState<number>(DEFAULT_LAYOUT_HEIGHT);
-  const wrapperRef: React.RefObject<HTMLDivElement> = React.createRef();
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     debugHoverTreeModelService.onDidUpdateTreeModelOrVariable(async (data: IDebugHoverUpdateData) => {
@@ -144,4 +143,4 @@ export const DebugHoverView = observer(() => {
       {renderVariableTree()}
     </div>
   );
-});
+};

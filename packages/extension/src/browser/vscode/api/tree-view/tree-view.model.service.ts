@@ -1,45 +1,45 @@
 import { DragEvent, MouseEvent } from 'react';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  DecorationsManager,
-  Decoration,
-  IRecycleTreeHandle,
-  TreeNodeType,
-  PromptValidateMessage,
-  TreeNodeEvent,
-  TreeNode,
   CompositeTreeNode,
+  Decoration,
+  DecorationsManager,
+  IRecycleTreeHandle,
+  PromptValidateMessage,
   TargetMatchMode,
+  TreeNode,
+  TreeNodeEvent,
+  TreeNodeType,
 } from '@opensumi/ide-components';
 import {
+  CommandService,
+  Deferred,
   DisposableCollection,
   Emitter,
-  PreferenceService,
   IContextKeyService,
-  Deferred,
-  ThrottledDelayer,
-  CommandService,
   LabelService,
+  PreferenceService,
+  ThrottledDelayer,
 } from '@opensumi/ide-core-browser';
 import {
   AbstractMenuService,
   ICtxMenuRenderer,
-  generateCtxMenu,
   MenuId,
+  generateCtxMenu,
 } from '@opensumi/ide-core-browser/lib/menu/next';
 import {
-  isUndefinedOrNull,
-  isNumber,
   CancellationToken,
-  Disposable,
-  Uri,
-  URI,
-  ILogger,
   CancellationTokenSource,
-  uuid,
+  Disposable,
+  ILogger,
   Mimes,
   Schemes,
+  URI,
+  Uri,
+  isNumber,
+  isUndefinedOrNull,
+  uuid,
 } from '@opensumi/ide-core-common';
 
 import {
@@ -54,8 +54,8 @@ import {
   DataTransfers,
   DraggedTreeItemsIdentifier,
   LocalSelectionTransfer,
-  toVSDataTransfer,
   VSDataTransfer,
+  toVSDataTransfer,
 } from '../../../../common/vscode/data-transfer';
 import { TreeViewDataProvider, TreeViewDragAndDropController } from '../main.thread.treeview';
 
@@ -233,7 +233,6 @@ export class ExtensionTreeViewModel {
 
   private _isMultiSelected = false;
   private revealDelayer = new ThrottledDelayer<void>(ExtensionTreeViewModel.DEFAULT_REVEAL_DELAY);
-  private revealDeferred: Deferred<void> | null;
 
   private toCancelNodeExpansion: DisposableCollection = new DisposableCollection();
   private draggedOverNode: ExtensionTreeNode | ExtensionCompositeTreeNode;
@@ -243,6 +242,7 @@ export class ExtensionTreeViewModel {
   private readonly treeItemsTransfer = LocalSelectionTransfer.getInstance<DraggedTreeItemsIdentifier>();
 
   private readonly treeMimeType: string;
+  private treeHandlerReadyDeffer = new Deferred<void>();
 
   constructor() {
     this._whenReady = this.initTreeModel();
@@ -337,16 +337,6 @@ export class ExtensionTreeViewModel {
     this.disposableCollection.push(
       this.treeViewDataProvider.onRevealChanged((treeItemId: string) => {
         this.reveal(treeItemId);
-      }),
-    );
-    this.disposableCollection.push(
-      this.treeModel!.onWillUpdate(() => {
-        // 更新树前更新下选中节点
-        if (this.selectedNodes.length !== 0) {
-          // 仅处理一下单选情况
-          const node = this.treeModel?.root.getTreeNodeByPath(this.selectedNodes[0].path);
-          this.selectedDecoration.addTarget(node as ExtensionTreeNode);
-        }
       }),
     );
   }
@@ -544,10 +534,11 @@ export class ExtensionTreeViewModel {
   };
 
   toggleDirectory = async (item: ExtensionCompositeTreeNode) => {
+    await this.treeHandlerReadyDeffer.promise;
     if (item.expanded) {
-      this.extensionTreeHandle.collapseNode(item);
+      await this.extensionTreeHandle?.collapseNode(item);
     } else {
-      this.extensionTreeHandle.expandNode(item);
+      await this.extensionTreeHandle?.expandNode(item);
     }
   };
 
@@ -565,6 +556,7 @@ export class ExtensionTreeViewModel {
 
   handleTreeHandler(handle: IExtensionTreeHandle) {
     this._extensionTreeHandle = handle;
+    this.treeHandlerReadyDeffer.resolve();
   }
 
   handleTreeBlur = () => {
@@ -1021,24 +1013,28 @@ export class ExtensionTreeViewModel {
     this.treeModel.root.collapsedAll();
   }
 
+  async refreshById(treeItemId: string) {
+    const id = this.treeViewDataProvider.getTreeNodeIdByTreeItemId(treeItemId);
+    if (!id) {
+      return;
+    }
+    const treeNode = (this.treeModel.root as ExtensionTreeRoot).getTreeNodeById(id);
+    if (!treeNode) {
+      return;
+    }
+    if (ExtensionCompositeTreeNode.is(treeNode)) {
+      await (treeNode as ExtensionCompositeTreeNode).refresh();
+    } else if (treeNode.parent) {
+      await (treeNode.parent as ExtensionCompositeTreeNode).refresh();
+    }
+  }
+
   async refresh(item?: TreeViewItem) {
     await this.whenReady;
     if (!item) {
       await this.treeModel.root?.refresh();
     } else {
-      const id = this.treeViewDataProvider.getTreeNodeIdByTreeItemId(item.id);
-      if (!id) {
-        return;
-      }
-      const treeNode = (this.treeModel.root as ExtensionTreeRoot).getTreeNodeById(id);
-      if (!treeNode) {
-        return;
-      }
-      if (ExtensionCompositeTreeNode.is(treeNode)) {
-        await (treeNode as ExtensionCompositeTreeNode).refresh();
-      } else if (treeNode.parent) {
-        await (treeNode.parent as ExtensionCompositeTreeNode).refresh();
-      }
+      await this.refreshById(item.id);
     }
   }
 
@@ -1046,15 +1042,15 @@ export class ExtensionTreeViewModel {
     await this.whenReady;
     if (!this.revealDelayer.isTriggered()) {
       this.revealDelayer.cancel();
-    } else if (this.revealDeferred) {
-      await this.revealDeferred.promise;
     }
+
     return this.revealDelayer.trigger(async () => {
-      this.revealDeferred = new Deferred();
+      await this.treeHandlerReadyDeffer.promise;
       if (this.treeModel.root.branchSize === 0) {
         // 当Tree为空时，刷新一次Tree
         await this.refresh();
       }
+
       const id = this.treeViewDataProvider.getTreeNodeIdByTreeItemId(treeItemId);
       if (!id) {
         return;
@@ -1069,7 +1065,7 @@ export class ExtensionTreeViewModel {
       // 递归展开几层节点，最多三层
       let expand = Math.min(isNumber(options.expand) ? options.expand : options.expand === true ? 1 : 0, 3);
 
-      let itemsToExpand = await this.extensionTreeHandle.ensureVisible(cache.path);
+      let itemsToExpand = await this.extensionTreeHandle?.ensureVisible(cache.path);
       if (itemsToExpand) {
         if (select) {
           // 更新节点选中态，不会改变焦点态节点
@@ -1080,18 +1076,21 @@ export class ExtensionTreeViewModel {
           this.activeNodeFocusedDecoration(itemsToExpand as ExtensionTreeNode, false, true);
         }
       }
-      for (
-        ;
-        ExtensionCompositeTreeNode.is(itemsToExpand) &&
-        (itemsToExpand as ExtensionCompositeTreeNode).branchSize > 0 &&
-        expand > 0;
-        expand--
-      ) {
+
+      for (; ExtensionCompositeTreeNode.is(itemsToExpand) && expand > 0; expand--) {
         await this.extensionTreeHandle.expandNode(itemsToExpand as CompositeTreeNode);
         itemsToExpand = itemsToExpand?.children ? (itemsToExpand?.children[0] as TreeNode) : undefined;
       }
-      this.revealDeferred.resolve();
-      this.revealDeferred = null;
     });
   }
+
+  handleCheckBoxChange = async (item: ExtensionCompositeTreeNode | ExtensionTreeNode) => {
+    if (item) {
+      this.treeViewDataProvider.markAsChecked(
+        item,
+        !item.checkboxInfo!.checked,
+        this.treeViewOptions.manageCheckboxStateManually,
+      );
+    }
+  };
 }

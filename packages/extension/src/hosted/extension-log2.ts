@@ -1,27 +1,22 @@
 import { Injector } from '@opensumi/di';
-import {
-  getNodeRequire,
-  SupportLogNamespace,
-  ILogService,
-  LogLevel,
-  IExtensionLogger,
-  ILogServiceManager,
-} from '@opensumi/ide-core-common';
-import { AppConfig } from '@opensumi/ide-core-node/lib/types';
+import { IExtensionLogger, ILogService, LogLevel, SupportLogNamespace } from '@opensumi/ide-core-common';
 import { LogServiceManager } from '@opensumi/ide-logs/lib/node/log-manager';
+
+import { ExtHostAppConfig } from '../common/ext.process';
+import { getNodeRequire } from '../common/utils';
 
 export class ExtensionLogger2 implements IExtensionLogger {
   private injector: Injector;
   private loggerManager: LogServiceManager;
   private logger: ILogService;
-  private config: any;
+  private config: ExtHostAppConfig;
 
-  constructor(injector) {
+  constructor(injector: Injector) {
     this.injector = injector;
-    this.config = this.injector.get(AppConfig);
+    this.config = this.injector.get(ExtHostAppConfig);
     this.injectLogService();
-
-    this.loggerManager = this.injector.get(LogServiceManager);
+    // 这块不是非常合理，插件进程引用了 Node 主进程的代码，先改为多例方式防止 AppConfig 找不到的问题
+    this.loggerManager = this.injector.get(LogServiceManager, [this.config]);
     this.logger = this.loggerManager.getLogger(SupportLogNamespace.ExtensionHost, this.config);
   }
 
@@ -30,7 +25,7 @@ export class ExtensionLogger2 implements IExtensionLogger {
       const LogServiceClass = this.config.LogServiceClass;
 
       this.injector.overrideProviders({
-        token: AppConfig,
+        token: ExtHostAppConfig,
         useValue: Object.assign({}, this.config, { LogServiceClass }),
       });
     } else if (this.config.extLogServiceClassPath) {
@@ -40,7 +35,7 @@ export class ExtensionLogger2 implements IExtensionLogger {
         LogServiceClass = LogServiceClass.default;
       }
       this.injector.overrideProviders({
-        token: AppConfig,
+        token: ExtHostAppConfig,
         useValue: Object.assign({}, this.config, { LogServiceClass }),
       });
     }

@@ -4,8 +4,19 @@ import { canceled } from './errors';
 
 export type MaybePromise<T> = T | Promise<T> | PromiseLike<T>;
 
+// 浏览器渲染帧
+export const FRAME_ONE = 16;
+export const FRAME_TWO = FRAME_ONE * 2;
+export const FRAME_THREE = FRAME_ONE * 3;
+export const FRAME_FOUR = FRAME_ONE * 4;
+export const FRAME_FIVE = FRAME_ONE * 5;
+
 export interface CancelablePromise<T> extends Promise<T> {
   cancel(): void;
+}
+
+export interface MayCancelablePromise<T> extends Promise<T> {
+  cancel?(): void;
 }
 
 export function createCancelablePromise<T>(callback: (token: CancellationToken) => Promise<T>): CancelablePromise<T> {
@@ -304,6 +315,11 @@ export class Barrier {
   wait(): Promise<boolean> {
     return this._promise;
   }
+
+  reject(): void {
+    this._isOpen = false;
+    this._completePromise(false);
+  }
 }
 
 /**
@@ -545,6 +561,11 @@ export class RunOnceScheduler {
     this.timeoutToken = setTimeout(this.timeoutHandler, delay);
   }
 
+  trigger(): void {
+    this.cancel();
+    this.onTimeout();
+  }
+
   get delay(): number {
     return this.timeout;
   }
@@ -577,4 +598,84 @@ export class RunOnceScheduler {
 export function disposableTimeout(handler: () => void, timeout = 0): IDisposable {
   const timer = setTimeout(handler, timeout);
   return toDisposable(() => clearTimeout(timer));
+}
+
+export function sleep(time: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, time));
+}
+
+export const retry = async <T>(
+  task: () => Promise<T>,
+  options: {
+    delay: number;
+    retries: number;
+    onFailedAttempt?: (error: any) => void;
+    timeout?: number;
+  },
+): Promise<T> => {
+  const { delay, retries, onFailedAttempt, timeout } = options;
+  try {
+    if (timeout) {
+      const result = await raceTimeout(task(), timeout || 0);
+      if (result === undefined) {
+        throw new Error('Timeout');
+      }
+      return result;
+    }
+    return task();
+  } catch (error) {
+    if (retries === 0) {
+      throw error;
+    }
+    if (onFailedAttempt) {
+      onFailedAttempt(error);
+    }
+    await sleep(delay);
+    return retry(task, { delay, retries: retries - 1, onFailedAttempt, timeout });
+  }
+};
+
+export class StateTracer {
+  protected deferred: { [state: string]: Barrier } = {};
+
+  public has(state: string): boolean {
+    return this.deferred[state] !== undefined;
+  }
+
+  public delete(state: string): void {
+    delete this.deferred[state];
+  }
+
+  public record(state: string): void {
+    if (this.deferred[state] === undefined) {
+      this.deferred[state] = new Barrier();
+    }
+  }
+
+  public fulfill(state: string): void {
+    if (this.deferred[state] !== undefined) {
+      this.deferred[state].open();
+    } else {
+      this.deferred[state] = new Barrier();
+      this.deferred[state].open();
+    }
+  }
+
+  public reachedState(state: string): Promise<boolean> {
+    if (this.deferred[state] === undefined) {
+      this.deferred[state] = new Barrier();
+    }
+    return this.deferred[state].wait();
+  }
+
+  public reachedAnyState(...states: string[]): Promise<boolean> {
+    return Promise.race(states.map((s) => this.reachedState(s)));
+  }
+
+  public dispose() {
+    Object.keys(this.deferred).forEach((key) => {
+      this.deferred[key].reject();
+    });
+    this.deferred = {};
+  }
 }

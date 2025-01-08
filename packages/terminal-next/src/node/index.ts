@@ -1,4 +1,4 @@
-import { Provider, Injectable } from '@opensumi/di';
+import { Injectable, Provider } from '@opensumi/di';
 import { NodeModule } from '@opensumi/ide-core-node';
 
 import {
@@ -9,8 +9,9 @@ import {
   ITerminalServicePath,
 } from '../common';
 
-import { PtyService, IPtyService } from './pty';
-import { PtyServiceManagerToken, PtyServiceManager } from './pty.manager';
+import { IPtyService, PtyService } from './pty';
+import { PtyServiceManager, PtyServiceManagerToken } from './pty.manager';
+import { IShellIntegrationService, ShellIntegrationService } from './shell-integration.service';
 import { TerminalProcessServiceImpl } from './terminal.process.service';
 import { ITerminalProfileServiceNode, TerminalProfileServiceNode } from './terminal.profile.service';
 import { TerminalServiceImpl } from './terminal.service';
@@ -30,6 +31,10 @@ export class TerminalNodePtyModule extends NodeModule {
     {
       token: ITerminalProcessService,
       useClass: TerminalProcessServiceImpl,
+    },
+    {
+      token: IShellIntegrationService,
+      useClass: ShellIntegrationService,
     },
     {
       token: IPtyService,

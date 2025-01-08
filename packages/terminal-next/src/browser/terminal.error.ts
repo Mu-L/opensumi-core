@@ -1,20 +1,21 @@
-import { observable } from 'mobx';
-
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Emitter } from '@opensumi/ide-core-common';
 
 import {
-  ITerminalErrorService,
-  ITerminalError,
-  ITerminalService,
-  ITerminalGroupViewService,
-  ITerminalController,
   IPtyExitEvent,
+  ITerminalController,
+  ITerminalError,
+  ITerminalErrorService,
+  ITerminalGroupViewService,
+  ITerminalService,
 } from '../common';
 
 @Injectable()
 export class TerminalErrorService implements ITerminalErrorService {
-  @observable
   errors: Map<string, ITerminalError> = new Map();
+
+  protected _onErrorsChangeEmitter = new Emitter<void>();
+  onErrorsChange = this._onErrorsChangeEmitter.event;
 
   @Autowired(ITerminalService)
   protected readonly service: ITerminalService;
@@ -28,6 +29,7 @@ export class TerminalErrorService implements ITerminalErrorService {
   constructor() {
     this.service.onError((error) => {
       this.errors.set(error.id, error);
+      this._onErrorsChangeEmitter.fire();
     });
 
     this.service.onExit((event: IPtyExitEvent) => {
@@ -43,6 +45,7 @@ export class TerminalErrorService implements ITerminalErrorService {
 
     this.controller.onDidCloseTerminal((e) => {
       this.errors.delete(e.id);
+      this._onErrorsChangeEmitter.fire();
     });
   }
 
@@ -51,6 +54,8 @@ export class TerminalErrorService implements ITerminalErrorService {
     if (client) {
       await 0; // 使后面的 delete 发生在下一个 microTask 中，避免在迭代过程中修改 this.errors
       this.errors.delete(clientId);
+      this._onErrorsChangeEmitter.fire();
+
       client.reset();
       return client.attached.promise;
     }

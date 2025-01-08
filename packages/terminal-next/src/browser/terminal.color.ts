@@ -1,13 +1,13 @@
 import { localize } from '@opensumi/ide-core-common';
 import {
-  registerColor,
+  ColorDefaults,
+  ColorIdentifier,
   PANEL_BACKGROUND,
   PANEL_BORDER,
-  ColorIdentifier,
-  ColorDefaults,
   editorFindMatch,
   editorFindMatchHighlight,
   overviewRulerFindMatchForeground,
+  registerColor,
   transparent,
 } from '@opensumi/ide-theme';
 
@@ -43,6 +43,7 @@ export const TERMINAL_FOREGROUND_COLOR = registerColor(
   },
   localize('terminal.foreground', 'The foreground color of the terminal.'),
 );
+
 export const TERMINAL_CURSOR_FOREGROUND_COLOR = registerColor(
   'terminalCursor.foreground',
   null,

@@ -1,6 +1,6 @@
 import { DisposableCollection, Emitter, Event, IAsyncResult } from '@opensumi/ide-utils';
 
-import { bindInputElement, ProxiedInputProp } from '../../input';
+import { ProxiedInputProp, bindInputElement } from '../../input';
 import { createMarkedRenderer, toMarkdownHtml } from '../../utils';
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -17,7 +17,7 @@ export interface PromptValidateMessage {
 }
 
 export enum VALIDATE_CLASS_NAME {
-  INFO = 'validate-error',
+  INFO = 'validate-info',
   ERROR = 'validate-error',
   WARNING = 'validate-warning',
 }

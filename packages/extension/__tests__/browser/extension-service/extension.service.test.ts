@@ -1,18 +1,21 @@
-import ReactDom from 'react-dom';
-
 import {
-  CommandRegistryImpl,
   CommandRegistry,
+  CommandRegistryImpl,
   IPreferenceSettingsService,
-  PreferenceScope,
-  KeybindingRegistryImpl,
   KeybindingRegistry,
+  KeybindingRegistryImpl,
+  PreferenceScope,
 } from '@opensumi/ide-core-browser';
 import { IToolbarRegistry } from '@opensumi/ide-core-browser/lib/toolbar';
-import { IMenuRegistry, MenuRegistryImpl, IMenuItem } from '@opensumi/ide-core-browser/src/menu/next';
+import { IMenuItem, IMenuRegistry, MenuRegistryImpl } from '@opensumi/ide-core-browser/src/menu/next';
 import { NextToolbarRegistryImpl } from '@opensumi/ide-core-browser/src/toolbar/toolbar.registry';
-import { LifeCyclePhase } from '@opensumi/ide-core-common';
-import { IActivationEventService, ExtensionBeforeActivateEvent } from '@opensumi/ide-extension/lib/browser/types';
+import { AppLifeCycleServiceToken, IAppLifeCycleService, IEventBus, LifeCyclePhase } from '@opensumi/ide-core-common';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+import {
+  AbstractExtInstanceManagementService,
+  ExtensionBeforeActivateEvent,
+  IActivationEventService,
+} from '@opensumi/ide-extension/lib/browser/types';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
 import { LayoutService } from '@opensumi/ide-main-layout/lib/browser/layout.service';
 import { TabbarService } from '@opensumi/ide-main-layout/lib/browser/tabbar/tabbar.service';
@@ -22,14 +25,12 @@ import { IThemeService, getColorRegistry } from '@opensumi/ide-theme/lib/common'
 
 import '@opensumi/ide-i18n';
 
-import { MockInjector } from '../../../../../tools/dev-tool/src/mock-injector';
 import { SumiContributionsServiceToken } from '../../../src/browser/sumi/contributes';
-import { AbstractExtInstanceManagementService } from '../../../src/browser/types';
 import { VSCodeContributesService, VSCodeContributesServiceToken } from '../../../src/browser/vscode/contributes';
 import {
+  AbstractExtensionManagementService,
   ExtensionService,
   IExtCommandManagement,
-  AbstractExtensionManagementService,
   IRequireInterceptorService,
 } from '../../../src/common';
 
@@ -43,12 +44,16 @@ describe('Extension service', () => {
   let injector: MockInjector;
   let codeContributes: VSCodeContributesService;
   let sumiContributes: VSCodeContributesService;
+  let eventBus: IEventBus;
+  let lifecycleService: IAppLifeCycleService;
 
   beforeAll(async () => {
     injector = setupExtensionServiceInjector();
     injector.get(IMainLayoutService).viewReady.resolve();
     extensionService = injector.get(ExtensionService);
     extCommandManagement = injector.get(IExtCommandManagement);
+    lifecycleService = injector.get<IAppLifeCycleService>(AppLifeCycleServiceToken);
+    eventBus = injector.get(IEventBus);
     extInstanceManagementService = injector.get(AbstractExtInstanceManagementService);
     extensionManagementService = injector.get(AbstractExtensionManagementService);
     // @ts-ignore
@@ -60,17 +65,18 @@ describe('Extension service', () => {
       codeContributes.register(e.id, e.contributes);
       sumiContributes.register(e.id, e.contributes);
     }
+    lifecycleService.phase = LifeCyclePhase.Initialize;
     await extensionService.activate();
-    await codeContributes['runContributesByPhase'](LifeCyclePhase.Ready);
-    await sumiContributes['runContributesByPhase'](LifeCyclePhase.Ready);
+    lifecycleService.phase = LifeCyclePhase.Starting;
+    lifecycleService.phase = LifeCyclePhase.Ready;
   });
 
   describe('activate', () => {
     it('emit event before activate', (done) => {
       // @ts-ignore
-      const disposable = extensionService.eventBus.on(ExtensionBeforeActivateEvent, () => {
-        done();
+      const disposable = eventBus.on(ExtensionBeforeActivateEvent, () => {
         disposable.dispose();
+        done();
       });
 
       // @ts-ignore
@@ -161,9 +167,7 @@ describe('Extension service', () => {
       const command = commandRegistry.getCommand('Test');
       expect(command).toBeDefined();
       expect(command?.label).toBe('this is label');
-      expect(command?.alias).toBe('this is alias');
       expect(command?.category).toBe('this is category');
-      expect(command?.aliasCategory).toBe('this is aliasCategory');
     });
 
     it('should register menus in editor/title and editor/context position', () => {
@@ -186,7 +190,7 @@ describe('Extension service', () => {
 
     it('should register extension configuration', () => {
       const preferenceSettingsService: PreferenceSettingsService = injector.get(IPreferenceSettingsService);
-      const preferences = preferenceSettingsService.getSections('extension', PreferenceScope.Default);
+      const preferences = preferenceSettingsService.getResolvedSections('extension', PreferenceScope.Default);
       expect(preferences.length).toBeGreaterThan(0);
       expect(preferences[0].title).toBe('Mock Extension Config');
     });
@@ -239,15 +243,12 @@ describe('Extension service', () => {
       const requireInterceptorService: IRequireInterceptorService = injector.get(IRequireInterceptorService);
       const interceptor = requireInterceptorService.getRequireInterceptor('ReactDOM');
       const result = interceptor?.load({});
-      expect(result).toBe(ReactDom);
+      expect(result).toMatchSnapshot();
     });
   });
 
   describe('extension process restart', () => {
     it('restart ext process when visibility change', async () => {
-      // 开始进行 visibilitychange 事件监听
-      await extensionService.activate();
-
       /**
        * 如果页面不可见，那么不会执行插件进程重启操作
        */
@@ -262,8 +263,8 @@ describe('Extension service', () => {
 
       extensionService.restartExtProcess();
 
-      expect(extProcessRestartHandler).not.toBeCalled();
-      expect(extensionService['isExtProcessWaitingForRestart']).toBe(true);
+      expect(extProcessRestartHandler).not.toHaveBeenCalled();
+      expect(extensionService['isExtProcessWaitingForRestart']).toBeTruthy();
 
       /**
        * 页面变为可见后，开始执行插件进程重启操作
@@ -281,7 +282,7 @@ describe('Extension service', () => {
 
       document.dispatchEvent(visibilityChangeEvent);
 
-      expect(extProcessRestartHandler).toBeCalled();
+      expect(extProcessRestartHandler).toHaveBeenCalled();
     });
   });
 });

@@ -1,45 +1,44 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { Emitter, Event, uuid, IJSONSchema, IJSONSchemaSnippet, path } from '@opensumi/ide-core-common';
+import { Emitter, Event, IJSONSchema, IJSONSchemaSnippet, path, uuid } from '@opensumi/ide-core-common';
 import {
   DebugConfiguration,
   DebugStreamConnection,
-  IDebuggerContribution,
   IDebugSessionDTO,
+  IDebuggerContribution,
 } from '@opensumi/ide-debug';
 
+import { CustomChildProcessModule } from '../../../../common/ext.process';
 import {
   IExtHostCommands,
   IExtHostDebugService,
+  IInterProcessConnectionService,
   IMainThreadDebug,
-  ExtensionWSChannel,
-  IExtHostConnectionService,
+  MainThreadAPIIdentifier,
 } from '../../../../common/vscode';
-import { MainThreadAPIIdentifier } from '../../../../common/vscode';
 import {
-  Disposable,
-  Uri,
-  DebugConsoleMode,
   DebugAdapterExecutable,
-  DebugAdapterServer,
   DebugAdapterInlineImplementation,
   DebugAdapterNamedPipeServer,
+  DebugAdapterServer,
   DebugConfigurationProviderTriggerKind,
+  DebugConsoleMode,
+  Disposable,
+  Uri,
 } from '../../../../common/vscode/ext-types';
 import { Breakpoint } from '../../../../common/vscode/models';
-import { CustomChildProcessModule } from '../../../ext.process-base';
 
 import { IDebugConfigurationProvider } from './common';
 import { resolveDebugAdapterExecutable } from './extension-debug-adapter-excutable-resolver';
 import { ExtensionDebugAdapterSession } from './extension-debug-adapter-session';
 import {
   connectDebugAdapter,
-  startDebugAdapter,
   directDebugAdapter,
   namedPipeDebugAdapter,
+  startDebugAdapter,
 } from './extension-debug-adapter-starter';
 import { ExtensionDebugAdapterTracker } from './extension-debug-adapter-tracker';
+
+import type vscode from 'vscode';
 
 const { Path } = path;
 
@@ -68,6 +67,14 @@ export function createDebugApiFactory(extHostDebugService: IExtHostDebugService)
     },
     onDidChangeBreakpoints(listener, thisArgs?, disposables?) {
       return extHostDebugService.onDidChangeBreakpoints(listener, thisArgs, disposables);
+    },
+    /** @stubbed */
+    get activeStackItem() {
+      return undefined;
+    },
+    /** @stubbed */
+    get onDidChangeActiveStackItem() {
+      return Event.None;
     },
     registerDebugConfigurationProvider(
       debugType: string,
@@ -104,6 +111,12 @@ export function createDebugApiFactory(extHostDebugService: IExtHostDebugService)
     },
     asDebugSourceUri(source: vscode.DebugProtocolSource, session?: vscode.DebugSession) {
       return extHostDebugService.asDebugSourceUri(source, session);
+    },
+    registerDebugVisualizationTreeProvider() {
+      return Disposable.create(() => {});
+    },
+    registerDebugVisualizationProvider() {
+      return Disposable.create(() => {});
     },
   };
 
@@ -181,7 +194,7 @@ export class ExtHostDebug implements IExtHostDebugService {
 
   constructor(
     rpc: IRPCProtocol,
-    private extHostConnectionService: IExtHostConnectionService,
+    private extHostConnectionService: IInterProcessConnectionService,
     private extHostCommand: IExtHostCommands,
     private cp?: CustomChildProcessModule,
   ) {
@@ -429,7 +442,7 @@ export class ExtHostDebug implements IExtHostDebugService {
 
     const connection = await this.extHostConnectionService.ensureConnection(sessionId);
 
-    debugAdapterSession.start(new ExtensionWSChannel(connection));
+    debugAdapterSession.start(connection);
 
     return sessionId;
   }
@@ -468,14 +481,35 @@ export class ExtHostDebug implements IExtHostDebugService {
     return undefined;
   }
 
+  // 根据 debugType 和 triggerKind 来检查 DebugConfigurationProvider 的数目
+  async $getDebugConfigurationProvidersCount(
+    debugType: string,
+    triggerKind?: vscode.DebugConfigurationProviderTriggerKind,
+  ): Promise<number> {
+    let providers = this.configurationProviders.get(debugType);
+    if (providers) {
+      if (triggerKind) {
+        providers = new Set(Array.from(providers).filter((provider) => provider.triggerKind === triggerKind));
+      }
+      return providers.size;
+    } else {
+      return 0;
+    }
+  }
+
   async $provideDebugConfigurations(
     debugType: string,
     workspaceFolderUri: string | undefined,
     token?: vscode.CancellationToken,
+    triggerKind?: vscode.DebugConfigurationProviderTriggerKind,
   ): Promise<vscode.DebugConfiguration[]> {
     let result: DebugConfiguration[] = [];
-    const providers = this.configurationProviders.get(debugType);
+    let providers = this.configurationProviders.get(debugType);
     if (providers) {
+      if (triggerKind) {
+        providers = new Set(Array.from(providers).filter((provider) => provider.triggerKind === triggerKind));
+      }
+
       for (const provider of providers) {
         if (provider.provideDebugConfigurations) {
           result = result.concat(

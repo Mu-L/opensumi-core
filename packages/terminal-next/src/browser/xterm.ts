@@ -1,20 +1,19 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
-import { ITerminalOptions, ITheme, Terminal } from 'xterm';
-import type { CanvasAddon as CanvasAddonType } from 'xterm-addon-canvas';
-import { FitAddon } from 'xterm-addon-fit';
-import { ISearchOptions, SearchAddon } from 'xterm-addon-search';
-import type { WebglAddon as WebglAddonType } from 'xterm-addon-webgl';
+import { FitAddon } from '@xterm/addon-fit';
+import { ISearchOptions, SearchAddon } from '@xterm/addon-search';
+import { ITerminalOptions, ITheme, Terminal } from '@xterm/xterm';
 
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import { IClipboardService } from '@opensumi/ide-core-browser';
-import { Disposable, isSafari } from '@opensumi/ide-core-common';
+import { PreferenceService } from '@opensumi/ide-core-browser/lib/preferences/types';
+import { Disposable } from '@opensumi/ide-core-common';
 import { MessageService } from '@opensumi/ide-overlay/lib/browser/message.service';
 import { WorkbenchThemeService } from '@opensumi/ide-theme/lib/browser/workbench.theme.service';
 import { PANEL_BACKGROUND } from '@opensumi/ide-theme/lib/common/color-registry';
 import { IThemeService } from '@opensumi/ide-theme/lib/common/theme.service';
 
-import { SupportedOptions } from '../common/preference';
-import { IXTerm } from '../common/xterm';
+import { CodeTerminalSettingId, SupportedOptions } from '../common/preference';
+import { IXTerm, RenderType } from '../common/xterm';
 
 import styles from './component/terminal.module.less';
 import {
@@ -26,6 +25,9 @@ import {
   TERMINAL_OVERVIEW_RULER_CURSOR_FOREGROUND_COLOR,
   TERMINAL_OVERVIEW_RULER_FIND_MATCH_FOREGROUND_COLOR,
 } from './terminal.color';
+
+import type { CanvasAddon as CanvasAddonType } from '@xterm/addon-canvas';
+import type { WebglAddon as WebglAddonType } from '@xterm/addon-webgl';
 
 export interface XTermOptions {
   cwd?: string;
@@ -47,6 +49,9 @@ export class XTerm extends Disposable implements IXTerm {
 
   @Autowired(IThemeService)
   protected themeService: WorkbenchThemeService;
+
+  @Autowired(PreferenceService)
+  protected readonly preferenceService: PreferenceService;
 
   container: HTMLDivElement;
 
@@ -76,15 +81,11 @@ export class XTerm extends Disposable implements IXTerm {
     this.raw.onSelectionChange(this.onSelectionChange.bind(this));
   }
 
-  private loadWebGLAddon() {
-    return !isSafari;
-  }
-
-  private async enableCanvasRenderer() {
+  protected async enableCanvasRenderer() {
     try {
       if (!this._canvasAddon) {
         // @ts-ignore
-        this._canvasAddon = new (await import('xterm-addon-canvas')).CanvasAddon();
+        this._canvasAddon = new (await import('@xterm/addon-canvas')).CanvasAddon();
       }
 
       this.addDispose(this._canvasAddon);
@@ -99,11 +100,11 @@ export class XTerm extends Disposable implements IXTerm {
     }
   }
 
-  private async enableWebglRenderer() {
+  protected async enableWebglRenderer() {
     try {
       if (!this._webglAddon) {
         // @ts-ignore
-        this._webglAddon = new (await import('xterm-addon-webgl')).WebglAddon();
+        this._webglAddon = new (await import('@xterm/addon-webgl')).WebglAddon();
       }
 
       this.addDispose(this._webglAddon);
@@ -189,9 +190,13 @@ export class XTerm extends Disposable implements IXTerm {
 
   open() {
     this.raw.open(this.container);
-    if (this.loadWebGLAddon()) {
+    const renderType = this.preferenceService.get<RenderType>(CodeTerminalSettingId.XtermRenderType, RenderType.WebGL);
+    if (renderType === RenderType.WebGL) {
       this.enableWebglRenderer();
+    } else if (renderType === RenderType.Canvas) {
+      this.enableCanvasRenderer();
     }
+    // 不设置 enableWebGL/Canvas render 的话，默认就会 fallback 到 DOM Render
   }
 
   fit() {

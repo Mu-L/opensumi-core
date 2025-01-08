@@ -1,13 +1,11 @@
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { Disposable, DisposableCollection, IDisposable } from '@opensumi/ide-core-common';
+import * as monaco from '@opensumi/ide-monaco';
+import { monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 
-import IModel = monaco.editor.IModel;
-import IMarkerData = monaco.editor.IMarkerData;
+import { Diagnostic, DiagnosticCollection, asMonacoDiagnostics } from '../../common';
 
-// eslint-disable-next-line import/order
-import { DisposableCollection, Disposable, IDisposable } from '@opensumi/ide-core-common';
-
-// eslint-disable-next-line import/order
-import { DiagnosticCollection, Diagnostic, asDiagnostics } from '../../common';
+type IMonacoModel = monaco.editor.ITextModel;
+type IMonacoMarkerData = monaco.editor.IMarkerData;
 
 export class MonacoDiagnosticCollection implements DiagnosticCollection {
   protected readonly diagnostics = new Map<string, MonacoModelDiagnostics | undefined>();
@@ -43,17 +41,17 @@ export class MonacoDiagnosticCollection implements DiagnosticCollection {
 
 export class MonacoModelDiagnostics implements IDisposable {
   readonly uri: monaco.Uri;
-  protected _markers: IMarkerData[] = [];
+  protected _markers: IMonacoMarkerData[] = [];
   protected _diagnostics: Diagnostic[] = [];
   constructor(uri: string, diagnostics: Diagnostic[], readonly owner: string) {
     this.uri = monaco.Uri.parse(uri);
     this.diagnostics = diagnostics;
-    monaco.editor.onDidCreateModel((model) => this.doUpdateModelMarkers(model));
+    monacoApi.editor.onDidCreateModel((model) => this.doUpdateModelMarkers(model));
   }
 
   set diagnostics(diagnostics: Diagnostic[]) {
     this._diagnostics = diagnostics;
-    this._markers = asDiagnostics(diagnostics) || [];
+    this._markers = asMonacoDiagnostics(diagnostics) || [];
     this.updateModelMarkers();
   }
 
@@ -61,7 +59,7 @@ export class MonacoModelDiagnostics implements IDisposable {
     return this._diagnostics;
   }
 
-  get markers(): ReadonlyArray<IMarkerData> {
+  get markers(): ReadonlyArray<IMonacoMarkerData> {
     return this._markers;
   }
 
@@ -71,13 +69,13 @@ export class MonacoModelDiagnostics implements IDisposable {
   }
 
   updateModelMarkers(): void {
-    const model = monaco.editor.getModel(this.uri);
+    const model = monacoApi.editor.getModel(this.uri);
     this.doUpdateModelMarkers(model);
   }
 
-  protected doUpdateModelMarkers(model: IModel | null): void {
+  protected doUpdateModelMarkers(model: IMonacoModel | null): void {
     if (model && this.uri.toString() === model.uri.toString()) {
-      monaco.editor.setModelMarkers(model, this.owner, this._markers);
+      monacoApi.editor.setModelMarkers(model, this.owner, this._markers);
     }
   }
 }

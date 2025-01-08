@@ -1,14 +1,14 @@
-import { Schemes } from '@opensumi/ide-core-common';
 import {
-  URI,
-  strings,
-  isWindows,
-  isLinux,
-  TernarySearchTree,
-  path,
-  parseGlob,
   IExpression,
   ParsedExpression,
+  Schemes,
+  TernarySearchTree,
+  URI,
+  isLinux,
+  isWindows,
+  parseGlob,
+  path,
+  strings,
 } from '@opensumi/ide-core-common';
 
 export class ResourceGlobMatcher {
@@ -68,7 +68,7 @@ export function relativePath(from: URI, to: URI, ignoreCase = hasToIgnoreCase(fr
 }
 
 /**
- * Tests wheter the two authorities are the same
+ * Tests whether the two authorities are the same
  */
 export function isEqualAuthority(a1: string, a2: string) {
   return a1 === a2 || strings.equalsIgnoreCase(a1, a2);

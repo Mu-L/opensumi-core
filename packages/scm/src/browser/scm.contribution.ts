@@ -1,43 +1,46 @@
 import { Autowired } from '@opensumi/di';
 import {
   ClientAppContribution,
+  Disposable,
   PreferenceContribution,
   PreferenceService,
+  SCM_COMMANDS,
+  URI,
   getExternalIcon,
+  getIcon,
 } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
-import { Disposable, URI } from '@opensumi/ide-core-browser';
 import { browserViews } from '@opensumi/ide-core-browser/lib/extensions/schema/browserViews';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import {
+  Command,
   CommandContribution,
   CommandRegistry,
-  Command,
+  IExtensionsSchemaService,
   PreferenceSchema,
-  localize,
   PreferenceScope,
   formatLocalize,
-  IExtensionsSchemaService,
+  localize,
 } from '@opensumi/ide-core-common';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
-import { WorkbenchEditorService, EditorCollectionService, IEditor } from '@opensumi/ide-editor/lib/common';
+import { EditorCollectionService, IEditor, WorkbenchEditorService } from '@opensumi/ide-editor/lib/common';
 import { IMainLayoutService, IViewsRegistry, MainLayoutContribution } from '@opensumi/ide-main-layout';
 
 import {
-  scmContainerId,
-  IDirtyDiffWorkbenchController,
-  OPEN_DIRTY_DIFF_WIDGET,
+  CLOSE_DIRTY_DIFF_WIDGET,
   GOTO_NEXT_CHANGE,
   GOTO_PREVIOUS_CHANGE,
-  TOGGLE_DIFF_SIDE_BY_SIDE,
-  scmResourceViewId,
-  SET_SCM_TREE_VIEW_MODE,
-  SET_SCM_LIST_VIEW_MODE,
+  IDirtyDiffWorkbenchController,
+  OPEN_DIRTY_DIFF_WIDGET,
   SCMViewModelMode,
-  CLOSE_DIRTY_DIFF_WIDGET,
+  SET_SCM_LIST_VIEW_MODE,
+  SET_SCM_TREE_VIEW_MODE,
+  TOGGLE_DIFF_SIDE_BY_SIDE,
+  scmContainerId,
+  scmResourceViewId,
 } from '../common';
 
+import { SCMTreeAPI } from './components/scm-resource-tree/scm-tree-api';
 import { SCMTreeService } from './components/scm-resource-tree/scm-tree.service';
 import { DirtyDiffWorkbenchController } from './dirty-diff';
 import { SCMBadgeController, SCMStatusBarController } from './scm-activity';
@@ -94,6 +97,9 @@ export class SCMContribution
 
   @Autowired()
   private readonly scmTreeService: SCMTreeService;
+
+  @Autowired()
+  private readonly scmTreeAPI: SCMTreeAPI;
 
   @Autowired(IViewsRegistry)
   private readonly viewsRegistry: IViewsRegistry;
@@ -196,6 +202,10 @@ export class SCMContribution
       execute: () => {
         this.scmTreeService.changeTreeMode(false);
       },
+    });
+
+    commands.registerCommand(SCM_COMMANDS.GetSCMResource, {
+      execute: async (uri: URI) => this.scmTreeAPI.getSCMResource(uri),
     });
   }
 

@@ -1,8 +1,8 @@
-import type vscode from 'vscode';
-
-import { LogLevel as KTLogLevel, Emitter } from '@opensumi/ide-core-common';
+import { Emitter, LogLevel as KTLogLevel } from '@opensumi/ide-core-common';
 
 import { LogLevel, UIKind, UriComponents } from './ext-types';
+
+import type vscode from 'vscode';
 
 export interface IMainThreadEnv {
   $clipboardReadText(): Thenable<string>;
@@ -24,6 +24,7 @@ export interface IExtHostEnv {
 }
 
 export interface ExtHostEnvValues {
+  customVSCodeEngineVersion?: string;
   appName: string;
   uriScheme: string;
   appRoot: string;

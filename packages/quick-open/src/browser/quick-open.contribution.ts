@@ -1,17 +1,17 @@
 import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  Domain,
+  ClientAppContribution,
   CommandContribution,
-  ContributionProvider,
-  KeybindingContribution,
   CommandRegistry,
+  ContributionProvider,
+  Domain,
+  KeybindingContribution,
   KeybindingRegistry,
-  localize,
-  QUICK_OPEN_COMMANDS,
   LAYOUT_COMMANDS,
+  QUICK_OPEN_COMMANDS,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { ClientAppContribution } from '@opensumi/ide-core-browser';
-import { MenuId, MenuContribution, IMenuRegistry } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { PrefixQuickOpenService } from '@opensumi/ide-core-browser/lib/quick-open';
 
 import { QuickOpenContribution, QuickOpenHandlerRegistry } from './prefix-quick-open.service';
@@ -55,10 +55,16 @@ export class QuickOpenFeatureContribution
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN, {
-      execute: (prefix = '>') => this.prefixQuickOpenService.open(prefix),
+      execute: () => this.prefixQuickOpenService.open('>'),
     });
     commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN_OUTLINE, {
       execute: () => this.prefixQuickOpenService.open('@'),
+    });
+    commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN_VIEW, {
+      execute: () => this.prefixQuickOpenService.open('view '),
+    });
+    commands.registerCommand(QUICK_OPEN_COMMANDS.OPEN_WITH_COMMAND, {
+      execute: (value?: string) => this.prefixQuickOpenService.open('>', value),
     });
   }
 

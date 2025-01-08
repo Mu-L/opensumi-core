@@ -1,20 +1,20 @@
 import { Autowired } from '@opensumi/di';
 import {
-  OUTLINE_COMMANDS,
-  Domain,
-  localize,
-  TabBarToolbarContribution,
-  ToolbarRegistry,
   CommandContribution,
   CommandRegistry,
+  Domain,
   IContextKeyService,
+  OUTLINE_COMMANDS,
+  TabBarToolbarContribution,
+  ToolbarRegistry,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
-import { OutlineSortTypeContext, OutlineFollowCursorContext } from '@opensumi/ide-core-browser/lib/contextkey';
+import { OutlineFollowCursorContext, OutlineSortTypeContext } from '@opensumi/ide-core-browser/lib/contextkey';
 import { EXPLORER_CONTAINER_ID } from '@opensumi/ide-explorer/lib/browser/explorer-contribution';
-import { MainLayoutContribution, IMainLayoutService } from '@opensumi/ide-main-layout';
+import { IMainLayoutService, MainLayoutContribution } from '@opensumi/ide-main-layout';
 
-import { OutlineSortOrder, OUTLINE_VIEW_ID } from '../common';
+import { OUTLINE_VIEW_ID, OutlineSortOrder } from '../common';
 
 import { OutlinePanel } from './outline';
 import { OutlineModelService } from './services/outline-model.service';
@@ -63,7 +63,6 @@ export class OutlineContribution implements MainLayoutContribution, TabBarToolba
       {
         id: OUTLINE_COMMANDS.OUTLINE_FOLLOW_CURSOR.id,
         iconClass: getIcon('follow-cursor'),
-        toogleIconClass: getIcon('follow-cursor', { fill: true }),
         label: localize('outline.follow.cursor'),
       },
       {

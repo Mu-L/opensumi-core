@@ -1,24 +1,55 @@
-import ReconnectingWebSocket from 'reconnecting-websocket';
+import { EventEmitter } from '@opensumi/events';
+import { Barrier, Deferred, DisposableStore, IReporterService, MultiMap, REPORT_NAME } from '@opensumi/ide-core-common';
 
-import { uuid } from '@opensumi/ide-core-common';
-import { IReporterService, REPORT_NAME, UrlProvider } from '@opensumi/ide-core-common';
+import { ChannelMessage } from '../common/channel/types';
+import { IRuntimeSocketConnection } from '../common/connection';
+import { IConnectionShape } from '../common/connection/types';
+import { ISerializer, furySerializer, wrapSerializer } from '../common/serializer';
+import { ConnectionInfo, ILogger, WSCloseInfo } from '../common/types';
+import { WSChannel } from '../common/ws-channel';
 
-import { stringify, parse } from '../common/utils';
-import { WSChannel, MessageString } from '../common/ws-channel';
+export interface WSChannelHandlerOptions {
+  logger?: ILogger;
+  serializer?: ISerializer<ChannelMessage, any>;
+}
 
-// 前台链接管理类
+/**
+ * Channel Handler in browser
+ */
 export class WSChannelHandler {
-  public connection: WebSocket;
-  private channelMap: Map<number | string, WSChannel> = new Map();
-  private logger = console;
+  private _disposables = new DisposableStore();
+
+  private _onChannelCreatedEmitter = this._disposables.add(new EventEmitter<Record<string, [WSChannel]>>());
+
+  wrappedConnection: IConnectionShape<ChannelMessage>;
+  public onChannelCreated(path: string, listener: (channel: WSChannel) => void) {
+    return this._onChannelCreatedEmitter.on(path, listener);
+  }
+
+  private channelMap: Map<string, WSChannel> = new Map();
+  private channelCloseEventMap = new MultiMap<string, WSCloseInfo>();
+  private logger: ILogger = console;
   public clientId: string;
-  private heartbeatMessageTimer: NodeJS.Timer | null;
+  private heartbeatMessageTimer: NodeJS.Timeout | null;
   private reporterService: IReporterService;
 
-  constructor(public wsPath: UrlProvider, logger: any, public protocols?: string[], clientId?: string) {
-    this.logger = logger || this.logger;
-    this.clientId = clientId || `CLIENT_ID_${uuid()}`;
-    this.connection = new ReconnectingWebSocket(wsPath, protocols, {}) as WebSocket; // new WebSocket(wsPath, protocols);
+  /**
+   * 保证在连接建立后再执行后续操作
+   */
+  private openingBarrier = new Barrier();
+
+  LOG_TAG: string;
+
+  constructor(
+    public connection: IRuntimeSocketConnection<Uint8Array>,
+    clientId: string,
+    options: WSChannelHandlerOptions = {},
+  ) {
+    this.logger = options.logger || this.logger;
+    this.clientId = clientId;
+    this.LOG_TAG = `[WSChannelHandler] [client-id:${this.clientId}]`;
+    const serializer = options.serializer || furySerializer;
+    this.wrappedConnection = wrapSerializer(this.connection, serializer);
   }
   // 为解决建立连接之后，替换成可落盘的 logger
   replaceLogger(logger: any) {
@@ -29,89 +60,139 @@ export class WSChannelHandler {
   setReporter(reporterService: IReporterService) {
     this.reporterService = reporterService;
   }
-  private clientMessage() {
-    const clientMsg: MessageString = stringify({
-      kind: 'client',
-      clientId: this.clientId,
-    });
-    this.connection.send(clientMsg);
-  }
   private heartbeatMessage() {
     if (this.heartbeatMessageTimer) {
       clearTimeout(this.heartbeatMessageTimer);
     }
-    this.heartbeatMessageTimer = global.setTimeout(() => {
-      const msg = stringify({
-        kind: 'heartbeat',
-        clientId: this.clientId,
+    this.heartbeatMessageTimer = setTimeout(() => {
+      this.channelMap.forEach((channel) => {
+        channel.ping();
       });
-      this.connection.send(msg);
+
       this.heartbeatMessage();
-    }, 5000);
+    }, 10 * 1000);
   }
 
   public async initHandler() {
-    this.connection.onmessage = (e) => {
+    this.wrappedConnection.onMessage((msg) => {
       // 一个心跳周期内如果有收到消息，则不需要再发送心跳
       this.heartbeatMessage();
 
-      const msg = parse(e.data);
+      switch (msg.kind) {
+        case 'pong':
+          // pong 不需要分发, 不处理
+          break;
 
-      if (msg.id) {
-        const channel = this.channelMap.get(msg.id);
-        if (channel) {
-          if (msg.kind === 'data' && !(channel as any).fireMessage) {
-            // 要求前端发送初始化消息，但后端最先发送消息时，前端并未准备好
-            this.logger.error('channel not ready!', msg);
+        default: {
+          const channel = this.channelMap.get(msg.id);
+          if (channel) {
+            channel.dispatch(msg);
+          } else {
+            this.logger.warn(this.LOG_TAG, `channel ${msg.id} not found`);
           }
-          channel.handleMessage(msg);
-        } else {
-          this.logger.warn(`channel ${msg.id} not found`);
         }
+      }
+    });
+
+    const reopenExistsChannel = () => {
+      if (this.channelMap.size > 0) {
+        this.channelMap.forEach((channel) => {
+          channel.open(channel.channelPath, this.clientId);
+        });
       }
     };
-    await new Promise((resolve) => {
-      this.connection.addEventListener('open', () => {
-        this.clientMessage();
-        this.heartbeatMessage();
-        resolve(undefined);
-        // 重连 channel
-        if (this.channelMap.size) {
-          this.channelMap.forEach((channel) => {
-            channel.onOpen(() => {
-              this.reporterService && this.reporterService.point(REPORT_NAME.CHANNEL_RECONNECT);
-              this.logger && this.logger.log(`channel reconnect ${this.clientId}:${channel.channelPath}`);
-            });
-            channel.open(channel.channelPath);
 
-            // 针对前端需要重新设置下后台状态的情况
-            if (channel.fireReOpen) {
-              channel.fireReOpen();
-            }
-          });
-        }
+    this.connection.onClose((code, reason) => {
+      this.channelMap.forEach((channel) => {
+        channel.close(code, reason);
       });
     });
-  }
-  private getChannelSend = (connection) => (content: string) => {
-    connection.send(content, (err: Error) => {
-      if (err) {
-        this.logger.warn(err);
+
+    if (this.connection.isOpen()) {
+      this.heartbeatMessage();
+      this.openingBarrier.open();
+    }
+
+    this.connection.onOpen(() => {
+      this.heartbeatMessage();
+      // 说明是重连
+      if (this.openingBarrier.isOpen()) {
+        reopenExistsChannel();
+      } else {
+        this.openingBarrier.open();
       }
     });
-  };
-  public async openChannel(channelPath: string) {
-    const channelSend = this.getChannelSend(this.connection);
-    const channelId = `${this.clientId}:${channelPath}`;
-    const channel = new WSChannel(channelSend, channelId);
-    this.channelMap.set(channel.id, channel);
 
-    await new Promise((resolve) => {
-      channel.onOpen(() => {
-        resolve(undefined);
-      });
-      channel.open(channelPath);
+    await this.openingBarrier.wait();
+  }
+
+  private fillKey(channelPath: string) {
+    return `${this.clientId}:${channelPath}`;
+  }
+
+  public getChannel(channelPath: string) {
+    return this.channelMap.get(this.fillKey(channelPath));
+  }
+
+  public async openChannel(channelPath: string) {
+    const key = this.fillKey(channelPath);
+    if (this.channelMap.has(key)) {
+      this.channelMap.get(key)!.dispose();
+      this.logger.log(this.LOG_TAG, `channel ${key} already exists, dispose it`);
+    }
+
+    const channel = new WSChannel(this.wrappedConnection, {
+      id: key,
+      logger: this.logger,
+      ensureServerReady: true,
     });
+    this.channelMap.set(channel.id, channel);
+    this._onChannelCreatedEmitter.emit(channelPath, channel);
+
+    let channelOpenedCount = 0;
+
+    channel.onOpen(() => {
+      channelOpenedCount++;
+      if (channelOpenedCount > 1) {
+        channel.fireReopen();
+        this.logger.log(
+          this.LOG_TAG,
+          `channel reconnect ${this.clientId}:${channel.channelPath}, count: ${channelOpenedCount}`,
+        );
+      } else {
+        this.logger.log(this.LOG_TAG, `channel open ${this.clientId}:${channel.channelPath}`);
+      }
+
+      const closeInfo = this.channelCloseEventMap.get(channel.id);
+      if (closeInfo) {
+        closeInfo.forEach((info) => {
+          this.reporterService &&
+            this.reporterService.point(REPORT_NAME.CHANNEL_RECONNECT, REPORT_NAME.CHANNEL_RECONNECT, info);
+        });
+
+        this.channelCloseEventMap.delete(channel.id);
+      }
+    });
+
+    channel.onClose((code: number, reason: string) => {
+      this.channelCloseEventMap.set(channel.id, {
+        channelPath,
+        closeEvent: { code, reason },
+        connectInfo: (navigator as any).connection as ConnectionInfo,
+      });
+      this.logger.log(this.LOG_TAG, `channel ${channelPath} closed, code: ${code}, reason: ${reason}`);
+    });
+
+    const deferred = new Deferred<void>();
+
+    const dispose = channel.onOpen(() => {
+      deferred.resolve();
+      dispose.dispose();
+    });
+
+    channel.open(channelPath, this.clientId);
+
+    await deferred.promise;
 
     return channel;
   }
@@ -120,5 +201,24 @@ export class WSChannelHandler {
     if (this.heartbeatMessageTimer) {
       clearTimeout(this.heartbeatMessageTimer);
     }
+    this._disposables.dispose();
+  }
+
+  awaitChannelReady(channelPath: string) {
+    const channel = this.getChannel(channelPath);
+    const deferred = new Deferred<void>();
+    if (channel) {
+      channel.onServerReady(() => {
+        deferred.resolve();
+      });
+    } else {
+      const dispose = this.onChannelCreated(channelPath, (channel) => {
+        channel.onServerReady(() => {
+          deferred.resolve();
+        });
+        dispose.dispose();
+      });
+    }
+    return deferred.promise;
   }
 }

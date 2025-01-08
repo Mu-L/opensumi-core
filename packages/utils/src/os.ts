@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { isWindows, isMacintosh, OperatingSystem } from './platform';
+import { OperatingSystem, isMacintosh, isWindows } from './platform';
 
 export type CMD = [string, string[]];
 export function cmd(command: string, ...args: string[]): CMD {
@@ -43,36 +43,12 @@ export function isNodeIntegrated(): boolean {
   return typeof module !== 'undefined' && !!module.exports;
 }
 
-/**
- * @deprecated isElectronEnv is deprecated, please use appConfig#isElectronRenderer instead.
- * 框架目前使用 isElectronEnv 的场景基本都与 isElectronRenderer 重复，所以直接废弃 isElectronEnv
- */
-export function isElectronEnv(): boolean {
-  return isElectronRenderer() || isElectronNode();
-}
-
-/**
- * @deprecated isElectronRenderer will deprecate, please use appConfig#isElectronRenderer instead.
- */
-export function isElectronRenderer() {
-  return (global as any).isElectronRenderer;
-}
+const safeGlobal: any = typeof global === 'undefined' ? (typeof window === 'undefined' ? {} : window) : global;
 
 export function isElectronNode() {
-  return process && process.env && !!process.env.ELECTRON_RUN_AS_NODE;
+  return typeof process !== 'undefined' && process.env && !!process.env.ELECTRON_RUN_AS_NODE;
 }
 
 export function isDevelopment() {
-  return (global as any).isDev || (process && process.env.IS_DEV);
-}
-
-/**
- * 在 Electron 中，会将 opensumi 中的 extension-host 使用 webpack 打成一个，所以需要其他方法来获取原始的 require
- */
-declare let __webpack_require__: any;
-declare let __non_webpack_require__: any;
-
-// https://github.com/webpack/webpack/issues/4175#issuecomment-342931035
-export function getNodeRequire() {
-  return typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;
+  return safeGlobal.isDev || (typeof process !== 'undefined' && process.env.IS_DEV);
 }

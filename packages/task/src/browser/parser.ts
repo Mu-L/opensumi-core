@@ -4,31 +4,31 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-  ProblemMatcher,
   ApplyToKind,
-  uuid,
-  isString,
   FileLocationKind,
-  Severity,
-  localize,
+  MultiLineProblemPattern,
+  NamedMultiLineProblemPattern,
   NamedProblemMatcher,
+  NamedProblemPattern,
+  ProblemLocationKind,
+  ProblemMatcher,
   ProblemPattern,
+  Severity,
   WatchingPattern,
+  isArray,
   isBoolean,
+  isNumber,
+  isString,
   isStringArray,
   isUndefined,
-  MultiLineProblemPattern,
-  ProblemLocationKind,
-  NamedProblemPattern,
-  NamedMultiLineProblemPattern,
-  isArray,
-  mixin,
   isUndefinedOrNull,
-  isNumber,
+  localize,
+  mixin,
   objects,
+  uuid,
 } from '@opensumi/ide-core-common';
 
-import { IProblemReporter, getProblemPatternFn, getProblemMatcherFn } from './task-config';
+import { IProblemReporter, getProblemMatcherFn, getProblemPatternFn } from './task-config';
 
 const { deepClone } = objects;
 
@@ -587,7 +587,6 @@ export class ProblemPatternParser extends Parser {
   }
 
   private validateProblemPattern(values: ProblemPattern[]): boolean {
-    // tslint:disable-next-line: one-variable-per-declaration
     let file = false;
     let message = false;
     let location = false;

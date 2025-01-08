@@ -1,11 +1,11 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
+  AppConfig,
   Disposable,
   DomListener,
-  getDebugLogger,
   IDisposable,
-  AppConfig,
   electronEnv,
+  getDebugLogger,
 } from '@opensumi/ide-core-browser';
 
 import { WebviewScheme } from '../common';
@@ -44,8 +44,7 @@ export class ElectronWebviewWebviewPanel extends AbstractWebviewPanel implements
     this.clear();
     this._iframeDisposer = new Disposable();
     this._ready = new Promise<void>((resolve) => {
-      // tslint:disable-next-line: no-unused-variable
-      const disposer = this._onWebviewMessage('webview-ready', () => {
+      this._onWebviewMessage('webview-ready', () => {
         if (this._isReady) {
           // 这种情况一般是由于iframe在dom中的位置变动导致了重载。
           // 此时我们需要重新初始化
@@ -110,6 +109,14 @@ export class ElectronWebviewWebviewPanel extends AbstractWebviewPanel implements
     }
   }
 
+  protected preprocessHtml(html: string): string {
+    // 将vscode-resource:/User/xxx 转换为 vscode-resource:///User/xxx
+    return html.replace(
+      /(["'])vscode-resource:(\/\/|)([^\s'"]+?)(["'])/gi,
+      (_, startQuote, slash, path, endQuote) => `${startQuote}vscode-resource://${path}${endQuote}`,
+    );
+  }
+
   remove() {
     if (this.webview) {
       this.webview.remove();
@@ -136,7 +143,6 @@ export class ElectronWebviewWebviewPanel extends AbstractWebviewPanel implements
     }
   }
 }
-// tslint:disable-next-line: no-unused-variable
 const WebviewHTMLStr = `<!DOCTYPE html>
 <html lang="en" style="width: 100%; height: 100%;">
 

@@ -1,8 +1,5 @@
-import { observable } from 'mobx';
-
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
-import { IMarker, MarkerSeverity, URI, Disposable, compareRangesUsingStarts } from '@opensumi/ide-core-common';
-import { arrays } from '@opensumi/ide-core-common';
+import { Disposable, IMarker, MarkerSeverity, URI, arrays, compareRangesUsingStarts } from '@opensumi/ide-core-common';
 
 import { IMarkerService, IRenderableMarkerModel, MarkerModelBuilder } from '../common';
 
@@ -18,8 +15,6 @@ function compareMarkers(a: IMarker, b: IMarker): number {
  * marker view model for display
  */
 export class MarkerViewModel extends Disposable {
-  // view data
-  @observable
   public markers: Map<string, IRenderableMarkerModel> = new Map<string, IRenderableMarkerModel>();
 
   // marker filter
@@ -36,7 +31,6 @@ export class MarkerViewModel extends Disposable {
   private _onMarkerChanged(resources: string[]) {
     if (resources) {
       resources.forEach((resource) => {
-        // tslint:disable-next-line: no-bitwise
         this.updateMarker(
           resource,
           this._service

@@ -1,8 +1,8 @@
 import { AddonsModule } from '@opensumi/ide-addons/lib/node';
-import { NodeModule, ConstructorOf } from '@opensumi/ide-core-node';
-import { ServerCommonModule } from '@opensumi/ide-core-node';
+import { AINativeModule } from '@opensumi/ide-ai-native/lib/node';
+import { ConstructorOf, NodeModule, ServerCommonModule } from '@opensumi/ide-core-node';
+import { ExtensionModule } from '@opensumi/ide-extension/lib/node/index';
 import { OpenVsxExtensionManagerModule } from '@opensumi/ide-extension-manager/lib/node';
-import { ExtensionModule } from '@opensumi/ide-extension/lib/node';
 import { FileSchemeNodeModule } from '@opensumi/ide-file-scheme/lib/node';
 import { FileSearchModule } from '@opensumi/ide-file-search/lib/node';
 import { FileServiceModule } from '@opensumi/ide-file-service/lib/node';
@@ -23,4 +23,5 @@ export const CommonNodeModules: ConstructorOf<NodeModule>[] = [
   OpenVsxExtensionManagerModule,
   FileSchemeNodeModule,
   AddonsModule,
+  AINativeModule,
 ];

@@ -1,13 +1,13 @@
-import { Provider, Injectable, Autowired } from '@opensumi/di';
-import { NodeModule, ServerAppContribution, Domain, INodeLogger } from '@opensumi/ide-core-node';
+import { Autowired, Injectable, Provider } from '@opensumi/di';
+import { Domain, INodeLogger, NodeModule, ServerAppContribution } from '@opensumi/ide-core-node';
 
 import {
-  IExtensionNodeService,
-  ExtensionNodeServiceServerPath,
-  IExtensionNodeClientService,
   ExtensionHostProfilerServicePath,
   ExtensionHostProfilerServiceToken,
+  ExtensionNodeServiceServerPath,
   IExtensionHostManager,
+  IExtensionNodeClientService,
+  IExtensionNodeService,
 } from '../common';
 
 import { ExtensionHostManager } from './extension.host.manager';
@@ -58,11 +58,11 @@ export class ExtensionContribution implements ServerAppContribution {
 
   async initialize() {
     await this.extensionNodeService.initialize();
-    this.logger.verbose('extension initialized');
+    this.logger.verbose('Extension server initialized');
   }
 
   async onStop() {
     await this.extensionNodeService.disposeAllClientExtProcess();
-    this.logger.warn('extension exit by server stop');
+    this.logger.warn('All extension process exit by server stop');
   }
 }

@@ -1,6 +1,6 @@
 export const browserViews = {
-  // kaitianContributes
-  'sumiContributes.opensumiContributes': '由此包表示的 Opensumi 扩展的所有贡献',
+  // sumiContributes
+  'sumiContributes.contributes': '声明 OpenSumi 扩展的所有贡献点信息',
 
   // 公用 properties，如 command
   'sumiContributes.common.command': '要执行的命令。该命令必须在 "contributes.command" 中声明（内置命令除外）',
@@ -143,6 +143,7 @@ inline 模式 showTitle 会失效, 只显示 icon`,
   'sumiContributes.menu': '提供菜单项',
   'sumiContributes.menu.api.CommandPalette': '命令面板菜单',
   'sumiContributes.menu.api.ActivityBarExtra': '左侧活动栏底部的菜单',
+  'sumiContributes.menu.api.ActivityBarTopExtra': '左侧活动栏顶部的菜单',
   'sumiContributes.menu.api.DebugBreakpointsContext': '调试断点的右键菜单',
   'sumiContributes.menu.api.DebugCallStackContext': '调试调用堆栈的右键菜单',
   'sumiContributes.menu.api.DebugConsoleContext': '底部调试控制台日志面板的右键菜单',
@@ -184,4 +185,9 @@ inline 模式 showTitle 会失效, 只显示 icon`,
     '(可选) 用于表示 UI 中的子菜单的图标。文件路径、具有深色和浅色主题的文件路径的对象，或者主题图标引用(如 "$(zap)")',
   'sumiContributes.submenus.icon.light': '使用浅色主题时的图标路径',
   'sumiContributes.submenus.icon.dark': '使用深色主题时的图标路径',
+
+  // scm
+  'sumiContributes.SCM': '提供自定义的 scm 控件',
+  'sumiContributes.SCM.additional': '需要额外追加的 scm 控件列表',
+  'sumiContributes.SCM.additional.input': '对 input 控件追加属性',
 };

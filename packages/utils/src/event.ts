@@ -5,10 +5,11 @@
 // Some code copied and modified from https://github.com/microsoft/vscode/blob/1.44.0/src/vs/base/common/event.ts
 
 import { CancellationToken } from './cancellation';
-import { DisposableStore, combinedDisposable, Disposable, IDisposable, toDisposable } from './disposable';
+import { Disposable, DisposableStore, IDisposable, combinedDisposable, toDisposable } from './disposable';
 import { onUnexpectedError } from './errors';
 import { once as onceFn } from './functional';
 import { LinkedList } from './linked-list';
+import { randomString } from './uuid';
 
 /**
  * 重要备注
@@ -350,8 +351,92 @@ export namespace Event {
     }
   }
 
-  export function chain<T>(event: Event<T>): IChainableEvent<T> {
-    return new ChainableEvent(event);
+  export function chain<T, R>(
+    event: Event<T>,
+    sythensize: ($: IChainableSythensis<T>) => IChainableSythensis<R>,
+  ): Event<R> {
+    const fn: Event<R> = (listener, thisArgs, disposables) => {
+      const cs = sythensize(new ChainableSynthesis()) as ChainableSynthesis;
+      return event(
+        function (value) {
+          const result = cs.evaluate(value);
+          if (result !== HaltChainable) {
+            listener.call(thisArgs, result);
+          }
+        },
+        undefined,
+        disposables,
+      );
+    };
+
+    return fn;
+  }
+
+  const HaltChainable = Symbol('HaltChainable');
+
+  class ChainableSynthesis implements IChainableSythensis<any> {
+    private readonly steps: ((input: any) => any)[] = [];
+
+    map<O>(fn: (i: any) => O): this {
+      this.steps.push(fn);
+      return this;
+    }
+
+    forEach(fn: (i: any) => void): this {
+      this.steps.push((v) => {
+        fn(v);
+        return v;
+      });
+      return this;
+    }
+
+    filter(fn: (e: any) => boolean): this {
+      this.steps.push((v) => (fn(v) ? v : HaltChainable));
+      return this;
+    }
+
+    reduce<R>(merge: (last: R | undefined, event: any) => R, initial?: R | undefined): this {
+      let last = initial;
+      this.steps.push((v) => {
+        last = merge(last, v);
+        return last;
+      });
+      return this;
+    }
+
+    latch(equals: (a: any, b: any) => boolean = (a, b) => a === b): ChainableSynthesis {
+      let firstCall = true;
+      let cache: any;
+      this.steps.push((value) => {
+        const shouldEmit = firstCall || !equals(value, cache);
+        firstCall = false;
+        cache = value;
+        return shouldEmit ? value : HaltChainable;
+      });
+
+      return this;
+    }
+
+    public evaluate(value: any) {
+      for (const step of this.steps) {
+        value = step(value);
+        if (value === HaltChainable) {
+          break;
+        }
+      }
+
+      return value;
+    }
+  }
+
+  export interface IChainableSythensis<T> {
+    map<O>(fn: (i: T) => O): IChainableSythensis<O>;
+    forEach(fn: (i: T) => void): IChainableSythensis<T>;
+    filter<R extends T>(fn: (e: T) => e is R): IChainableSythensis<R>;
+    filter(fn: (e: T) => boolean): IChainableSythensis<T>;
+    reduce<R>(merge: (last: R, event: T) => R, initial: R): IChainableSythensis<R>;
+    reduce<R>(merge: (last: R | undefined, event: T) => R): IChainableSythensis<R>;
+    latch(equals?: (a: T, b: T) => boolean): IChainableSythensis<T>;
   }
 
   export interface NodeEventEmitter {
@@ -420,7 +505,7 @@ class LeakageMonitor {
   private _stacks: Map<string, number> | undefined;
   private _warnCountdown = 0;
 
-  constructor(readonly customThreshold?: number, readonly name: string = Math.random().toString(18).slice(2, 5)) {}
+  constructor(readonly customThreshold?: number, readonly name: string = randomString(3)) {}
 
   dispose(): void {
     if (this._stacks) {
@@ -1021,4 +1106,81 @@ export class ReadyEvent<T = void> implements IDisposable {
       this._emitter.dispose();
     }
   }
+}
+
+export class Dispatcher<T = void> implements IDisposable {
+  private _emitter = new Emitter<{
+    type: string;
+    data: T;
+  }>();
+
+  on(type: string): Event<T> {
+    return Event.map(
+      Event.filter(this._emitter.event, (e) => e.type === type),
+      (v) => v.data,
+    );
+  }
+
+  dispatch(type: string, data: T) {
+    this._emitter.fire({
+      type,
+      data,
+    });
+  }
+
+  dispose(): void {
+    this._emitter.dispose();
+  }
+}
+
+export class EventQueue<T> {
+  protected _listeners = new LinkedList<(data: T) => void>();
+
+  protected queue: T[] = [];
+
+  isOpened = false;
+  open = () => {
+    this.isOpened = true;
+    this.queue.forEach((data) => {
+      this.fire(data);
+    });
+    this.queue = [];
+  };
+
+  close = () => {
+    this.isOpened = false;
+  };
+
+  push = (data: T) => {
+    if (this.isOpened) {
+      this.fire(data);
+    } else {
+      this.queue.push(data);
+    }
+  };
+
+  fire = (data: T) => {
+    this._listeners.forEach((listener) => {
+      listener(data);
+    });
+  };
+
+  on = (cb: (data: T) => void) => {
+    const toRemove = this._listeners.push(cb);
+
+    if (!this.isOpened) {
+      this.open();
+    }
+
+    return Disposable.create(() => {
+      toRemove();
+      if (this._listeners.size === 0) {
+        this.close();
+      }
+    });
+  };
+
+  dispose = () => {
+    this._listeners.clear();
+  };
 }

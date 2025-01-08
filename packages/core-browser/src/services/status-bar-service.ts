@@ -1,11 +1,17 @@
-import { IMarkdownString, IThemeColor, StatusBarHoverCommand } from '@opensumi/ide-core-common';
-import { IDisposable } from '@opensumi/ide-core-common';
+import { IDisposable, IMarkdownString, IThemeColor, StatusBarHoverCommand } from '@opensumi/ide-core-common';
+import { IObservable } from '@opensumi/monaco-editor-core/esm/vs/base/common/observableInternal/base';
 
 import { IMenu } from '../menu/next';
+
+import type { EventEmitter } from '@opensumi/events';
 
 export const IStatusBarService = Symbol('IStatusBarService');
 
 export interface IStatusBarService {
+  emitter: EventEmitter<{
+    backgroundColor: [string?];
+    color: [string?];
+  }>;
   getBackgroundColor(): string | undefined;
   getColor(): string | undefined;
   setBackgroundColor(color?: string): void;
@@ -19,8 +25,8 @@ export interface IStatusBarService {
    */
   toggleElement(entryId: string): void;
   contextMenu: IMenu;
-  leftEntries: StatusBarEntry[];
-  rightEntries: StatusBarEntry[];
+  leftEntries: IObservable<StatusBarEntry[]>;
+  rightEntries: IObservable<StatusBarEntry[]>;
 }
 
 export interface StatusBarHoverContent {
@@ -51,25 +57,35 @@ export interface StatusBarEntry {
    * 标识当前状态栏组件 contextmenu 显示的名称，如果没有使用 text 代替
    */
   name?: string;
+  // 状态栏项的对齐方式
   alignment: StatusBarAlignment;
+  // 状态栏项的颜色
   color?: IThemeColor | string;
+  // 状态栏项的背景颜色
   backgroundColor?: IThemeColor | string;
+  // 状态栏项的CSS类名称
   className?: string;
+  // 状态栏项的工具提示文本或Markdown字符串
   tooltip?: string | IMarkdownString;
+  // 状态栏项关联的命令ID
   command?: string;
+  // 命令参数数组
   arguments?: any[];
+  // 状态栏项的优先级
   priority?: number;
+  // 状态栏项的图标类名称
   iconClass?: string;
+  // 状态栏项的ARIA标签
   ariaLabel?: string;
+  // 状态栏项的角色属性
   role?: string;
-  /**
-   * 是否默认展示，可以通过右键菜单控制
-   */
+  // 状态栏项的位置，可以是左侧或右侧
+  side?: 'left' | 'right';
+  // 是否默认展示，可以通过右键菜单控制
   hidden?: boolean;
-  /**
-   * 鼠标移上去 Content 的内容
-   */
+  // 鼠标移上去 Content 的内容
   hoverContents?: StatusBarHoverContent[];
+  // 点击事件
   onClick?: (e: any) => void;
 }
 

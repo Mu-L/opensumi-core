@@ -1,5 +1,5 @@
 import { Injectable } from '@opensumi/di';
-import { Event, Emitter } from '@opensumi/ide-core-browser';
+import { Emitter, Event } from '@opensumi/ide-core-browser';
 import { AbstractMenubarService, IMenubarItem, MenuNode } from '@opensumi/ide-core-browser/lib/menu/next';
 import { Disposable } from '@opensumi/ide-core-common';
 
@@ -82,21 +82,21 @@ describe('test for packages/menu-bar/src/browser/menu-bar.store.ts', () => {
   });
 
   it('ok for state#menubarItems', () => {
-    expect(menubarStore.menubarItems).toEqual([]);
+    expect(menubarStore.menubarItems.get()).toEqual([]);
 
     menubarService.menubarItems = [
       { id: 'helpMenu', label: 'help' },
       { id: 'windowMenu', label: 'window' },
     ];
 
-    expect(menubarStore.menubarItems).toEqual([
+    expect(menubarStore.menubarItems.get()).toEqual([
       { id: 'helpMenu', label: 'help' },
       { id: 'windowMenu', label: 'window' },
     ]);
 
     menubarService.menubarItems = [{ id: 'helpMenu', label: 'help' }];
 
-    expect(menubarStore.menubarItems).toEqual([{ id: 'helpMenu', label: 'help' }]);
+    expect(menubarStore.menubarItems.get()).toEqual([{ id: 'helpMenu', label: 'help' }]);
   });
 
   it('ok for state#menuItems', () => {
@@ -114,6 +114,6 @@ describe('test for packages/menu-bar/src/browser/menu-bar.store.ts', () => {
 
   it('ok for fn#handleMenubarClick', () => {
     menubarStore.handleMenubarClick('fakeMenuId');
-    expect(fakeRebuildMenuNodes).toBeCalled();
+    expect(fakeRebuildMenuNodes).toHaveBeenCalled();
   });
 });

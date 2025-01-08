@@ -1,17 +1,25 @@
 import { Injectable } from '@opensumi/di';
-import { PreferenceSchemaProvider, IPreferenceSettingsService, URI, BinaryBuffer } from '@opensumi/ide-core-browser';
+import {
+  BinaryBuffer,
+  IPreferenceSettingsService,
+  PreferenceSchemaProvider,
+  URI,
+  createContributionProvider,
+} from '@opensumi/ide-core-browser';
 import {
   MockPreferenceSchemaProvider,
   MockPreferenceSettingsService,
 } from '@opensumi/ide-core-browser/__mocks__/preference';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { SemanticTokenRegistryImpl } from '@opensumi/ide-theme/lib/browser/semantic-tokens-registry';
-import { Color } from '@opensumi/ide-theme/lib/common';
+import { ThemeData } from '@opensumi/ide-theme/lib/browser/theme-data';
+import { ThemeStore } from '@opensumi/ide-theme/lib/browser/theme-store';
+import { Color, IThemeData, IThemeStore } from '@opensumi/ide-theme/lib/common';
 import { ISemanticTokenRegistry } from '@opensumi/ide-theme/lib/common/semantic-tokens-registry';
 
-import { IThemeService } from '../../';
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
+import { IThemeService, ThemeContributionProvider } from '../../src';
 import { WorkbenchThemeService } from '../../src/browser/workbench.theme.service';
 
 @Injectable()
@@ -103,7 +111,7 @@ describe('color theme service test', () => {
   let injector: MockInjector;
   beforeEach(() => {
     injector = createBrowserInjector([]);
-
+    createContributionProvider(injector, ThemeContributionProvider);
     injector.addProviders(
       {
         token: IThemeService,
@@ -125,6 +133,14 @@ describe('color theme service test', () => {
         token: IFileServiceClient,
         useClass: MockFileServiceClient,
       },
+      {
+        token: IThemeData,
+        useClass: ThemeData,
+      },
+      {
+        token: IThemeStore,
+        useClass: ThemeStore,
+      },
     );
   });
 
@@ -145,6 +161,7 @@ describe('color theme service test', () => {
           label: 'Dark Default Colors',
           uiTheme: 'vs',
           path: './test-relativa-path/theme.json',
+          extensionId: 'mock',
         },
       ],
       new URI('file://base-ext-path'),
@@ -161,6 +178,7 @@ describe('color theme service test', () => {
           label: 'Dracula',
           uiTheme: 'vs',
           path: './test-relativa-path/theme.plist',
+          extensionId: 'mock',
         },
       ],
       new URI('file://base-ext-path'),

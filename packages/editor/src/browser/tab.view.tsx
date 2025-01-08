@@ -1,44 +1,63 @@
-import classnames from 'classnames';
+import cls from 'classnames';
 import React, {
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-  useContext,
-  useMemo,
-  forwardRef,
   DragEvent,
   HTMLAttributes,
-  Ref,
   MouseEvent,
+  forwardRef,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from 'react';
 
-import { Scrollbars } from '@opensumi/ide-components';
 import {
-  getIcon,
-  MaybeNull,
-  IEventBus,
-  getSlotLocation,
+  ComponentRegistry,
   ConfigContext,
+  Disposable,
+  DisposableCollection,
+  DomListener,
+  Event,
+  IEventBus,
+  MaybeNull,
+  MouseEventButton,
+  PreferenceService,
   ResizeEvent,
   URI,
-  Disposable,
-  DomListener,
-  PreferenceService,
-  DisposableCollection,
-  Event,
+  fastdom,
+  getExternalIcon,
+  getIcon,
+  getSlotLocation,
+  renderView,
+  useDesignStyles,
 } from '@opensumi/ide-core-browser';
-import { InlineActionBar } from '@opensumi/ide-core-browser/lib/components/actions';
-import { LAYOUT_VIEW_SIZE } from '@opensumi/ide-core-browser/lib/layout/constants';
+import { InlineMenuBar } from '@opensumi/ide-core-browser/lib/components/actions';
+import { LayoutViewSizeConfig } from '@opensumi/ide-core-browser/lib/layout/constants';
 import { VIEW_CONTAINERS } from '@opensumi/ide-core-browser/lib/layout/view-id';
 import { IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { useInjectable, useUpdateOnEventBusEvent } from '@opensumi/ide-core-browser/lib/react-hooks';
+import { formatLocalize } from '@opensumi/ide-core-common';
 
-import { IResource, ResourceService, IEditorGroup, WorkbenchEditorService, ResourceDidUpdateEvent } from '../common';
+import {
+  IEditorGroup,
+  IResource,
+  ResourceDidUpdateEvent,
+  ResourceService,
+  TabbarRightExtraContentId,
+  WorkbenchEditorService,
+} from '../common';
 
+import { Scroll } from './editor-scrollbar';
 import styles from './editor.module.less';
 import { TabTitleMenuService } from './menu/title-context.menu';
-import { GridResizeEvent, IEditorActionRegistry, DragOverPosition, EditorGroupFileDropEvent } from './types';
+import {
+  DragOverPosition,
+  EditorGroupFileDropEvent,
+  GridResizeEvent,
+  IEditorActionRegistry,
+  IEditorTabService,
+} from './types';
 import { useUpdateOnGroupTabChange } from './view/react-hook';
 import { EditorGroup, WorkbenchEditorServiceImpl } from './workbench-editor.service';
 
@@ -53,7 +72,7 @@ export const Tabs = ({ group }: ITabsProps) => {
   const tabWrapperRef = useRef<HTMLDivElement | null>();
   const contentRef = useRef<HTMLDivElement | null>();
   const editorActionUpdateTimer = useRef<any>(null);
-  const editorActionRef = useRef<typeof EditorActions>(null);
+  const editorActionRef = useRef<HTMLDivElement>(null);
   const resourceService = useInjectable(ResourceService) as ResourceService;
   const eventBus = useInjectable(IEventBus) as IEventBus;
   const configContext = useContext(ConfigContext);
@@ -61,6 +80,34 @@ export const Tabs = ({ group }: ITabsProps) => {
   const tabTitleMenuService = useInjectable(TabTitleMenuService) as TabTitleMenuService;
   const preferenceService = useInjectable<PreferenceService>(PreferenceService);
   const menuRegistry = useInjectable<IMenuRegistry>(IMenuRegistry);
+  const editorTabService = useInjectable<IEditorTabService>(IEditorTabService);
+  const layoutViewSize = useInjectable<LayoutViewSizeConfig>(LayoutViewSizeConfig);
+  const componentRegistry = useInjectable<ComponentRegistry>(ComponentRegistry);
+
+  const styles_tab_right = useDesignStyles(styles.tab_right, 'tab_right');
+  const styles_close_tab = useDesignStyles(styles.close_tab, 'close_tab');
+  const styles_kt_editor_close_icon = useDesignStyles(styles.kt_editor_close_icon, 'kt_editor_close_icon');
+  const styles_kt_editor_tabs_content = useDesignStyles(styles.kt_editor_tabs_content, 'kt_editor_tabs_content');
+  const styles_kt_editor_tabs_current_last = useDesignStyles(
+    styles.kt_editor_tabs_current_last,
+    'kt_editor_tabs_current_last',
+  );
+  const styles_kt_editor_tab = useDesignStyles(styles.kt_editor_tab, 'kt_editor_tab');
+  const styles_kt_editor_tab_current_prev = useDesignStyles(
+    styles.kt_editor_tab_current_prev,
+    'kt_editor_tab_current_prev',
+  );
+  const styles_kt_editor_tab_current_next = useDesignStyles(
+    styles.kt_editor_tab_current_next,
+    'kt_editor_tab_current_next',
+  );
+  const styles_kt_editor_tab_current = useDesignStyles(styles.kt_editor_tab_current, 'kt_editor_tab_current');
+  const styles_kt_editor_tab_dirty = useDesignStyles(styles.kt_editor_tab_dirty, 'kt_editor_tab_dirty');
+  const styles_kt_editor_tabs = useDesignStyles(styles.kt_editor_tabs, 'kt_editor_tabs');
+  const styles_kt_editor_tabs_scroll_wrapper = useDesignStyles(
+    styles.kt_editor_tabs_scroll_wrapper,
+    'kt_editor_tabs_scroll_wrapper',
+  );
 
   const [tabsLoadingMap, setTabsLoadingMap] = useState<{ [resource: string]: boolean }>({});
   const [wrapMode, setWrapMode] = useState<boolean>(!!preferenceService.get<boolean>('editor.wrapTab'));
@@ -68,6 +115,13 @@ export const Tabs = ({ group }: ITabsProps) => {
   const [lastMarginRight, setLastMarginRight] = useState<number | undefined>();
 
   const slotLocation = useMemo(() => getSlotLocation(pkgName, configContext.layoutConfig), []);
+
+  const RightExtraContentViewConfig = React.useMemo(() => {
+    const firstView = componentRegistry.getComponentRegistryInfo(TabbarRightExtraContentId)?.views?.[0];
+    if (firstView) {
+      return firstView;
+    }
+  }, []);
 
   useUpdateOnGroupTabChange(group);
   useUpdateOnEventBusEvent(
@@ -130,33 +184,37 @@ export const Tabs = ({ group }: ITabsProps) => {
   );
 
   const scrollToCurrent = useCallback(() => {
-    if (tabContainer.current) {
-      if (group.currentResource) {
-        try {
+    fastdom.measure(() => {
+      try {
+        if (tabContainer.current && group.currentResource) {
           const currentTab = tabContainer.current.querySelector(
             '.' + styles.kt_editor_tab + "[data-uri='" + group.currentResource.uri.toString() + "']",
           );
           if (currentTab) {
-            currentTab.scrollIntoView();
+            currentTab.scrollIntoView({
+              block: 'nearest',
+              inline: 'nearest',
+            });
           }
-        } catch (e) {
-          // noop
         }
+      } catch (e) {
+        // noop
       }
-    }
+    });
   }, [group, tabContainer.current]);
 
   const updateTabMarginRight = useCallback(() => {
     if (editorActionUpdateTimer.current) {
       clearTimeout(editorActionUpdateTimer.current);
-      editorActionUpdateTimer.current = null;
     }
-    const timer = setTimeout(() => {
-      if (editorActionRef.current?.offsetWidth !== lastMarginRight) {
-        setLastMarginRight(editorActionRef.current?.offsetWidth);
-      }
+    editorActionUpdateTimer.current = setTimeout(() => {
+      fastdom.measure(() => {
+        const _marginReight = (editorActionRef.current as HTMLDivElement)?.offsetWidth;
+        if (_marginReight !== lastMarginRight) {
+          setLastMarginRight(_marginReight);
+        }
+      });
     }, 200);
-    editorActionUpdateTimer.current = timer;
   }, [editorActionRef.current, editorActionUpdateTimer.current, lastMarginRight]);
 
   useEffect(() => {
@@ -174,17 +232,13 @@ export const Tabs = ({ group }: ITabsProps) => {
         disposer.addDispose(new DomListener(tabContainer.current, 'mousewheel', preventNavigation));
       }
       disposer.addDispose(
-        eventBus.on(ResizeEvent, (event) => {
-          if (event.payload.slotLocation === slotLocation) {
-            scrollToCurrent();
-          }
+        eventBus.onDirective(ResizeEvent.createDirective(slotLocation), () => {
+          scrollToCurrent();
         }),
       );
       disposer.addDispose(
-        eventBus.on(GridResizeEvent, (event) => {
-          if (event.payload.gridId === group.grid.uid) {
-            scrollToCurrent();
-          }
+        eventBus.onDirective(GridResizeEvent.createDirective(group.grid.uid), () => {
+          scrollToCurrent();
         }),
       );
       return () => {
@@ -194,27 +248,29 @@ export const Tabs = ({ group }: ITabsProps) => {
   }, [wrapMode]);
 
   const layoutLastInRow = useCallback(() => {
-    if (contentRef.current && wrapMode) {
-      const newMap: Map<number, boolean> = new Map();
+    fastdom.measureAtNextFrame(() => {
+      if (contentRef.current && wrapMode) {
+        const newMap: Map<number, boolean> = new Map();
 
-      let currentTabY: number | undefined;
-      let lastTab: HTMLDivElement | undefined;
-      const tabs = Array.from(contentRef.current.children);
-      // 最后一个元素是editorAction
-      tabs.pop();
-      tabs.forEach((child: HTMLDivElement) => {
-        if (child.offsetTop !== currentTabY) {
-          currentTabY = child.offsetTop;
-          if (lastTab) {
-            newMap.set(tabs.indexOf(lastTab), true);
+        let currentTabY: number | undefined;
+        let lastTab: HTMLDivElement | undefined;
+        const tabs = Array.from(contentRef.current.children);
+        // 最后一个元素是editorAction
+        tabs.pop();
+        tabs.forEach((child: HTMLDivElement) => {
+          if (child.offsetTop !== currentTabY) {
+            currentTabY = child.offsetTop;
+            if (lastTab) {
+              newMap.set(tabs.indexOf(lastTab), true);
+            }
           }
-        }
-        lastTab = child;
-        newMap.set(tabs.indexOf(child), false);
-      });
-      // 最后一个 tab 不做 grow 处理
-      setTabMap(newMap);
-    }
+          lastTab = child;
+          newMap.set(tabs.indexOf(child), false);
+        });
+        // 最后一个 tab 不做 grow 处理
+        setTabMap(newMap);
+      }
+    });
   }, [contentRef.current, wrapMode]);
 
   useEffect(() => {
@@ -225,10 +281,8 @@ export const Tabs = ({ group }: ITabsProps) => {
   useEffect(() => {
     const disposable = new DisposableCollection();
     disposable.push(
-      eventBus.on(ResizeEvent, (e) => {
-        if (e.payload.slotLocation === slotLocation) {
-          layoutLastInRow();
-        }
+      eventBus.onDirective(ResizeEvent.createDirective(slotLocation), () => {
+        layoutLastInRow();
       }),
     );
     disposable.push(
@@ -241,7 +295,7 @@ export const Tabs = ({ group }: ITabsProps) => {
     // 当前选中的group变化时宽度变化
     disposable.push(
       editorService.onDidCurrentEditorGroupChanged(() => {
-        window.requestAnimationFrame(updateTabMarginRight);
+        updateTabMarginRight();
       }),
     );
     // editorMenu变化时宽度可能变化
@@ -251,7 +305,7 @@ export const Tabs = ({ group }: ITabsProps) => {
         () => {},
         200,
       )(() => {
-        window.requestAnimationFrame(updateTabMarginRight);
+        updateTabMarginRight();
       }),
     );
 
@@ -263,7 +317,7 @@ export const Tabs = ({ group }: ITabsProps) => {
   useEffect(() => {
     const disposableCollection = new DisposableCollection();
     disposableCollection.push(
-      group.onDidEditorFocusChange((event) => {
+      group.onDidEditorFocusChange(() => {
         updateTabMarginRight();
       }),
     );
@@ -313,106 +367,146 @@ export const Tabs = ({ group }: ITabsProps) => {
     [editorService],
   );
 
-  const renderTabContent = () => (
-    <div className={styles.kt_editor_tabs_content} ref={contentRef as any}>
-      {group.resources.map((resource, i) => {
-        let ref: HTMLDivElement | null;
-        const decoration = resourceService.getResourceDecoration(resource.uri);
-        const subname = resourceService.getResourceSubname(resource, group.resources);
-        return (
-          <div
-            draggable={true}
-            className={classnames({
-              [styles.kt_editor_tab]: true,
-              [styles.last_in_row]: tabMap.get(i),
-              [styles.kt_editor_tab_current]: group.currentResource === resource,
-              [styles.kt_editor_tab_preview]: group.previewURI && group.previewURI.isEqual(resource.uri),
-            })}
-            style={
-              wrapMode && i === group.resources.length - 1
-                ? { marginRight: lastMarginRight, height: LAYOUT_VIEW_SIZE.EDITOR_TABS_HEIGHT }
-                : { height: LAYOUT_VIEW_SIZE.EDITOR_TABS_HEIGHT }
-            }
-            onContextMenu={(event) => {
-              tabTitleMenuService.show(event.nativeEvent.x, event.nativeEvent.y, resource && resource.uri, group);
-              event.preventDefault();
-            }}
-            key={resource.uri.toString()}
-            onMouseUp={(e) => {
-              if (e.nativeEvent.which === 2) {
-                e.preventDefault();
+  const renderEditorTab = React.useCallback(
+    (resource: IResource, isCurrent: boolean) => {
+      const decoration = resourceService.getResourceDecoration(resource.uri);
+      const subname = resourceService.getResourceSubname(resource, group.resources);
+
+      return editorTabService.renderEditorTab(
+        <>
+          <div className={tabsLoadingMap[resource.uri.toString()] ? 'loading_indicator' : cls(resource.icon)}> </div>
+          <div tabIndex={0} role='tab' aria-selected={isCurrent ? 'true' : 'false'}>
+            {resource.name}
+          </div>
+          {subname ? <div className={styles.subname}>{subname}</div> : null}
+          {decoration.readOnly ? (
+            <span className={cls(getExternalIcon('lock'), styles.editor_readonly_icon)}></span>
+          ) : null}
+          <div className={styles_tab_right}>
+            <div
+              className={cls({
+                [styles.kt_hidden]: !decoration.dirty,
+                [styles.dirty]: true,
+              })}
+            ></div>
+            <div
+              className={styles_close_tab}
+              onMouseDown={(e) => {
                 e.stopPropagation();
                 group.close(resource.uri);
-              }
-            }}
-            onMouseDown={(e) => {
-              if (e.nativeEvent.which === 1) {
-                group.open(resource.uri, { focus: true });
-              }
-            }}
-            data-uri={resource.uri.toString()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (ref) {
-                ref.classList.add(styles.kt_on_drag_over);
-              }
-            }}
-            onDragLeave={(e) => {
-              if (ref) {
-                ref.classList.remove(styles.kt_on_drag_over);
-              }
-            }}
-            onDrop={(e) => {
-              if (ref) {
-                ref.classList.remove(styles.kt_on_drag_over);
-              }
-              if (onDrop) {
-                onDrop(e, i, resource);
-              }
-            }}
-            onDoubleClick={(e) => {
-              group.pinPreviewed(resource.uri);
-            }}
-            ref={(el) => (ref = el)}
-            onDragStart={(e) => {
-              e.dataTransfer.setData('uri', resource.uri.toString());
-              e.dataTransfer.setData('uri-source-group', group.name);
-            }}
-          >
-            <div className={tabsLoadingMap[resource.uri.toString()] ? 'loading_indicator' : classnames(resource.icon)}>
-              {' '}
-            </div>
-            <div>{resource.name}</div>
-            {subname ? <div className={styles.subname}>{subname}</div> : null}
-            <div className={styles.tab_right}>
-              <div
-                className={classnames({
-                  [styles.kt_hidden]: !decoration.dirty,
-                  [styles.dirty]: true,
-                })}
-              ></div>
-              <div
-                className={styles.close_tab}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  group.close(resource.uri);
-                }}
-              >
-                <div className={classnames(getIcon('close'), styles.kt_editor_close_icon)} />
-              </div>
+              }}
+            >
+              {editorTabService.renderTabCloseComponent(
+                <div
+                  className={cls(getIcon('close'), styles_kt_editor_close_icon)}
+                  tabIndex={0}
+                  role='button'
+                  aria-label={formatLocalize('editor.closeTab.title', resource.name)}
+                />,
+              )}
             </div>
           </div>
-        );
-      })}
-      {wrapMode && <EditorActions className={styles.kt_editor_wrap_mode_action} ref={editorActionRef} group={group} />}
-    </div>
+        </>,
+        isCurrent,
+      );
+    },
+    [editorTabService],
   );
 
-  return (
-    <div id={VIEW_CONTAINERS.EDITOR_TABS} className={styles.kt_editor_tabs}>
+  const renderTabContent = () => {
+    const noTab = group.resources.length === 0;
+    const curTabIndex = group.resources.findIndex((resource) => group.currentResource === resource);
+    return (
       <div
-        className={styles.kt_editor_tabs_scroll_wrapper}
+        draggable={false}
+        className={cls({
+          [styles_kt_editor_tabs_content]: true,
+          [styles.kt_editor_tabs_content_empty]: noTab,
+          [styles_kt_editor_tabs_current_last]: curTabIndex === group.resources.length - 1,
+        })}
+        ref={contentRef as any}
+        role='tablist'
+      >
+        {group.resources.map((resource, i) => {
+          let ref: HTMLDivElement | null;
+          const decoration = resourceService.getResourceDecoration(resource.uri);
+          return (
+            <div
+              draggable={true}
+              title={resource.title}
+              className={cls({
+                [styles_kt_editor_tab]: true,
+                [styles.last_in_row]: tabMap.get(i),
+                [styles_kt_editor_tab_current_prev]: curTabIndex - 1 === i,
+                [styles_kt_editor_tab_current_next]: curTabIndex + 1 === i,
+                [styles_kt_editor_tab_current]: group.currentResource === resource,
+                [styles.kt_editor_tab_preview]: group.previewURI && group.previewURI.isEqual(resource.uri),
+                [styles_kt_editor_tab_dirty]: decoration.dirty,
+              })}
+              style={
+                wrapMode && i === group.resources.length - 1
+                  ? { marginRight: lastMarginRight, height: layoutViewSize.editorTabsHeight }
+                  : { height: layoutViewSize.editorTabsHeight }
+              }
+              onContextMenu={(event) => {
+                tabTitleMenuService.show(event.nativeEvent.x, event.nativeEvent.y, resource && resource.uri, group);
+                event.preventDefault();
+              }}
+              key={resource.uri.toString()}
+              onMouseUp={(e) => {
+                if (e.nativeEvent.button === MouseEventButton.Middle) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  group.close(resource.uri);
+                }
+              }}
+              onMouseDown={(e) => {
+                if (e.nativeEvent.button === MouseEventButton.Left) {
+                  group.open(resource.uri, { focus: true });
+                }
+              }}
+              data-uri={resource.uri.toString()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (ref) {
+                  ref.classList.add(styles.kt_on_drag_over);
+                }
+              }}
+              onDragLeave={(e) => {
+                if (ref) {
+                  ref.classList.remove(styles.kt_on_drag_over);
+                }
+              }}
+              onDrop={(e) => {
+                if (ref) {
+                  ref.classList.remove(styles.kt_on_drag_over);
+                }
+                if (onDrop) {
+                  onDrop(e, i, resource);
+                }
+              }}
+              onDoubleClick={(e) => {
+                group.pinPreviewed(resource.uri);
+              }}
+              ref={(el) => (ref = el)}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('uri', resource.uri.toString());
+                e.dataTransfer.setData('uri-source-group', group.name);
+              }}
+            >
+              {renderEditorTab(resource, group.currentResource === resource)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div id={VIEW_CONTAINERS.EDITOR_TABS} className={styles_kt_editor_tabs}>
+      <div
+        className={styles_kt_editor_tabs_scroll_wrapper}
         ref={tabWrapperRef as any}
         onDragOver={handleWrapperDragOver}
         onDragLeave={handleWrapperDragLeave}
@@ -420,18 +514,26 @@ export const Tabs = ({ group }: ITabsProps) => {
         onDoubleClick={handleEmptyDBClick}
       >
         {!wrapMode ? (
-          <Scrollbars
-            tabBarMode
+          <Scroll
             forwardedRef={(el) => (el ? (tabContainer.current = el) : null)}
             className={styles.kt_editor_tabs_scroll}
           >
             {renderTabContent()}
-          </Scrollbars>
+          </Scroll>
         ) : (
           <div className={styles.kt_editor_wrap_container}>{renderTabContent()}</div>
         )}
       </div>
-      {!wrapMode && <EditorActions ref={editorActionRef} group={group} />}
+
+      <EditorActions
+        className={cls({
+          [styles.kt_editor_wrap_mode_action]: wrapMode,
+        })}
+        ref={editorActionRef}
+        group={group}
+      />
+
+      {renderView(RightExtraContentViewConfig)}
     </div>
   );
 };
@@ -444,7 +546,8 @@ export interface IEditorActionsBaseProps {
 export type IEditorActionsProps = IEditorActionsBaseProps & HTMLAttributes<HTMLDivElement>;
 
 export const EditorActions = forwardRef<HTMLDivElement, IEditorActionsProps>(
-  (props: IEditorActionsProps, ref: Ref<typeof EditorActions>) => {
+  (props: IEditorActionsProps, ref: React.LegacyRef<HTMLDivElement>) => {
+    const styles_editor_actions = useDesignStyles(styles.editor_actions, 'editor_actions');
     const { group, className } = props;
 
     const acquireArgs = useCallback(
@@ -461,9 +564,18 @@ export const EditorActions = forwardRef<HTMLDivElement, IEditorActionsProps>(
 
     const editorActionRegistry = useInjectable<IEditorActionRegistry>(IEditorActionRegistry);
     const editorService: WorkbenchEditorServiceImpl = useInjectable(WorkbenchEditorService);
+    const layoutViewSize = useInjectable<LayoutViewSizeConfig>(LayoutViewSizeConfig);
+
     const menu = editorActionRegistry.getMenu(group);
     const [hasFocus, setHasFocus] = useState<boolean>(editorService.currentEditorGroup === group);
     const [args, setArgs] = useState<[URI, IEditorGroup, MaybeNull<URI>] | undefined>(acquireArgs());
+
+    /**
+     * 集成场景下可以不展示任何菜单，可以用以下代码取消菜单注册
+     * registry.unregisterMenuId(MenuId.EditorTitle);
+     * registry.unregisterMenuId(MenuId.EditorTitleRun);
+     */
+    const noActions = menu.getMergedMenuNodes().length === 0;
 
     useEffect(() => {
       const disposableCollection = new DisposableCollection();
@@ -491,15 +603,16 @@ export const EditorActions = forwardRef<HTMLDivElement, IEditorActionsProps>(
     return (
       <div
         ref={ref}
-        className={classnames(styles.editor_actions, className)}
-        style={{ height: LAYOUT_VIEW_SIZE.EDITOR_TABS_HEIGHT }}
+        className={cls(styles_editor_actions, className, {
+          [styles.editor_actions_no_actions]: noActions,
+        })}
+        style={{ height: layoutViewSize.editorTabsHeight }}
       >
-        <InlineActionBar<URI, IEditorGroup, MaybeNull<URI>>
+        <InlineMenuBar<URI, IEditorGroup, MaybeNull<URI>>
           menus={menu}
-          context={args as any /* 这个推断过不去.. */}
+          context={args as any}
           // 不 focus 的时候只展示 more 菜单
           regroup={(nav, more) => (hasFocus ? [nav, more] : [[], more])}
-          debounce={{ delay: 100, maxWait: 300 }}
         />
       </div>
     );

@@ -1,7 +1,5 @@
-import classNames from 'classnames';
+import cls from 'classnames';
 import React from 'react';
-
-import warning from '../utils/warning';
 
 import { IInputBaseProps, Input } from './Input';
 
@@ -9,10 +7,6 @@ import './validate-input.less';
 
 export enum VALIDATE_TYPE {
   INFO = 1,
-  /**
-   * @deprecated
-   */
-  WRANING = 0,
   ERROR = 2,
   WARNING = 3,
   IGNORE = 4,
@@ -42,21 +36,15 @@ export const ValidateInput = React.forwardRef<HTMLInputElement, ValidateInputPro
       setValidateMessage(validateInfo);
     }, [validateInfo]);
 
-    warning(
-      !validateMessage || validateMessage.type !== VALIDATE_TYPE.WRANING,
-      '`VALIDATE_TYPE.WRANING` was a wrong typo, please use `VALIDATE_TYPE.WARNING` instead',
-    );
-
-    const validateClx = classNames({
+    const validateClx = cls({
       'validate-error': validateMessage && validateMessage.type === VALIDATE_TYPE.ERROR,
-      'validate-warning':
-        validateMessage && [VALIDATE_TYPE.WRANING, VALIDATE_TYPE.WARNING].includes(validateMessage.type),
+      'validate-warning': validateMessage && validateMessage.type === VALIDATE_TYPE.WARNING,
       'validate-info': validateMessage && validateMessage.type === VALIDATE_TYPE.INFO,
     });
 
     const renderValidateMessage = () => {
       if (validateMessage && validateMessage.message) {
-        return <div className={classNames('validate-message', validateClx, { popup })}>{validateMessage.message}</div>;
+        return <div className={cls('validate-message', validateClx, { popup })}>{validateMessage.message}</div>;
       }
     };
 
@@ -90,11 +78,11 @@ export const ValidateInput = React.forwardRef<HTMLInputElement, ValidateInputPro
     };
 
     return (
-      <div className={classNames('input-box', { popup })}>
+      <div className={cls('input-box', { popup })}>
         <Input
           type={type}
           ref={ref}
-          className={classNames(className, validateMessage, validateClx)}
+          className={cls(className, validateMessage, validateClx)}
           onChange={handleChange}
           {...restProps}
         />

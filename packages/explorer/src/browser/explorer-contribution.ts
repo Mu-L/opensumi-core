@@ -1,5 +1,5 @@
 import { Autowired } from '@opensumi/di';
-import { localize, Domain, getIcon, formatLocalize, ClientAppContribution } from '@opensumi/ide-core-browser';
+import { ClientAppContribution, Domain, formatLocalize, getIcon, localize } from '@opensumi/ide-core-browser';
 import { EXPLORER_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 import { browserViews } from '@opensumi/ide-core-browser/lib/extensions/schema/browserViews';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
@@ -12,13 +12,16 @@ export class ExplorerContribution implements ClientAppContribution, ComponentCon
   @Autowired(IExtensionsSchemaService)
   protected readonly extensionsSchemaService: IExtensionsSchemaService;
 
-  // Explorer 只注册容器
+  /**
+   * register `explorer` component container
+   */
   registerComponent(registry: ComponentRegistry) {
     registry.register('@opensumi/ide-explorer', [], {
       iconClass: getIcon('explorer'),
       title: localize('explorer.title'),
       priority: 10,
       containerId: EXPLORER_CONTAINER_ID,
+      activateKeyBinding: 'ctrlcmd+shift+e',
     });
   }
 

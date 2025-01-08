@@ -1,21 +1,20 @@
-import { observable } from 'mobx';
 import React from 'react';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   Disposable,
   IToolbarRegistry,
-  createToolbarActionBtn,
   ToolbarActionBtnClickEvent,
+  createToolbarActionBtn,
 } from '@opensumi/ide-core-browser';
 import { IEventBus } from '@opensumi/ide-core-common';
 
 import {
-  IToolBarViewService,
-  ToolBarPosition,
-  IToolBarElementHandle,
   IToolBarAction,
   IToolBarComponent,
+  IToolBarElementHandle,
+  IToolBarViewService,
+  ToolBarPosition,
 } from './types';
 
 const locationToString = {
@@ -91,20 +90,11 @@ export class ToolBarViewService implements IToolBarViewService {
    * @deprecated
    */
   getVisibleElements(position: ToolBarPosition): (IToolBarComponent | IToolBarAction)[] {
-    // const index = mappedIndex[position];
-    // if (index === undefined) {
-    //   getDebugLogger('Toolbar').warn('getVisibleElements with invalid position:', position);
-    //   return [];
-    // }
-    // return this.elements[index]
-    //   .filter((handle) => handle.visible)
-    //   .map((handle) => handle.element);
     return [];
   }
 }
 
 export class ToolBarElementHandle extends Disposable implements IToolBarElementHandle {
-  @observable
   public visible = true;
 
   constructor(public readonly element: IToolBarAction | IToolBarComponent) {

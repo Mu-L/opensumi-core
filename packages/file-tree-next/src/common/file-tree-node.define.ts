@@ -1,8 +1,12 @@
-import { TreeNode, ICompositeTreeNode, CompositeTreeNode, ITree } from '@opensumi/ide-components';
+import { CompositeTreeNode, ICompositeTreeNode, ITree, TreeNode } from '@opensumi/ide-components';
 import { URI } from '@opensumi/ide-core-browser';
 import { FileStat } from '@opensumi/ide-file-service';
 
 export class Directory extends CompositeTreeNode {
+  public static is(node: any): node is Directory {
+    return CompositeTreeNode.is(node);
+  }
+
   constructor(
     tree: ITree,
     parent: ICompositeTreeNode | undefined,
@@ -24,7 +28,9 @@ export class Directory extends CompositeTreeNode {
 
   private updateName(name: string) {
     if (this.name !== name) {
-      this.addMetadata('name', name);
+      TreeNode.removeTreeNode(this.id, this.path);
+      this.name = name;
+      TreeNode.setTreeNode(this.id, this.path, this);
     }
   }
 
@@ -50,6 +56,10 @@ export class Directory extends CompositeTreeNode {
 }
 
 export class File extends TreeNode {
+  public static is(node: any): node is File {
+    return TreeNode.is(node);
+  }
+
   constructor(
     tree: ITree,
     parent: CompositeTreeNode | undefined,
@@ -67,7 +77,9 @@ export class File extends TreeNode {
 
   private updateName(name: string) {
     if (this.name !== name) {
-      this.addMetadata('name', name);
+      TreeNode.removeTreeNode(this.id, this.path);
+      this.name = name;
+      TreeNode.setTreeNode(this.id, this.path, this);
     }
   }
 

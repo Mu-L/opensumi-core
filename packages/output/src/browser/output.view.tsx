@@ -1,17 +1,18 @@
-import { observer } from 'mobx-react-lite';
-import React from 'react';
-import { useEffect, createRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 
-import { Select, Option } from '@opensumi/ide-components';
-import { useInjectable, isElectronRenderer, ViewState } from '@opensumi/ide-core-browser';
+import { Option, Select } from '@opensumi/ide-components';
+import { AppConfig, ViewState, useAutorun, useInjectable } from '@opensumi/ide-core-browser';
+import { OUTPUT_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 import { Select as NativeSelect } from '@opensumi/ide-core-browser/lib/components/select';
+import { IMainLayoutService } from '@opensumi/ide-main-layout/lib/common/main-layout.definition';
 
 import styles from './output.module.less';
 import { OutputService } from './output.service';
 
-export const Output = observer(({ viewState }: { viewState: ViewState }) => {
+export const Output = ({ viewState }: { viewState: ViewState }) => {
   const outputService = useInjectable<OutputService>(OutputService);
-  const outputRef = createRef<HTMLDivElement>();
+  const outputRef = useRef<HTMLDivElement | null>(null);
+  const layoutService = useInjectable<IMainLayoutService>(IMainLayoutService);
 
   useEffect(() => {
     outputService.viewHeight = String(viewState.height);
@@ -19,7 +20,15 @@ export const Output = observer(({ viewState }: { viewState: ViewState }) => {
 
   useEffect(() => {
     if (outputRef.current) {
-      outputService.initOutputMonacoInstance(outputRef.current);
+      const handler = layoutService.getTabbarHandler(OUTPUT_CONTAINER_ID);
+      if (handler?.isActivated()) {
+        outputService.initOutputMonacoInstance(outputRef.current);
+      } else {
+        const dispose = handler?.onActivate(() => {
+          outputService.initOutputMonacoInstance(outputRef.current!);
+          dispose?.dispose();
+        });
+      }
     }
   }, []);
 
@@ -28,16 +37,20 @@ export const Output = observer(({ viewState }: { viewState: ViewState }) => {
       <div className={styles.output} ref={outputRef} />
     </React.Fragment>
   );
-});
+};
 
-export const ChannelSelector = observer(() => {
+export const ChannelSelector = () => {
   const NONE = '<no channels>';
 
-  const outputService = useInjectable<OutputService>(OutputService);
+  const appConfig = useInjectable<AppConfig>(AppConfig);
   const channelOptionElements: React.ReactNode[] = [];
-  outputService.getChannels().forEach((channel, idx) => {
+  const [name, setName] = React.useState<string>('');
+  const outputService = useInjectable<OutputService>(OutputService);
+  const channels = useAutorun(outputService.getChannels);
+
+  channels.forEach((channel, idx) => {
     channelOptionElements.push(
-      isElectronRenderer() ? (
+      appConfig.isElectronRenderer ? (
         <option value={channel.name} key={`${idx} - ${channel.name}`}>
           {channel.name}
         </option>
@@ -48,9 +61,19 @@ export const ChannelSelector = observer(() => {
       ),
     );
   });
+
+  useEffect(() => {
+    const dispose = outputService.onDidSelectedChannelChange((channel) => {
+      setName(channel.name);
+    });
+    return () => {
+      dispose.dispose();
+    };
+  }, []);
+
   if (channelOptionElements.length === 0) {
     channelOptionElements.push(
-      isElectronRenderer() ? (
+      appConfig.isElectronRenderer ? (
         <option key={NONE} value={NONE}>
           {NONE}
         </option>
@@ -75,16 +98,13 @@ export const ChannelSelector = observer(() => {
     }
   }
 
-  return isElectronRenderer() ? (
-    <NativeSelect
-      value={outputService.selectedChannel ? outputService.selectedChannel.name : NONE}
-      onChange={handleChange}
-    >
+  return appConfig.isElectronRenderer ? (
+    <NativeSelect value={name ? name : NONE} onChange={handleChange}>
       {channelOptionElements}
     </NativeSelect>
   ) : (
     <Select
-      value={outputService.selectedChannel ? outputService.selectedChannel.name : NONE}
+      value={name ? name : NONE}
       className={styles.select}
       size='small'
       maxHeight={outputService.viewHeight}
@@ -93,4 +113,4 @@ export const ChannelSelector = observer(() => {
       {channelOptionElements}
     </Select>
   );
-});
+};

@@ -1,27 +1,24 @@
 import path from 'path';
 
-import { Injectable, Autowired, ConstructorOf } from '@opensumi/di';
+import { ConstructorOf, Injectable, Optional } from '@opensumi/di';
 import { Emitter } from '@opensumi/ide-core-common';
 import { AppConfig } from '@opensumi/ide-core-node/lib/types';
 
 import {
-  ILogService,
-  LogLevel,
-  SupportLogNamespace,
-  ILogServiceManager,
-  BaseLogServiceOptions,
-  LoggerManagerInitOptions,
   Archive,
+  BaseLogServiceOptions,
+  ILogService,
+  ILogServiceManager,
+  LogLevel,
+  LoggerManagerInitOptions,
+  SupportLogNamespace,
 } from '../common/';
 
-import { LogService, DEFAULT_LOG_FOLDER } from './log.service';
-import { getLogFolder, cleanOldLogs, cleanAllLogs, cleanExpiredLogs, getLogZipArchiveByFolder } from './utils';
+import { DEFAULT_LOG_FOLDER, LogService } from './log.service';
+import { cleanAllLogs, cleanExpiredLogs, cleanOldLogs, getLogFolder, getLogZipArchiveByFolder } from './utils';
 
 @Injectable()
 export class LogServiceManager implements ILogServiceManager {
-  @Autowired(AppConfig)
-  private appConfig: AppConfig;
-
   protected readonly logLevelChangeEmitter = new Emitter<LogLevel>();
   private globalLogLevel: LogLevel;
   private logMap = new Map<SupportLogNamespace, ILogService>();
@@ -29,7 +26,7 @@ export class LogServiceManager implements ILogServiceManager {
   private logFolderPath: string;
   private LogServiceClass: ConstructorOf<ILogService>;
 
-  constructor() {
+  constructor(@Optional(AppConfig) private appConfig: AppConfig) {
     this.init({
       logDir: this.appConfig.logDir,
       logLevel: this.appConfig.logLevel,

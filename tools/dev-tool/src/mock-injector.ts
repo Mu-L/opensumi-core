@@ -1,8 +1,9 @@
-import { Injector, Token, TokenResult, InstanceOpts, ConstructorOf, CreatorStatus, Provider } from '@opensumi/di';
-import { CommandRegistry } from '@opensumi/ide-core-common';
+import { ConstructorOf, CreatorStatus, Injector, InstanceOpts, Token, TokenResult } from '@opensumi/di';
+import { MockLoggerManageClient, MockLoggerService } from '@opensumi/ide-core-browser/__mocks__/logger';
+import { CommandRegistry, ILogServiceManager, ILoggerManagerClient, getDebugLogger } from '@opensumi/ide-core-common';
+import { INodeLogger, NodeModule, ServerApp } from '@opensumi/ide-core-node';
 
 export class MockInjector extends Injector {
-  // tslint:disable-next-line
   private mockMap = new Map<Token, [any, any][]>();
 
   mock<T extends Token, K extends keyof TokenResult<T>>(token: T, method: K, value: TokenResult<T>[K]) {
@@ -95,4 +96,30 @@ export function mockService<T = any>(target: Partial<T>): any {
       return t[p];
     },
   });
+}
+
+export function getNodeMockInjector() {
+  const injector = new MockInjector();
+  injector.addProviders(
+    {
+      token: ILoggerManagerClient,
+      useClass: MockLoggerManageClient,
+    },
+    {
+      token: ILogServiceManager,
+      useClass: MockLoggerService,
+    },
+    {
+      token: INodeLogger,
+      useValue: getDebugLogger(),
+    },
+  );
+  return injector;
+}
+
+export function createNodeInjector(modules: Array<ConstructorOf<NodeModule>>, inj?: Injector): MockInjector {
+  const injector = inj || getNodeMockInjector();
+  const app = new ServerApp({ modules, injector } as any);
+
+  return app.injector as MockInjector;
 }

@@ -4,10 +4,10 @@ import path from 'path';
 import * as fs from 'fs-extra';
 import semver from 'semver';
 
-import { getDebugLogger, getNodeRequire, Uri } from '@opensumi/ide-core-node';
-
+import { Uri, getDebugLogger } from '@opensumi/ide-core-node';
 
 import { IExtensionMetaData, IExtraMetaData } from '../common';
+import { getNodeRequire } from '../common/utils';
 
 import { mergeContributes } from './merge-contributes';
 
@@ -119,8 +119,20 @@ export class ExtensionScanner {
       }
     }
 
-    // merge for `kaitianContributes` and `contributes`
-    packageJSON.contributes = mergeContributes(packageJSON.kaitianContributes, packageJSON.contributes);
+    // compatible with `kaitianContributes` declare
+    if (!packageJSON.sumiContributes && packageJSON.kaitianContributes) {
+      packageJSON.sumiContributes = packageJSON.kaitianContributes;
+    }
+
+    packageJSON.contributes = packageJSON.contributes || {};
+
+    // merge for `sumiContributes` and `contributes`
+    // `sumiContributesOverride` is used for override the `contributes`
+    if (packageJSON.sumiContributesOverride) {
+      packageJSON.contributes = Object.assign(packageJSON.contributes, packageJSON.sumiContributesOverride);
+    }
+    // `sumiContributes` is used for merge the `contributes`
+    packageJSON.contributes = mergeContributes(packageJSON.sumiContributes, packageJSON.contributes);
 
     const extension = {
       // vscode 规范

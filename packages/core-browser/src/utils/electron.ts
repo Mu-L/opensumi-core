@@ -1,6 +1,6 @@
+import { NetSocketConnection } from '@opensumi/ide-connection/lib/common/connection';
 import { IDisposable } from '@opensumi/ide-core-common';
 import { IElectronMainApi } from '@opensumi/ide-core-common/lib/electron';
-import type { MessageConnection } from '@opensumi/vscode-jsonrpc';
 
 declare const ElectronIpcRenderer: IElectronIpcRenderer;
 
@@ -12,13 +12,36 @@ export interface IElectronIpcRenderer {
   send(channel: string, ...args: any[]): void;
 }
 
-export function createElectronMainApi(name: string): IElectronMainApi<any> {
+interface IPCMessage {
+  type: 'event' | 'request' | 'response';
+  service: string;
+  method: string;
+  requestId?: number; // for connecting 'requst' and 'response'
+  args: any[];
+}
+
+const getCapturer = () => {
+  if (window.__OPENSUMI_DEVTOOLS_GLOBAL_HOOK__?.captureIPC) {
+    return window.__OPENSUMI_DEVTOOLS_GLOBAL_HOOK__.captureIPC;
+  }
+  return;
+};
+
+export function createElectronMainApi(name: string, enableCaptured?: boolean): IElectronMainApi<any> {
   let id = 0;
+  const capturer = getCapturer();
+  const capture = (message: IPCMessage) => {
+    if (capturer) {
+      capturer(message);
+    }
+  };
+
   return new Proxy(
     {
       on: (event: string, listener: (...args) => void): IDisposable => {
         const wrappedListener = (e, eventName, ...args) => {
           if (eventName === event) {
+            enableCaptured && capture({ type: 'event', service: name, method: event, args });
             return listener(...args);
           }
         };
@@ -32,13 +55,13 @@ export function createElectronMainApi(name: string): IElectronMainApi<any> {
     },
     {
       get: (target, method) => {
-        if (method === 'on') {
-          return target[method];
-        } else {
-          return async (...args: any) =>
+        if (!target[method]) {
+          target[method] = async (...args: any) =>
             new Promise((resolve, reject) => {
               const requestId = id++;
               ElectronIpcRenderer.send('request:' + name, method, requestId, ...args);
+              enableCaptured && capture({ type: 'request', service: name, method: String(method), requestId, args });
+
               const listener = (event, id, error, result) => {
                 if (id === requestId) {
                   ElectronIpcRenderer.removeListener('response:' + name, listener);
@@ -49,14 +72,34 @@ export function createElectronMainApi(name: string): IElectronMainApi<any> {
                   } else {
                     resolve(result);
                   }
+                  enableCaptured &&
+                    capture({
+                      type: 'response',
+                      service: name,
+                      method: String(method),
+                      requestId,
+                      args: [error, result],
+                    });
                 }
               };
-              ElectronIpcRenderer.on('response:' + name, listener);
+
+              switch (method) {
+                case 'dispose':
+                  return resolve(undefined);
+                default:
+                  ElectronIpcRenderer.on('response:' + name, listener);
+              }
             });
         }
+        return target[method];
       },
     },
   );
+}
+
+export interface IElectronEnvMetadata {
+  windowClientId: string;
+  [key: string]: any;
 }
 
 export const electronEnv: {
@@ -65,6 +108,8 @@ export const electronEnv: {
   ipcRenderer: IElectronIpcRenderer;
   webviewPreload: string;
   plainWebviewPreload: string;
+  metadata: IElectronEnvMetadata;
+  osRelease: string;
   [key: string]: any;
 } = (global as any) || {};
 
@@ -74,19 +119,17 @@ if (typeof ElectronIpcRenderer !== 'undefined') {
 
 export interface IElectronNativeDialogService {
   showOpenDialog(options: Electron.OpenDialogOptions): Promise<string[] | undefined>;
-
   showSaveDialog(options: Electron.SaveDialogOptions): Promise<string | undefined>;
 }
 
 export const IElectronNativeDialogService = Symbol('IElectronNativeDialogService');
 
-export function createElectronClientConnection(connectPath?: string): MessageConnection {
+export function createNetSocketConnection(connectPath?: string): NetSocketConnection {
   let socket;
   if (connectPath) {
     socket = electronEnv.createNetConnection(connectPath);
   } else {
     socket = electronEnv.createRPCNetConnection();
   }
-  const { createSocketConnection } = require('@opensumi/ide-connection/lib/node/connect');
-  return createSocketConnection(socket);
+  return new NetSocketConnection(socket);
 }

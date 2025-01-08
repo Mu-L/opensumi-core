@@ -1,18 +1,19 @@
-import { Autowired, Injectable, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import { warning } from '@opensumi/ide-components/lib/utils/warning';
 import { IRPCProtocol, ProxyIdentifier } from '@opensumi/ide-connection';
-import { AppConfig, IToolbarPopoverRegistry } from '@opensumi/ide-core-browser';
-import { path, URI } from '@opensumi/ide-core-browser';
+import { AppConfig, IToolbarPopoverRegistry, URI, path } from '@opensumi/ide-core-browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 import {
   ContributionProvider,
+  Disposable,
   IExtensionProps,
   ILogger,
-  replaceLocalizePlaceholder,
   IReporterService,
   REPORT_NAME,
   getDebugLogger,
+  replaceLocalizePlaceholder,
 } from '@opensumi/ide-core-common';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
+import { ISCMRepository, SCMService } from '@opensumi/ide-scm';
 
 import {
   EXTENSION_EXTEND_SERVICE_PREFIX,
@@ -31,18 +32,18 @@ import {
 
 import { ExtensionNoExportsView } from './components';
 import { Extension } from './extension';
-import { createProxiedWindow, createProxiedDocument } from './proxies';
+import { createProxiedDocument, createProxiedWindow } from './proxies';
 import { retargetEvents } from './retargetEvents';
 import { getShadowRoot } from './shadowRoot';
+import { KtViewLocation } from './sumi/contributes/browser-views';
 import { SumiBrowserContributionRunner } from './sumi-browser/contribution';
 import { ISumiBrowserContributions } from './sumi-browser/types';
-import { KtViewLocation } from './sumi/contributes/browser-views';
 
 const { Path, posix } = path;
 const LOAD_FAILED_CODE = 'load';
 
 @Injectable()
-export class ViewExtProcessService implements AbstractViewExtProcessService {
+export class ViewExtProcessService extends Disposable implements AbstractViewExtProcessService {
   /**
    * TODO: 支持底部面板多视图展示
    * should replace view component
@@ -78,6 +79,9 @@ export class ViewExtProcessService implements AbstractViewExtProcessService {
 
   @Autowired(IReporterService)
   private readonly reporterService: IReporterService;
+
+  @Autowired(SCMService)
+  private readonly scmService: SCMService;
 
   private readonly debugLogger = getDebugLogger();
 
@@ -179,18 +183,18 @@ export class ViewExtProcessService implements AbstractViewExtProcessService {
   public async activeExtension(extension: IExtension, protocol: IRPCProtocol) {
     const { extendConfig, packageJSON, contributes } = extension;
     // 对使用 kaitian.js 的老插件兼容
-    // 因为可能存在即用了 kaitian.js 作为入口，又注册了 kaitianContributes 贡献点的插件
+    // 因为可能存在即用了 kaitian.js 作为入口，又注册了 sumiContributes 贡献点的插件
     if (extendConfig?.browser?.main) {
       warning(
         false,
-        '[Deprecated warning]: kaitian.js is deprecated, please use `package.json#kaitianContributes` instead',
+        '[Deprecated warning]: kaitian.js is deprecated, please use `package.json#sumiContributes` instead',
       );
       await this.activateExtensionByDeprecatedExtendConfig(extension as Extension);
       return;
     }
 
     // 激活 workerMain/browserMain 相关部分
-    if (packageJSON.kaitianContributes && contributes?.browserMain) {
+    if (packageJSON.sumiContributes && contributes?.browserMain) {
       await this.activeExtensionContributes(extension);
     }
   }
@@ -264,9 +268,70 @@ export class ViewExtProcessService implements AbstractViewExtProcessService {
         }
       }
     }
+
+    const handleScmContributes = (repo: ISCMRepository) => {
+      // scm
+      if (contributes.scm && contributes.scm.additional) {
+        const { input } = contributes.scm.additional;
+
+        if (!input) {
+          return;
+        }
+
+        const { addonBefore, addonAfter } = input;
+
+        const appendComponent = (addon: string[], key: string) => {
+          addon.forEach((addonId: string) => {
+            const component = moduleExports[addonId];
+
+            if (!component) {
+              this.logger.error(`Can not find ${key} from extension ${extension.id}, id: ${component}`);
+            }
+
+            if (this.appConfig.useExperimentalShadowDom) {
+              const shadowComponent = (props) =>
+                getShadowRoot(
+                  component,
+                  extension,
+                  props,
+                  addon,
+                  proxiedHead,
+                  this.appConfig.componentCDNType,
+                  this.appConfig.extensionBrowserStyleSheet,
+                );
+              repo.input.appendProps({
+                [key]: shadowComponent,
+              });
+            } else {
+              repo.input.appendProps({
+                [key]: component,
+              });
+            }
+          });
+        };
+
+        if (addonBefore) {
+          appendComponent(addonBefore, 'addonBefore');
+        }
+
+        if (addonAfter) {
+          appendComponent(addonAfter, 'addonAfter');
+        }
+      }
+    };
+
+    this.addDispose(
+      this.scmService.onDidAddRepository((repo) => {
+        handleScmContributes(repo);
+      }),
+    );
+
+    this.scmService.repositories.forEach((repo) => {
+      handleScmContributes(repo);
+    });
   }
 
-  /*
+  /**
    * @deprecated 废弃的用法兼容
    * 对于老的 kaitian.js 的兼容激活
    */
@@ -484,7 +549,7 @@ export class ViewExtProcessService implements AbstractViewExtProcessService {
     return pendingFetch;
   }
 
-  private getMockAmdLoader<T>(extension: IExtension, rpcProtocol?: IRPCProtocol) {
+  private getSumiAMDLoader<T>(extension: IExtension, rpcProtocol?: IRPCProtocol) {
     const _exports: { default?: any } | T = {};
     const _module = { exports: _exports };
     const _require = (request: string) => {
@@ -506,7 +571,7 @@ export class ViewExtProcessService implements AbstractViewExtProcessService {
     const loadTimer = this.reporterService.time(REPORT_NAME.LOAD_EXTENSION_MAIN);
     const pendingFetch = await this.doFetch(decodeURIComponent(browserPath));
     loadTimer.timeEnd(extension.id);
-    const { _module, _exports, _require } = this.getMockAmdLoader<T>(extension, this.nodeExtensionService.protocol);
+    const { _module, _exports, _require } = this.getSumiAMDLoader<T>(extension, this.nodeExtensionService.protocol);
     const initFn = new Function(
       'module',
       'exports',
@@ -587,7 +652,7 @@ export class ViewExtProcessService implements AbstractViewExtProcessService {
     const loadTimer = this.reporterService.time(REPORT_NAME.LOAD_EXTENSION_MAIN);
     const pendingFetch = await this.doFetch(decodeURIComponent(browserPath));
     loadTimer.timeEnd(extension.id);
-    const { _module, _exports, _require } = this.getMockAmdLoader<T>(extension, this.nodeExtensionService.protocol);
+    const { _module, _exports, _require } = this.getSumiAMDLoader<T>(extension, this.nodeExtensionService.protocol);
     const stylesCollection = [];
     const proxiedHead = document.createElement('head');
     const proxiedDocument = createProxiedDocument(proxiedHead);

@@ -6,3 +6,6 @@ export * from './plistParser';
 export * from './style';
 export * from './theme.service';
 export * from './themeCompatibility';
+export * from './provider';
+export * from './css-var';
+export * from './rule';

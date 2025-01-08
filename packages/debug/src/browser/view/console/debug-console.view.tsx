@@ -1,63 +1,78 @@
 import cls from 'classnames';
-import debounce from 'lodash/debounce';
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
 import {
-  RecycleTree,
-  IRecycleTreeHandle,
-  TreeNodeType,
-  INodeRendererWrapProps,
   ClasslistComposite,
-  INodeRendererProps,
   CompositeTreeNode,
+  INodeRendererProps,
+  INodeRendererWrapProps,
+  IRecycleTreeHandle,
+  Loading,
+  RecycleTree,
   TreeNode,
-  TreeNodeEvent,
+  TreeNodeType,
 } from '@opensumi/ide-components';
-import { Loading } from '@opensumi/ide-components';
-import { useInjectable, ViewState, getIcon } from '@opensumi/ide-core-browser';
-import { PreferenceService, PreferenceChange, CoreConfiguration } from '@opensumi/ide-core-browser';
+import {
+  CoreConfiguration,
+  PreferenceChange,
+  PreferenceService,
+  ViewState,
+  getIcon,
+  useDesignStyles,
+  useInjectable,
+} from '@opensumi/ide-core-browser';
 import { Disposable } from '@opensumi/ide-core-common';
+import { IMainLayoutService } from '@opensumi/ide-main-layout/lib/common/main-layout.definition';
 
+import { DEBUG_CONSOLE_CONTAINER_ID } from '../../../common';
 import { LinkDetector } from '../../debug-link-detector';
 import { CharWidthReader } from '../../debugUtils';
-import { DebugConsoleNode, AnsiConsoleNode, DebugVariableContainer, TreeWithLinkWrapper } from '../../tree';
+import { AnsiConsoleNode, DebugConsoleNode, DebugVariableContainer, TreeWithLinkWrapper } from '../../tree';
 
 import { DebugConsoleFilterService } from './debug-console-filter.service';
 import { IDebugConsoleModel } from './debug-console-tree.model.service';
 import styles from './debug-console.module.less';
 import { DebugConsoleService } from './debug-console.service';
 
-declare const ResizeObserver: any;
-
-export const DebugConsoleView = observer(({ viewState }: { viewState: ViewState }) => {
+export const DebugConsoleView = ({ viewState }: { viewState: ViewState }) => {
   const debugConsoleService = useInjectable<DebugConsoleService>(DebugConsoleService);
   const debugConsoleFilterService = useInjectable<DebugConsoleFilterService>(DebugConsoleFilterService);
   const preferenceService = useInjectable<PreferenceService>(PreferenceService);
   const { consoleModel } = debugConsoleService;
-  const debugInputRef = React.createRef<HTMLDivElement>();
   const { height, width } = viewState;
   const [model, setModel] = React.useState<IDebugConsoleModel>();
   const [consoleHeight, setConsoleHeight] = React.useState<number>(26);
   const [filterValue, setFilterValue] = React.useState<string>('');
   const [isWordWrap, setIsWordWrap] = React.useState<boolean>(true);
-  const disposer = new Disposable();
-  const wrapperRef: React.RefObject<HTMLDivElement> = React.createRef();
+
+  const debugInputRef = React.useRef<HTMLDivElement | null>(null);
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const layoutService = useInjectable<IMainLayoutService>(IMainLayoutService);
+
+  const styles_debug_console_output = useDesignStyles(styles.debug_console_output, 'debug_console_output');
+  const styles_variable_repl_bar = useDesignStyles(styles.variable_repl_bar, 'variable_repl_bar');
 
   React.useEffect(() => {
-    debugConsoleService.init(debugInputRef.current);
+    if (debugInputRef && debugInputRef.current) {
+      const handler = layoutService.getTabbarHandler(DEBUG_CONSOLE_CONTAINER_ID);
+      if (handler?.isActivated()) {
+        debugConsoleService.init(debugInputRef.current);
+      } else {
+        const dispose = handler?.onActivate(() => {
+          debugConsoleService.init(debugInputRef.current);
+          dispose?.dispose();
+        });
+      }
+    }
   }, [debugInputRef.current]);
 
   React.useEffect(() => {
+    const disposer = new Disposable();
+
     disposer.addDispose(
       consoleModel.onDidUpdateTreeModel(async (model: IDebugConsoleModel) => {
         if (model) {
           await model.treeModel.ensureReady;
-          disposer.addDispose(
-            model.treeModel.root.watcher.on(TreeNodeEvent.WillChangeExpansionState, () => {
-              consoleModel.treeHandle.layoutItem();
-            }),
-          );
         }
         setModel(model);
       }),
@@ -89,35 +104,6 @@ export const DebugConsoleView = observer(({ viewState }: { viewState: ViewState 
       disposer.dispose();
     };
   }, []);
-
-  React.useEffect(() => {
-    if (wrapperRef.current && isWordWrap) {
-      let animationFrame: number;
-      const layoutDebounce = debounce(() => consoleModel.treeHandle?.layoutItem(), 10);
-      const resizeObserver = new ResizeObserver(() => {
-        animationFrame = window.requestAnimationFrame(() => layoutDebounce());
-      });
-      resizeObserver.observe(wrapperRef.current);
-      return () => {
-        if (wrapperRef.current) {
-          resizeObserver?.unobserve(wrapperRef.current);
-        }
-        if (animationFrame) {
-          window.cancelAnimationFrame(animationFrame);
-        }
-      };
-    }
-  }, [wrapperRef.current]);
-
-  React.useEffect(() => {
-    if (model && isWordWrap) {
-      disposer.addDispose(
-        model.treeModel.state.onChangeScrollOffset(() => {
-          consoleModel.treeHandle.layoutItem();
-        }),
-      );
-    }
-  }, [model, isWordWrap]);
 
   const handleTreeReady = (handle: IRecycleTreeHandle) => {
     consoleModel.handleTreeHandler({
@@ -222,7 +208,7 @@ export const DebugConsoleView = observer(({ viewState }: { viewState: ViewState 
   return (
     <div className={styles.debug_console} onContextMenu={handleOuterContextMenu} onClick={handleConsoleClick}>
       <div
-        className={styles.debug_console_output}
+        className={styles_debug_console_output}
         tabIndex={-1}
         onBlur={handleOuterBlur}
         ref={wrapperRef}
@@ -230,7 +216,7 @@ export const DebugConsoleView = observer(({ viewState }: { viewState: ViewState 
       >
         {renderOutputContent()}
       </div>
-      <div className={styles.variable_repl_bar} style={{ maxHeight: height - 26 + 'px' }}>
+      <div className={styles_variable_repl_bar} style={{ maxHeight: height - 26 + 'px' }}>
         <div className={styles.variable_repl_bar_icon}>
           <span className={getIcon('right')}></span>
         </div>
@@ -238,7 +224,7 @@ export const DebugConsoleView = observer(({ viewState }: { viewState: ViewState 
       </div>
     </div>
   );
-});
+};
 
 export interface IDebugConsoleNodeProps {
   item: any;
@@ -279,6 +265,8 @@ export const DebugConsoleRenderedNode: React.FC<IDebugConsoleNodeRenderedProps> 
   const debugConsoleFilterService = useInjectable<DebugConsoleFilterService>(DebugConsoleFilterService);
   const linkDetector: LinkDetector = useInjectable<LinkDetector>(LinkDetector);
   const [computedStyle, setComputedStyle] = React.useState<string>();
+
+  const styles_expansion_toggle = useDesignStyles(styles.expansion_toggle, 'expansion_toggle');
 
   React.useEffect(() => {
     const computed = window.getComputedStyle(
@@ -440,7 +428,7 @@ export const DebugConsoleRenderedNode: React.FC<IDebugConsoleNodeRenderedProps> 
     };
     if (decorations && decorations?.classlist.indexOf(styles.mod_loading) > -1) {
       return (
-        <div className={cls(styles.debug_console_node_segment, styles.expansion_toggle)}>
+        <div className={cls(styles.debug_console_node_segment, styles_expansion_toggle)}>
           <Loading />
         </div>
       );
@@ -452,7 +440,7 @@ export const DebugConsoleRenderedNode: React.FC<IDebugConsoleNodeRenderedProps> 
     return (
       <div
         onClick={handleTwiceClick}
-        className={cls(styles.debug_console_node_segment, styles.expansion_toggle, getIcon('right'), {
+        className={cls(styles.debug_console_node_segment, styles_expansion_toggle, getIcon('right'), {
           [`${styles.mod_collapsed}`]: !(node as DebugConsoleNode).expanded,
         })}
       />

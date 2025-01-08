@@ -1,19 +1,17 @@
-import { observable } from 'mobx';
-
-import { Injectable, Autowired } from '@opensumi/di';
-import { URI, IDisposable, WithEventBus, OnEvent } from '@opensumi/ide-core-browser';
-import { Disposable, arrays, LRUMap, ILogger, Emitter } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IDisposable, OnEvent, URI, WithEventBus } from '@opensumi/ide-core-browser';
+import { Disposable, Emitter, ILogger, LRUMap, arrays } from '@opensumi/ide-core-common';
 
 import {
-  ResourceService,
-  IResource,
-  IResourceProvider,
-  ResourceNeedUpdateEvent,
-  ResourceDidUpdateEvent,
-  IResourceDecoration,
-  ResourceDecorationNeedChangeEvent,
-  ResourceDecorationChangeEvent,
   AskSaveResult,
+  IResource,
+  IResourceDecoration,
+  IResourceProvider,
+  ResourceDecorationChangeEvent,
+  ResourceDecorationNeedChangeEvent,
+  ResourceDidUpdateEvent,
+  ResourceNeedUpdateEvent,
+  ResourceService,
 } from '../common';
 
 const { addElement } = arrays;
@@ -71,8 +69,9 @@ export class ResourceServiceImpl extends WithEventBus implements ResourceService
   }
 
   @OnEvent(ResourceDecorationNeedChangeEvent)
-  onResourceDecorationChangeEvent(e: ResourceDecorationNeedChangeEvent) {
-    this.getResourceDecoration(e.payload.uri); // ensure object
+  onResourceDecorationNeedChangeEvent(e: ResourceDecorationNeedChangeEvent) {
+    // ensure object
+    void this.getResourceDecoration(e.payload.uri);
     let changed = false;
     const previous = this.resourceDecoration.get(e.payload.uri.toString()) || {};
     new Set([...Object.keys(previous), ...Object.keys(e.payload.decoration)]).forEach((key) => {
@@ -86,6 +85,12 @@ export class ResourceServiceImpl extends WithEventBus implements ResourceService
     }
   }
 
+  getSupportedSchemes() {
+    return Array.from(this.providers.values())
+      .map((provider) => provider.scheme)
+      .filter(Boolean) as string[];
+  }
+
   async getResource(uri: URI): Promise<IResource<any> | null> {
     if (!this.resources.has(uri.toString())) {
       const r = await this.doGetResource(uri);
@@ -93,7 +98,7 @@ export class ResourceServiceImpl extends WithEventBus implements ResourceService
         return null;
       }
       const resource = {
-        resource: observable(Object.assign({}, r.resource)),
+        resource: r.resource,
         provider: r.provider,
       };
       this.resources.set(uri.toString(), resource);
@@ -226,7 +231,7 @@ export class ResourceServiceImpl extends WithEventBus implements ResourceService
 
   public getResourceDecoration(uri: URI): IResourceDecoration {
     if (!this.resourceDecoration.has(uri.toString())) {
-      this.resourceDecoration.set(uri.toString(), observable(DefaultResourceDecoration));
+      this.resourceDecoration.set(uri.toString(), { ...DefaultResourceDecoration });
     }
     return this.resourceDecoration.get(uri.toString()) as IResourceDecoration;
   }
@@ -245,6 +250,7 @@ export class ResourceServiceImpl extends WithEventBus implements ResourceService
   disposeResource(resource: IResource<any>) {
     const provider = this.getProvider(resource.uri);
     this.resources.delete(resource.uri.toString());
+    this.resourceDecoration.delete(resource.uri.toString());
     if (!provider || !provider.onDisposeResource) {
       return;
     } else {
@@ -255,6 +261,7 @@ export class ResourceServiceImpl extends WithEventBus implements ResourceService
 
 const DefaultResourceDecoration: IResourceDecoration = {
   dirty: false,
+  readOnly: false,
 };
 
 const GhostResourceProvider: IResourceProvider = {

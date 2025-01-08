@@ -1,23 +1,23 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  ILogger,
-  isOSX,
+  CommandRegistry,
+  CommandService,
+  ContributionProvider,
+  Disposable,
   Emitter,
   Event,
-  CommandRegistry,
-  ContributionProvider,
   IDisposable,
-  Disposable,
+  ILogger,
   formatLocalize,
-  CommandService,
+  isOSX,
   isUndefined,
 } from '@opensumi/ide-core-common';
 import { ContextKeyExpression } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 
 import { IContextKeyService } from '../context-key';
 import { KeyboardLayoutService } from '../keyboard/keyboard-layout-service';
-import { KeyCode, KeySequence, Key, SpecialCases } from '../keyboard/keys';
-import { StatusBarAlignment, IStatusBarService } from '../services';
+import { Key, KeyCode, KeySequence, SpecialCases } from '../keyboard/keys';
+import { IStatusBarService, StatusBarAlignment } from '../services';
 
 export enum KeybindingScope {
   DEFAULT,
@@ -27,7 +27,7 @@ export enum KeybindingScope {
 }
 
 // ref: https://github.com/Microsoft/vscode/blob/97fc588e65bedcb1113baeddd2f67237e52c8c63/src/vs/platform/keybinding/common/keybindingsRegistry.ts#L56
-// 快捷键第一优先级，在开天中将对该值 * 100 作为快捷键的优先级参数 priority
+// 快捷键第一优先级，将对该值 * 100 作为快捷键的优先级参数 priority
 export enum KeybindingWeight {
   Default = 0, // 不传入 priority 则默认为 0
   EditorCore = 1,
@@ -161,6 +161,7 @@ export interface KeybindingRegistry {
   isPseudoCommand(commandId: string): boolean;
   resetKeybindings(): void;
   onKeybindingsChanged: Event<{ affectsCommands: string[] }>;
+  getKeybindingByScope(scope: KeybindingScope): Keybinding[];
 }
 
 export const keybindingServicePath = '/services/keybindings';
@@ -779,8 +780,9 @@ export class KeybindingRegistryImpl implements KeybindingRegistry, KeybindingSer
       clearTimeout(this.modifierKeySequenceTimer);
     }
     const keyCode = KeyCode.createKeyCode(event);
-    // 当传入的 KeyCode 不是修饰符时，不处理
+    // 当传入的 KeyCode 不是修饰符时，清空当前修饰符队列
     if (!keyCode.isModifierOnly()) {
+      this.modifierKeySequence = [];
       return;
     }
     this.modifierKeySequence.push(keyCode);
@@ -819,7 +821,6 @@ export class KeybindingRegistryImpl implements KeybindingRegistry, KeybindingSer
     this.keyboardLayoutService.validateKeyCode(keyCode);
     this.keySequence.push(keyCode);
     const bindings = this.getKeybindingsForKeySequence(this.keySequence, event);
-
     if (this.tryKeybindingExecution(bindings.full, event)) {
       this.keySequence = [];
       this.statusBar.removeElement('keybinding-status');
@@ -902,6 +903,10 @@ export class KeybindingRegistryImpl implements KeybindingRegistry, KeybindingSer
       }
     }
     return false;
+  }
+
+  getKeybindingByScope(scope: KeybindingScope) {
+    return this.keymaps[scope];
   }
 }
 

@@ -1,17 +1,17 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   CancellationToken,
-  IPosition,
   IDisposable,
-  arrays,
+  IPosition,
   RefCountedDisposable,
-  onUnexpectedExternalError,
   URI,
   Uri,
+  arrays,
+  onUnexpectedExternalError,
 } from '@opensumi/ide-core-common';
 import {
-  TypeHierarchyItem,
   ITypeHierarchyService,
+  TypeHierarchyItem,
   TypeHierarchyProvider,
   TypeHierarchyProviderRegistry,
 } from '@opensumi/ide-monaco/lib/browser/contrib/typeHierarchy';
@@ -104,8 +104,11 @@ export class TypeHierarchyService implements ITypeHierarchyService {
   }
 
   async prepareTypeHierarchyProvider(resource: Uri, position: Position) {
-    let textModel = this.modelService.getModelReference(URI.parse(resource.toString()))?.instance.getMonacoModel();
-    let textModelReference: IDisposable | undefined;
+    let textModelReference = this.modelService.getModelReference(URI.parse(resource.toString()));
+
+    let textModel: ITextModel | undefined = textModelReference?.instance.getMonacoModel();
+    textModelReference?.dispose();
+
     if (!textModel) {
       const result = await this.modelService.createModelReference(URI.parse(resource.toString()));
       textModel = result.instance.getMonacoModel();

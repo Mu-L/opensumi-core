@@ -1,13 +1,11 @@
 name: E2E Test
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  push:
+    branches: [main, v*.*]
   pull_request:
-    branches:
-      - main
+    branches: [main, v*.*]
 
 # Cancel prev CI if new commit come
 concurrency:
@@ -16,32 +14,35 @@ concurrency:
 
 jobs:
   build:
-    name: ubuntu-latest,  Node.js 14.x
+    name: ubuntu-latest, Node.js 20.x
 
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Use Node.js "14.x"
-        uses: actions/setup-node@v3
+      - name: Install libsecret-1
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+
+      - name: Use Node.js "20.x"
+        uses: actions/setup-node@v4
         with:
-          node-version: '14.x'
+          node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
-
-      - uses: microsoft/playwright-github-action@v1
       - name: Get yarn cache directory path
         id: yarn_cache_dir_path
-        run: echo "::set-output name=dir::$(yarn config get cacheFolder)"
-      - uses: actions/cache@v3
+        run: echo "dir=$(yarn config get cacheFolder)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
         id: yarn_cache
         with:
           path: ${{ steps.yarn_cache_dir_path.outputs.dir }}
-          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('./yarn.lock') }}
           restore-keys: |
             ${{ runner.os }}-yarn-
+
       - name: Install
         run: |
           yarn install --immutable
@@ -53,7 +54,7 @@ jobs:
         run: |
           yarn run download-extension
           yarn run rebuild:node
-          SUPPORT_LOAD_WORKSPACE_BY_HASH=true yarn start &
+          SUPPORT_LOAD_WORKSPACE_BY_HASH=true yarn start:e2e &
           bash tools/playwright/scripts/wait.sh && cd tools/playwright && yarn run ui-tests-ci
 
       - name: Upload test results

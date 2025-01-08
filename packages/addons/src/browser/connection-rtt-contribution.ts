@@ -3,7 +3,7 @@ import { IStatusBarService, StatusBarAlignment, StatusBarEntryAccessor } from '@
 import { Command, CommandContribution, CommandRegistry } from '@opensumi/ide-core-common/lib/command';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
 
-import { ConnectionRTTBrowserServiceToken, ConnectionRTTBrowserService } from './connection-rtt-service';
+import { ConnectionRTTBrowserService, ConnectionRTTBrowserServiceToken } from './connection-rtt-service';
 
 const START_CONNECTION_RTT_COMMAND: Command = {
   id: 'connection.start.rtt',
@@ -49,7 +49,7 @@ export class ConnectionRTTContribution implements CommandContribution {
         if (!this.interval) {
           return;
         }
-        global.clearInterval(this.interval);
+        clearInterval(this.interval);
         if (this.statusBar) {
           this.statusBar.dispose();
           this.statusBar = undefined;
@@ -59,7 +59,7 @@ export class ConnectionRTTContribution implements CommandContribution {
   }
 
   private startRTTInterval() {
-    this.interval = global.setInterval(async () => {
+    this.interval = setInterval(async () => {
       const start = Date.now();
       await this.rttService.measure();
       const rtt = Date.now() - start;

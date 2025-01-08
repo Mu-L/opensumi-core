@@ -1,33 +1,33 @@
 import isEqual from 'lodash/isEqual';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  TreeModel,
-  DecorationsManager,
   Decoration,
+  DecorationsManager,
   IRecycleTreeHandle,
-  TreeNodeType,
+  TreeModel,
   TreeNodeEvent,
+  TreeNodeType,
 } from '@opensumi/ide-components';
 import {
-  Emitter,
-  ThrottledDelayer,
   Deferred,
-  Event,
   DisposableCollection,
+  Emitter,
+  Event,
   IClipboardService,
+  ThrottledDelayer,
 } from '@opensumi/ide-core-browser';
-import { AbstractContextMenuService, MenuId, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
+import { AbstractContextMenuService, ICtxMenuRenderer, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
 import { DebugSession } from '../../debug-session';
 import {
+  DebugScope,
+  DebugVariable,
+  DebugVariableContainer,
+  DebugVariableRoot,
   ExpressionContainer,
   ExpressionNode,
-  DebugVariableRoot,
-  DebugVariableContainer,
-  DebugVariable,
-  DebugScope,
 } from '../../tree/debug-tree-node.define';
 import { DebugViewModel } from '../debug-view-model';
 
@@ -239,24 +239,17 @@ export class DebugVariablesModelService {
 
   listenTreeViewChange() {
     this.dispose();
+    if (!this.treeModel) {
+      return;
+    }
     this.disposableCollection.push(
-      this.treeModel?.root.watcher.on(TreeNodeEvent.WillResolveChildren, (target) => {
+      this.treeModel.root.watcher.on(TreeNodeEvent.WillResolveChildren, (target) => {
         this.loadingDecoration.addTarget(target);
       }),
     );
     this.disposableCollection.push(
-      this.treeModel?.root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
+      this.treeModel.root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
         this.loadingDecoration.removeTarget(target);
-      }),
-    );
-    this.disposableCollection.push(
-      this.treeModel!.onWillUpdate(() => {
-        // 更新树前更新下选中节点
-        if (this.selectedNodes.length !== 0) {
-          // 仅处理一下单选情况
-          const node = this.treeModel?.root.getTreeNodeByPath(this.selectedNodes[0].path);
-          this.selectedDecoration.addTarget(node as ExpressionNode);
-        }
       }),
     );
   }

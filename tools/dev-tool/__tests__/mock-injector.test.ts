@@ -1,6 +1,7 @@
 import { Injectable } from '@opensumi/di';
 
-import { createBrowserInjector, createNodeInjector } from '../src/injector-helper';
+import { createBrowserInjector } from '../src/injector-helper';
+import { createNodeInjector } from '../src/mock-injector';
 import { MockInjector } from '../src/mock-injector';
 
 describe('mock-injector test', () => {
@@ -17,49 +18,49 @@ describe('mock-injector test', () => {
     fn2 = jest.fn();
   });
 
-  describe('手动创建 injector', () => {
+  describe('Manually create Injector', () => {
     let injector: MockInjector;
 
     beforeEach(() => {
       injector = new MockInjector();
     });
 
-    it('能够正常 mock 一个依赖注入的对象', () => {
+    it('Can mock a injected service', () => {
       injector.mock(A, 'log', fn2);
 
       const args = [1, '2', true];
       const a = injector.get(A);
       a.log(...args);
 
-      expect(fn1).toBeCalledTimes(0);
-      expect(fn2).toBeCalledTimes(1);
-      expect(fn2).toBeCalledWith(...args);
+      expect(fn1).toHaveBeenCalledTimes(0);
+      expect(fn2).toHaveBeenCalledTimes(1);
+      expect(fn2).toHaveBeenCalledWith(...args);
     });
 
-    it('先创建对象，能够正常 mock', () => {
+    it('Can mock a created service', () => {
       const args = [1, '2', true];
       const a = injector.get(A);
 
       injector.mock(A, 'log', fn2);
       a.log(...args);
 
-      expect(fn1).toBeCalledTimes(0);
-      expect(fn2).toBeCalledTimes(1);
-      expect(fn2).toBeCalledWith(...args);
+      expect(fn1).toHaveBeenCalledTimes(0);
+      expect(fn2).toHaveBeenCalledTimes(1);
+      expect(fn2).toHaveBeenCalledWith(...args);
     });
 
-    it('不 mock 的时候正常运行', () => {
+    it('Work as expected', () => {
       const args = [1, '2', true];
       const a = injector.get(A);
       a.log(...args);
 
-      expect(fn1).toBeCalledTimes(1);
-      expect(fn1).toBeCalledWith(...args);
+      expect(fn1).toHaveBeenCalledTimes(1);
+      expect(fn1).toHaveBeenCalledWith(...args);
     });
   });
 
-  describe('通过辅助函数创建 injector', () => {
-    it('能够使用 Browser 环境的 Injector 进行 mock', () => {
+  describe('User helper to create Injector', () => {
+    it('Can mock service with the Injector created by `createBrowserInjector` method', () => {
       const injector = createBrowserInjector([]);
       injector.mock(A, 'log', fn2);
 
@@ -67,12 +68,12 @@ describe('mock-injector test', () => {
       const a = injector.get(A);
       a.log(...args);
 
-      expect(fn1).toBeCalledTimes(0);
-      expect(fn2).toBeCalledTimes(1);
-      expect(fn2).toBeCalledWith(...args);
+      expect(fn1).toHaveBeenCalledTimes(0);
+      expect(fn2).toHaveBeenCalledTimes(1);
+      expect(fn2).toHaveBeenCalledWith(...args);
     });
 
-    it('能够使用 Node 环境的 Injector 进行 mock', () => {
+    it('Can mock service with the Injector created by `createNodeInjector` method', () => {
       const injector = createNodeInjector([]);
       injector.mock(A, 'log', fn2);
 
@@ -80,9 +81,9 @@ describe('mock-injector test', () => {
       const a = injector.get(A);
       a.log(...args);
 
-      expect(fn1).toBeCalledTimes(0);
-      expect(fn2).toBeCalledTimes(1);
-      expect(fn2).toBeCalledWith(...args);
+      expect(fn1).toHaveBeenCalledTimes(0);
+      expect(fn2).toHaveBeenCalledTimes(1);
+      expect(fn2).toHaveBeenCalledWith(...args);
     });
   });
 });

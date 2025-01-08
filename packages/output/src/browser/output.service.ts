@@ -1,15 +1,14 @@
-import { observable, action } from 'mobx';
-
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { AppConfig, PreferenceService } from '@opensumi/ide-core-browser';
-import { WithEventBus } from '@opensumi/ide-core-common';
+import { Emitter, WithEventBus } from '@opensumi/ide-core-common';
 import {
-  IEditorDocumentModelService,
   EditorCollectionService,
   ICodeEditor,
+  IEditorDocumentModelService,
   getSimpleEditorOptions,
 } from '@opensumi/ide-editor/lib/browser';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import * as monaco from '@opensumi/ide-monaco';
+import { derived, observableValue, transaction } from '@opensumi/ide-monaco/lib/common/observable';
 
 import { OutputChannel } from './output.channel';
 
@@ -28,25 +27,20 @@ export class OutputService extends WithEventBus {
   private readonly preferenceService: PreferenceService;
 
   private outputEditor?: ICodeEditor;
-
-  @observable
-  readonly channels = new Map<string, OutputChannel>();
-
-  @observable.ref
-  selectedChannel: OutputChannel;
-
-  @observable
-  public keys: string = '' + Math.random();
-
+  private onDidSelectedChannelChangeEmitter = new Emitter<OutputChannel>();
   private monacoDispose: monaco.IDisposable;
-
   private autoReveal = true;
-
   private enableSmartScroll = true;
+  private readonly channels = observableValue<Map<string, OutputChannel>>(this, new Map());
+
+  public selectedChannel: OutputChannel;
+
+  get onDidSelectedChannelChange() {
+    return this.onDidSelectedChannelChangeEmitter.event;
+  }
 
   constructor() {
     super();
-
     this.enableSmartScroll = Boolean(this.preferenceService.get<boolean>('output.enableSmartScroll'));
     this.addDispose(
       this.preferenceService.onPreferenceChanged((e) => {
@@ -57,12 +51,12 @@ export class OutputService extends WithEventBus {
     );
   }
 
-  @action
   public updateSelectedChannel(channel: OutputChannel) {
     if (this.monacoDispose) {
       this.monacoDispose.dispose();
     }
     this.selectedChannel = channel;
+    this.onDidSelectedChannelChangeEmitter.fire(channel);
     this.selectedChannel.modelReady.promise.then(() => {
       const model = this.selectedChannel.outputModel.instance.getMonacoModel();
       this.outputEditor?.open(this.selectedChannel.outputModel);
@@ -79,7 +73,6 @@ export class OutputService extends WithEventBus {
     });
   }
 
-  @observable
   private _viewHeight: string;
 
   set viewHeight(value: string) {
@@ -91,37 +84,56 @@ export class OutputService extends WithEventBus {
   }
 
   getChannel(name: string): OutputChannel {
-    const existing = this.channels.get(name);
+    const channels = this.channels.get();
+    const existing = channels.get(name);
     if (existing) {
       return existing;
     }
+
     const channel = this.config.injector.get(OutputChannel, [name]);
-    this.channels.set(name, channel);
-    if (this.channels.size === 1) {
+    channels.set(name, channel);
+    if (channels.size === 1) {
       this.updateSelectedChannel(channel);
     }
+    transaction((tx) => {
+      this.channels.set(new Map(channels), tx);
+    });
     return channel;
   }
 
   deleteChannel(name: string): void {
-    this.channels.delete(name);
+    transaction((tx) => {
+      const channels = this.channels.get();
+      channels.delete(name);
+      this.channels.set(new Map(channels), tx);
+    });
   }
 
-  getChannels(): OutputChannel[] {
-    return Array.from(this.channels.values());
-  }
+  readonly getChannels = derived<OutputChannel[]>(this, (reader) => {
+    const channels = this.channels.read(reader);
+    return Array.from(channels.values());
+  });
 
   public async initOutputMonacoInstance(container: HTMLDivElement) {
+    if (this.outputEditor) {
+      this.outputEditor.dispose();
+    }
+
     this.outputEditor = this.editorCollectionService.createCodeEditor(container, {
       ...getSimpleEditorOptions(),
       lineDecorationsWidth: 20,
       automaticLayout: true,
       readOnly: true,
+      domReadOnly: true,
       extraEditorClassName: 'kt-output-monaco',
       scrollbar: {
         useShadows: false,
       },
     });
+
+    if (this.selectedChannel) {
+      this.updateSelectedChannel(this.selectedChannel);
+    }
 
     this.addDispose(
       this.outputEditor.monacoEditor.onMouseUp((e) => {

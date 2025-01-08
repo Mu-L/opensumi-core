@@ -1,23 +1,26 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
   AppConfig,
-  compareAnything,
   ConfigProvider,
   IContextKey,
   IContextKeyService,
+  IDisposable,
   KeybindingRegistry,
   QuickOpenActionProvider,
   QuickOpenTabOptions,
+  compareAnything,
 } from '@opensumi/ide-core-browser';
 import { VALIDATE_TYPE } from '@opensumi/ide-core-browser/lib/components';
+import { VIEW_CONTAINERS } from '@opensumi/ide-core-browser/lib/layout/view-id';
+import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
 import {
   HideReason,
+  QuickOpenModel as IKaitianQuickOpenModel,
   IKeyMods,
   QuickOpenItem,
-  QuickOpenModel as IKaitianQuickOpenModel,
   QuickOpenOptions,
   QuickOpenService,
 } from '@opensumi/ide-core-browser/lib/quick-open';
@@ -44,14 +47,15 @@ export interface IKaitianQuickOpenControllerOpts extends QuickOpenTabOptions {
   onChangeValue?(lookFor: string): void;
   onKeyMods?(mods: IKeyMods): void;
   keepScrollPosition?: boolean | undefined;
+  busy?: boolean;
 }
 
 @Injectable()
 export class MonacoQuickOpenService implements QuickOpenService {
   protected _widget: QuickOpenWidget | undefined;
-  protected opts: IKaitianQuickOpenControllerOpts;
+  protected opts: KaitianQuickOpenControllerOpts;
   protected container: HTMLElement;
-  protected previousActiveElement: Element | undefined;
+  protected previousActiveElement: Element | undefined | null;
 
   @Autowired(KeybindingRegistry)
   protected keybindingRegistry: KeybindingRegistry;
@@ -68,7 +72,12 @@ export class MonacoQuickOpenService implements QuickOpenService {
   @Autowired(AppConfig)
   private readonly appConfig: AppConfig;
 
+  @Autowired(IProgressService)
+  protected readonly progressService: IProgressService;
+
   private preLookFor = '';
+
+  private progressDispose: IDisposable;
 
   get inQuickOpenContextKey(): IContextKey<boolean> {
     return this.contextKeyService.createKey<boolean>('inQuickOpen', false);
@@ -94,16 +103,19 @@ export class MonacoQuickOpenService implements QuickOpenService {
   }
 
   open(model: IKaitianQuickOpenModel, options?: Partial<QuickOpenOptions.Resolved> | undefined): void {
+    this.previousActiveElement = document.activeElement;
     const opts = new KaitianQuickOpenControllerOpts(model, this.keybindingRegistry, options);
+    this.progressDispose = this.progressService.registerProgressIndicator(VIEW_CONTAINERS.QUICKPICK_PROGRESS);
     this.hideDecoration();
     this.internalOpen(opts);
   }
 
   hide(reason?: HideReason): void {
     this.widget.hide(reason);
+    this.progressDispose.dispose();
   }
 
-  protected internalOpen(opts: IKaitianQuickOpenControllerOpts): void {
+  protected internalOpen(opts: KaitianQuickOpenControllerOpts): void {
     this.opts = opts;
     const widget = this.widget;
 
@@ -114,6 +126,7 @@ export class MonacoQuickOpenService implements QuickOpenService {
       valueSelection: opts.valueSelection,
       canSelectMany: opts.canSelectMany,
       keepScrollPosition: opts.keepScrollPosition,
+      busy: opts.busy,
       renderTab: opts.renderTab,
       toggleTab: opts.toggleTab,
     });
@@ -121,8 +134,13 @@ export class MonacoQuickOpenService implements QuickOpenService {
     this.inQuickOpenContextKey.set(true);
   }
 
+  updateOptions(options: IKaitianQuickOpenControllerOpts): void {
+    this.opts.updateOptions(options);
+    this.widget.updateOptions(options);
+  }
+
   refresh(): void {
-    this.onType(this.widget.inputValue);
+    this.onType(this.widget.inputValue.get());
   }
 
   public get widget(): QuickOpenWidget {
@@ -181,13 +199,12 @@ export class MonacoQuickOpenService implements QuickOpenService {
   private initWidgetView(widget: QuickOpenWidget) {
     // 因为 quickopen widget 需要通过构造函数初始化，无法通过 useInjectable 获取实例
     // 但其实是一个单例对象，使用 React Context 让其子组件获取到 widget 实例
-    ReactDOM.render(
+    ReactDOM.createRoot(this.container).render(
       <ConfigProvider value={this.appConfig}>
         <QuickOpenContext.Provider value={{ widget }}>
           <QuickOpenView />
         </QuickOpenContext.Provider>
       </ConfigProvider>,
-      this.container,
     );
   }
 
@@ -200,7 +217,7 @@ export class MonacoQuickOpenService implements QuickOpenService {
     if (this.widget && options.onType) {
       options.onType(lookFor, (model) => {
         // 触发 onchange 事件
-        if (this.preLookFor !== lookFor && this.opts.onChangeValue) {
+        if (this.preLookFor !== lookFor) {
           this.opts.onChangeValue(lookFor);
         }
         this.preLookFor = lookFor;
@@ -214,16 +231,16 @@ export class MonacoQuickOpenService implements QuickOpenService {
   }
 
   showDecoration(type: VALIDATE_TYPE): void {
-    this.widget.validateType = type;
+    this.widget.validateType.set(type, undefined);
   }
 
   hideDecoration(): void {
-    this.widget.validateType = undefined;
+    this.widget.validateType.set(undefined, undefined);
   }
 }
 
 export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControllerOpts {
-  protected readonly options: QuickOpenOptions.Resolved;
+  protected options: QuickOpenOptions.Resolved;
 
   constructor(
     protected readonly model: IKaitianQuickOpenModel,
@@ -260,6 +277,10 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
 
   get keepScrollPosition(): boolean | undefined {
     return this.options.keepScrollPosition;
+  }
+
+  get busy(): boolean | undefined {
+    return this.options.busy;
   }
 
   get renderTab() {
@@ -299,6 +320,16 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
     }
   }
 
+  onChangeValue(lookFor: string): void {
+    if (this.options.onChangeValue) {
+      this.options.onChangeValue(lookFor);
+    }
+  }
+
+  updateOptions(options?: QuickOpenOptions) {
+    this.options = QuickOpenOptions.resolve(options, this.options);
+  }
+
   /**
    * A good default sort implementation for quick open entries respecting highlight information
    * as well as associated resources.
@@ -331,7 +362,7 @@ export class KaitianQuickOpenControllerOpts implements IKaitianQuickOpenControll
     const originLookFor = lookFor;
 
     if (this.options.skipPrefix) {
-      lookFor = lookFor.substr(this.options.skipPrefix);
+      lookFor = lookFor.substring(this.options.skipPrefix).trim();
     }
 
     if (actionProvider && actionProvider.getValidateInput) {

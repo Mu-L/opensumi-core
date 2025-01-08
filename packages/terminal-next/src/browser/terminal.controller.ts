@@ -1,26 +1,25 @@
-import { observable } from 'mobx';
-
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser/ws-channel-handler';
-import { ResizeEvent, getSlotLocation, AppConfig } from '@opensumi/ide-core-browser';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { AppConfig, ResizeEvent, getSlotLocation } from '@opensumi/ide-core-browser';
 import { TERMINAL_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 import { ICtxMenuRenderer, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { generateCtxMenu } from '@opensumi/ide-core-browser/lib/menu/next/menu-util';
 import { AbstractMenuService } from '@opensumi/ide-core-browser/lib/menu/next/menu.interface';
+import { PreferenceService } from '@opensumi/ide-core-browser/lib/preferences/types';
 import {
-  WithEventBus,
-  Emitter,
-  Deferred,
-  Event,
-  IDisposable,
-  DisposableStore,
-  ILogger,
-  DisposableCollection,
   CommandRegistry,
+  Deferred,
+  DisposableCollection,
+  DisposableStore,
+  Emitter,
+  Event,
+  IApplicationService,
+  IDisposable,
+  ILogger,
+  Uri,
+  WithEventBus,
+  isThemeColor,
   replaceLocalizePlaceholder,
   withNullAsUndefined,
-  isThemeColor,
-  Uri,
 } from '@opensumi/ide-core-common';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
@@ -28,32 +27,34 @@ import { TabBarHandler } from '@opensumi/ide-main-layout/lib/browser/tabbar-hand
 import { IThemeService } from '@opensumi/ide-theme';
 
 import {
-  ITerminalController,
-  ITerminalClient,
-  IWidget,
-  ITerminalInfo,
-  ITerminalBrowserHistory,
-  ITerminalTheme,
-  ITerminalGroupViewService,
+  ICreateClientWithWidgetOptions,
+  ICreateTerminalOptions,
   IShellLaunchConfig,
+  IStartExtensionTerminalRequest,
+  ITerminalBrowserHistory,
+  ITerminalClient,
+  ITerminalClientFactory2,
+  ITerminalController,
   ITerminalErrorService,
+  ITerminalExitEvent,
+  ITerminalExternalLinkProvider,
+  ITerminalGroupViewService,
+  ITerminalInfo,
   ITerminalInternalService,
   ITerminalLaunchError,
   ITerminalProcessExtHostProxy,
-  IStartExtensionTerminalRequest,
-  ITerminalExitEvent,
-  ITerminalTitleChangeEvent,
-  ITerminalExternalLinkProvider,
-  ICreateTerminalOptions,
-  ITerminalClientFactory2,
-  ICreateClientWithWidgetOptions,
+  ITerminalProfile,
   ITerminalProfileService,
+  ITerminalTheme,
+  ITerminalTitleChangeEvent,
+  IWidget,
+  TERMINAL_ID_SEPARATOR,
+  TerminalCliterFilter,
+  TerminalLocation,
   TerminalOptions,
   asTerminalIcon,
-  TERMINAL_ID_SEPARATOR,
-  ITerminalProfile,
-  TerminalCliterFilter,
 } from '../common';
+import { CodeTerminalSettingId } from '../common/preference';
 
 import { TerminalContextKey } from './terminal.context-key';
 import { TerminalGroupViewService } from './terminal.view';
@@ -117,6 +118,9 @@ export class TerminalController extends WithEventBus implements ITerminalControl
   @Autowired(IMenuRegistry)
   private readonly menuRegistry: IMenuRegistry;
 
+  @Autowired(IApplicationService)
+  protected readonly applicationService: IApplicationService;
+
   @Autowired(INJECTOR_TOKEN)
   private readonly injector: Injector;
 
@@ -132,6 +136,9 @@ export class TerminalController extends WithEventBus implements ITerminalControl
   @Autowired(ICtxMenuRenderer)
   private ctxMenuRenderer: ICtxMenuRenderer;
 
+  @Autowired(PreferenceService)
+  private readonly preferenceService: PreferenceService;
+
   @Autowired(AppConfig)
   protected readonly appConfig: AppConfig;
 
@@ -145,8 +152,20 @@ export class TerminalController extends WithEventBus implements ITerminalControl
    */
   private terminalContextKey: TerminalContextKey;
 
-  @observable
-  themeBackground: string;
+  private _onThemeBackgroundChangeEmitter = new Emitter<string>();
+  onThemeBackgroundChange = this._onThemeBackgroundChangeEmitter.event;
+
+  private _themeBackground: string;
+  get themeBackground() {
+    return this._themeBackground;
+  }
+
+  set themeBackground(value: string) {
+    if (value !== this._themeBackground) {
+      this._themeBackground = value;
+      this._onThemeBackgroundChangeEmitter.fire(value);
+    }
+  }
 
   get clients() {
     return this._clients;
@@ -176,12 +195,7 @@ export class TerminalController extends WithEventBus implements ITerminalControl
     if (this._clientId) {
       return this._clientId;
     }
-    if (this.appConfig.isElectronRenderer) {
-      this._clientId = (global as any).metadata?.windowClientId;
-    } else {
-      const WSHandler = this.injector.get(WSChannelHandler);
-      this._clientId = WSHandler.clientId;
-    }
+    this._clientId = this.applicationService.clientId;
     return this._clientId;
   }
 
@@ -193,8 +207,8 @@ export class TerminalController extends WithEventBus implements ITerminalControl
   }
 
   private async _createClient(widget: IWidget, options?: ICreateTerminalOptions) {
-    const client = await this.clientFactory(widget, /** @type ICreateTerminalOptions */ options);
-    this.logger.log('create client with clientFactory2', client);
+    const client = await this.clientFactory(widget, options);
+    this.logger.log('create client with ITerminalClientFactory2', client);
     return this.setupClient(widget, client);
   }
 
@@ -307,16 +321,6 @@ export class TerminalController extends WithEventBus implements ITerminalControl
     let firstAvailableId = '';
     const { groups, current } = history;
 
-    // const ids: (string | { client: string })[] = [];
-
-    // groups.forEach((widgets) => ids.push(...widgets.map((widget) => widget.client)));
-
-    // 之前OpenSumi的Check终端活跃机制是有问题的，暂时不启用，这部分逻辑在PtyService会兜住
-    // const checked = await this.service.check(ids.map((id) => (typeof id === 'string' ? id : id.clientId)));
-    // if (!checked) {
-    //   return;
-    // }
-
     for (const widgets of groups) {
       if (!widgets) {
         continue;
@@ -341,6 +345,8 @@ export class TerminalController extends WithEventBus implements ITerminalControl
               group,
               typeof session === 'string' ? session : session.client,
               !!session.task,
+              false,
+              true,
             );
             const client = await this.clientFactory(widget);
 
@@ -364,7 +370,7 @@ export class TerminalController extends WithEventBus implements ITerminalControl
              * 等待预先连接成功
              */
             client.attached.promise.then(() => {
-              widget.name = client.name;
+              widget.rename(client.name);
               // client.term.writeln('\x1b[2mTerminal restored\x1b[22m');
 
               /**
@@ -381,7 +387,7 @@ export class TerminalController extends WithEventBus implements ITerminalControl
       await Promise.all(promises);
     }
 
-    const selectedIndex = this.terminalView.groups.findIndex((group) => group.widgetsMap.has(currentWidgetId));
+    const selectedIndex = this.terminalView.groups.get().findIndex((group) => group.widgetsMap.has(currentWidgetId));
 
     if (selectedIndex > -1 && currentWidgetId) {
       this.terminalView.selectWidget(currentWidgetId);
@@ -460,15 +466,14 @@ export class TerminalController extends WithEventBus implements ITerminalControl
     );
 
     this.addDispose(
-      this.eventBus.on(ResizeEvent, (e: ResizeEvent) => {
-        if (
-          this._tabBarHandler &&
-          this._tabBarHandler.isActivated() &&
-          e.payload.slotLocation === getSlotLocation('@opensumi/ide-terminal-next', this.config.layoutConfig)
-        ) {
-          this.terminalView.resize();
-        }
-      }),
+      this.eventBus.onDirective(
+        ResizeEvent.createDirective(getSlotLocation('@opensumi/ide-terminal-next', this.config.layoutConfig)),
+        () => {
+          if (this._tabBarHandler && this._tabBarHandler.isActivated()) {
+            this.terminalView.resize();
+          }
+        },
+      ),
     );
 
     this.registerContributedProfilesCommandAndMenu();
@@ -486,7 +491,7 @@ export class TerminalController extends WithEventBus implements ITerminalControl
             this.terminalView.selectWidget(current.id);
           } else {
             this.terminalView.selectGroup(
-              this.terminalView.currentGroupIndex > -1 ? this.terminalView.currentGroupIndex : 0,
+              this.terminalView.currentGroupIndex.get() > -1 ? this.terminalView.currentGroupIndex.get() : 0,
             );
           }
         }),
@@ -506,7 +511,7 @@ export class TerminalController extends WithEventBus implements ITerminalControl
           this.terminalView.selectWidget(widget.id);
         } else {
           this.terminalView.selectGroup(
-            this.terminalView.currentGroupIndex > -1 ? this.terminalView.currentGroupIndex : 0,
+            this.terminalView.currentGroupIndex.get() > -1 ? this.terminalView.currentGroupIndex.get() : 0,
           );
         }
       }
@@ -518,12 +523,15 @@ export class TerminalController extends WithEventBus implements ITerminalControl
 
   async reconnect() {
     const clients = Array.from(this._clients.values());
-    const canReconnected = await this.service.check(clients.map((client) => client.id));
 
-    if (!canReconnected) {
-      this.terminalView.clear();
-      this._reset();
-    }
+    // 在重连的时候检查终端的健康状态，如果不健康的话，展示相关信息提示用户
+    clients.forEach(async (client) => {
+      const clientHealthy = await client.checkHealthy();
+
+      if (!clientHealthy) {
+        client.displayUnHealthyMessage();
+      }
+    });
   }
 
   focus() {
@@ -551,21 +559,18 @@ export class TerminalController extends WithEventBus implements ITerminalControl
 
   toJSON() {
     const groups: { client: string }[][] = [];
-    let cClient = this._clients.get(this.terminalView.currentWidgetId);
-    this.terminalView.groups.forEach((wGroup) => {
+    let cClient = this._clients.get(this.terminalView.currentWidgetId.get());
+    this.terminalView.groups.get().forEach((wGroup) => {
       const group: { client: string }[] = [];
 
-      wGroup.widgets.forEach((widget) => {
+      const widgets = wGroup.widgets.get();
+      widgets.forEach((widget) => {
         const client = this._clients.get(widget.id);
-        if (!client) {
-          return;
-        }
+        const disablePersistence =
+          !this.preferenceService.get(CodeTerminalSettingId.EnablePersistentSessions) ||
+          client?.launchConfig?.disablePersistence;
 
-        if (client.launchConfig?.isExtensionOwnedTerminal || client.launchConfig?.disablePersistence) {
-          return;
-        }
-
-        if (client.isTaskExecutor) {
+        if (!client || disablePersistence || client?.isTaskExecutor) {
           return;
         }
 
@@ -622,9 +627,8 @@ export class TerminalController extends WithEventBus implements ITerminalControl
       // isFeatureTerminal: withNullAsUndefined(options?.isFeatureTerminal),
       isExtensionOwnedTerminal: options.isExtensionTerminal,
       // useShellEnvironment: withNullAsUndefined(internalOptions?.useShellEnvironment),
-      // location:
-      // internalOptions?.location ||
-      // this._serializeParentTerminal(options.location, internalOptions?.resolvedExtHostIdentifier),
+      // 只支持 Panel
+      location: TerminalLocation.Panel,
       disablePersistence: withNullAsUndefined(options.isTransient),
     };
     shellLaunchConfig.__fromTerminalOptions = options;
@@ -710,13 +714,16 @@ export class TerminalController extends WithEventBus implements ITerminalControl
   }
 
   clearCurrentGroup() {
-    this.terminalView.currentGroup &&
-      this.terminalView.currentGroup.widgets.forEach((widget) => {
+    const group = this.terminalView.currentGroup.get();
+    if (group) {
+      const widgets = group.widgets.get();
+      widgets.forEach((widget) => {
         const client = this._clients.get(widget.id);
         if (client) {
           client.clear();
         }
       });
+    }
   }
 
   clearAllGroups() {
@@ -736,6 +743,17 @@ export class TerminalController extends WithEventBus implements ITerminalControl
   hideTerminalPanel() {
     if (this._tabBarHandler && this._tabBarHandler.isActivated()) {
       this._tabBarHandler.deactivate();
+    }
+  }
+
+  toggleTerminalPanel() {
+    if (!this._tabBarHandler) {
+      return;
+    }
+    if (this._tabBarHandler.isActivated()) {
+      this._tabBarHandler.deactivate();
+    } else {
+      this._tabBarHandler.activate();
     }
   }
 

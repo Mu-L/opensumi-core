@@ -1,4 +1,5 @@
 import { Event, Uri } from '@opensumi/ide-utils';
+import { IReadableStream } from '@opensumi/ide-utils/lib/stream';
 
 import { FileChangeEvent } from './file-watch';
 
@@ -61,6 +62,22 @@ export interface FileStat {
    * 当前文件是否为只读
    */
   readonly?: boolean;
+
+  /**
+   * 真实资源路径
+   */
+  realUri?: string;
+}
+
+export interface IFileStatOptions {
+  /**
+   * Whether to throw an error if the file in following error(in older version, OpenSumi will eat these errors silently):
+   * - doesn't exist
+   * - no access
+   * - busy
+   * - permission deny
+   */
+  throwError?: boolean;
 }
 
 export namespace FileStat {
@@ -107,6 +124,11 @@ export enum FileType {
   SymbolicLink = 64,
 }
 
+export interface IReadFileStreamOptions {
+  position?: number;
+  length?: number;
+}
+
 /**
  * Compatible with vscode.FileSystemProvider
  */
@@ -135,7 +157,7 @@ export interface FileSystemProvider {
    * @param options Configures the watch.
    * @returns A disposable that tells the provider to stop watching the `uri`.
    */
-  watch(uri: Uri, options: { excludes?: string[] }): number | Promise<number>;
+  watch(uri: Uri, options: { excludes?: string[]; recursive?: boolean }): number | Promise<number>;
 
   unwatch?(watcherId: number): void | Promise<void>;
 
@@ -147,10 +169,11 @@ export interface FileSystemProvider {
    * `FileType.SymbolicLink | FileType.Directory`.
    *
    * @param uri The uri of the file to retrieve metadata about.
+   * @param options some options to influence the stat result.
    * @return The file metadata about the file.
    * @throws [`FileNotFound`](#FileSystemError.FileNotFound) when `uri` doesn't exist.
    */
-  stat(uri: Uri): Promise<FileStat | void>;
+  stat(uri: Uri, options?: IFileStatOptions): Promise<FileStat | void>;
 
   /**
    * Retrieve all entries of a [directory](#FileType.Directory).
@@ -179,6 +202,8 @@ export interface FileSystemProvider {
    * @throws [`FileNotFound`](#FileSystemError.FileNotFound) when `uri` doesn't exist.
    */
   readFile(uri: Uri, encoding?: string): Uint8Array | void | Promise<Uint8Array | void>;
+
+  readFileStream?(uri: Uri, opts?: IReadFileStreamOptions): Promise<IReadableStream<Uint8Array>>;
 
   /**
    * Write data to a file, replacing its entire contents.

@@ -1,29 +1,27 @@
 import net from 'net';
 import { performance } from 'perf_hooks';
-import Stream from 'stream';
 
-import { ConstructorOf, Injector } from '@opensumi/di';
-import { RPCProtocol, initRPCService, RPCServiceCenter } from '@opensumi/ide-connection';
-import { createSocketConnection } from '@opensumi/ide-connection/lib/node';
+import { Injector } from '@opensumi/di';
+import { SumiConnectionMultiplexer, createExtMessageIO } from '@opensumi/ide-connection';
+import { NetSocketConnection } from '@opensumi/ide-connection/lib/common/connection';
 import {
+  CommonProcessReporter,
   Emitter,
-  ReporterProcessMessage,
-  LogLevel,
   IReporter,
-  setLanguageId,
-  ILogService,
+  ReporterProcessMessage,
   isPromiseCanceledError,
   locale,
+  setLanguageId,
 } from '@opensumi/ide-core-common';
+import { suppressNodeJSEpipeError } from '@opensumi/ide-core-common/lib/node';
 import { argv } from '@opensumi/ide-core-common/lib/node/cli';
-import { AppConfig } from '@opensumi/ide-core-node/lib/types';
 
-import { ProcessMessageType, IExtensionHostService, KT_PROCESS_SOCK_OPTION_KEY, KT_APP_CONFIG_KEY } from '../common';
-import { CommandHandler } from '../common/vscode';
+import { IExtensionHostService, KT_APP_CONFIG_KEY, KT_PROCESS_SOCK_OPTION_KEY, ProcessMessageType } from '../common';
+import { ExtHostAppConfig, ExtProcessConfig } from '../common/ext.process';
+import { knownProtocols } from '../common/vscode/protocols';
 
 import { setPerformance } from './api/vscode/language/util';
 import { ExtensionLogger2 } from './extension-log2';
-import { ExtensionReporter } from './extension-reporter';
 
 import '@opensumi/ide-i18n';
 
@@ -32,73 +30,21 @@ setPerformance(performance);
 Error.stackTraceLimit = 100;
 let logger: any = console;
 let preload: IExtensionHostService;
-export interface IBuiltInCommand {
-  id: string;
-  handler: CommandHandler;
-}
+async function initRPCProtocol(extInjector: Injector): Promise<any> {
+  const extConnection = argv[KT_PROCESS_SOCK_OPTION_KEY];
 
-export interface CustomChildProcess {
-  stdin: Stream.Writable;
-  stdout: Stream.Readable;
-  kill: () => void;
-}
+  logger = new ExtensionLogger2(extInjector);
+  logger.log('init rpc protocol for ext connection path', extConnection);
 
-export interface CustomChildProcessModule {
-  spawn(command: string, args: string | string[], options: any): CustomChildProcess;
-}
+  const socket = net.createConnection(JSON.parse(extConnection));
 
-export interface ExtHostAppConfig extends Partial<AppConfig> {
-  builtinCommands?: IBuiltInCommand[];
-  customDebugChildProcess?: CustomChildProcessModule;
-  /**
-   * 集成方自定义 vscode.version 版本
-   * 设置该参数可能会导致插件运行异常
-   * @type {string} 插件版本号
-   * @memberof ExtHostAppConfig
-   */
-  customVSCodeEngineVersion?: string;
-}
+  const appConfig: ExtHostAppConfig = extInjector.get(ExtHostAppConfig);
 
-export interface ExtProcessConfig {
-  injector?: Injector;
-  LogServiceClass?: ConstructorOf<ILogService>;
-  logDir?: string;
-  logLevel?: LogLevel;
-  /**
-   * 这种 command 只有插件能调用到，且只能在插件进程调用到
-   */
-  builtinCommands?: IBuiltInCommand[];
-  customDebugChildProcess?: CustomChildProcessModule;
-  customVSCodeEngineVersion?: string;
-}
-
-async function initRPCProtocol(extInjector): Promise<any> {
-  const extCenter = new RPCServiceCenter();
-  const { getRPCService } = initRPCService<{
-    onMessage(msg: string): void;
-  }>(extCenter);
-
-  const extConnection = net.createConnection(JSON.parse(argv[KT_PROCESS_SOCK_OPTION_KEY] || '{}'));
-
-  extCenter.setConnection(createSocketConnection(extConnection));
-
-  const service = getRPCService('ExtProtocol');
-
-  const onMessageEmitter = new Emitter<string>();
-  service.on('onMessage', (msg: string) => {
-    onMessageEmitter.fire(msg);
+  const extProtocol = new SumiConnectionMultiplexer(new NetSocketConnection(socket), {
+    timeout: appConfig.rpcMessageTimeout,
+    io: createExtMessageIO(knownProtocols),
   });
 
-  const onMessage = onMessageEmitter.event;
-  const send = service.onMessage;
-
-  const extProtocol = new RPCProtocol({
-    onMessage,
-    send,
-  });
-
-  logger = new ExtensionLogger2(extInjector); // new ExtensionLogger(extProtocol);
-  logger.log('process extConnection path', argv[KT_PROCESS_SOCK_OPTION_KEY]);
   return { extProtocol, logger };
 }
 
@@ -115,6 +61,26 @@ function patchProcess() {
   };
 }
 
+function _wrapConsoleMethod(method: 'log' | 'info' | 'warn' | 'error') {
+  // eslint-disable-next-line no-console
+  const original = console[method].bind(console);
+
+  Object.defineProperty(console, method, {
+    set: () => {},
+    get: () =>
+      function (...args) {
+        original(...args);
+      },
+  });
+}
+
+function patchConsole() {
+  _wrapConsoleMethod('info');
+  _wrapConsoleMethod('log');
+  _wrapConsoleMethod('warn');
+  _wrapConsoleMethod('error');
+}
+
 export async function extProcessInit(config: ExtProcessConfig = {}) {
   const extAppConfig = JSON.parse(argv[KT_APP_CONFIG_KEY] || '{}');
   const { injector, ...extConfig } = config;
@@ -122,18 +88,19 @@ export async function extProcessInit(config: ExtProcessConfig = {}) {
   const reporterEmitter = new Emitter<ReporterProcessMessage>();
   extInjector.addProviders(
     {
-      token: AppConfig,
+      token: ExtHostAppConfig,
       useValue: { ...extAppConfig, ...extConfig },
     },
     {
       token: IReporter,
-      useValue: new ExtensionReporter(reporterEmitter),
+      useValue: new CommonProcessReporter(reporterEmitter),
     },
   );
   if (locale) {
     setLanguageId(locale);
   }
   patchProcess();
+  patchConsole();
   const { extProtocol: protocol, logger } = await initRPCProtocol(extInjector);
   try {
     let Preload = require('./ext.host');
@@ -152,18 +119,18 @@ export async function extProcessInit(config: ExtProcessConfig = {}) {
       }
     });
 
-    logger?.log('preload.init start');
+    logger.log('preload.init start');
     await preload.init();
-    logger?.log('preload.init end');
+    logger.log('preload.init end');
 
     if (process && process.send) {
       process.send('ready');
 
       process.on('message', async (msg) => {
         if (msg === 'close') {
-          logger?.log('preload.close start');
+          logger.log('preload.close start');
           await preload.close();
-          logger?.log('preload.close end');
+          logger.log('preload.close end');
           if (process && process.send) {
             process.send('finish');
           }
@@ -171,7 +138,7 @@ export async function extProcessInit(config: ExtProcessConfig = {}) {
       });
     }
   } catch (e) {
-    logger?.error(e);
+    logger.error(e);
   }
 }
 
@@ -211,6 +178,10 @@ function onUnexpectedError(e: any) {
   }
   unexpectedErrorHandler(err);
 }
+
+suppressNodeJSEpipeError(process, (msg) => {
+  getErrorLogger()(msg);
+});
 
 process.on('uncaughtException', (err) => {
   onUnexpectedError(err);

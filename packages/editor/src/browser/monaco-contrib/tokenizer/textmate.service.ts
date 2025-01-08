@@ -1,27 +1,25 @@
-import { OnigScanner, loadWASM, OnigString } from 'vscode-oniguruma';
+import { OnigScanner, OnigString, loadWASM } from 'vscode-oniguruma';
 import {
-  Registry,
-  IRawGrammar,
-  IOnigLib,
-  parseRawGrammar,
   IEmbeddedLanguagesMap,
-  ITokenTypeMap,
   INITIAL,
+  IOnigLib,
+  IRawGrammar,
+  ITokenTypeMap,
+  Registry,
+  parseRawGrammar,
 } from 'vscode-textmate';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  WithEventBus,
-  parseWithComments,
-  PreferenceService,
-  ILogger,
   ExtensionActivateEvent,
+  ILogger,
+  PreferenceService,
+  WithEventBus,
   getDebugLogger,
-  MonacoService,
-  electronEnv,
-  AppConfig,
+  parseWithComments,
 } from '@opensumi/ide-core-browser';
-import { URI, Disposable, isObject } from '@opensumi/ide-core-common';
+import { EKnownResources, RendererRuntime } from '@opensumi/ide-core-browser/lib/application/runtime/types';
+import { Disposable, URI, isObject } from '@opensumi/ide-core-common';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import {
   GrammarsContribution,
@@ -41,23 +39,25 @@ import {
 import {
   CommentRule,
   IIndentationRule,
+  IRegExp,
   IndentAction,
   IndentationRuleDto,
-  IRegExp,
   LanguageConfigurationDto,
   LanguagesContribution,
 } from '@opensumi/ide-monaco/lib/common';
 import { IThemeData } from '@opensumi/ide-theme';
 import { ThemeChangedEvent } from '@opensumi/ide-theme/lib/common/event';
 import { asStringArray } from '@opensumi/ide-utils/lib/arrays';
-import { ILanguageExtensionPoint } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/language';
-import { ILanguageService } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/language';
+import {
+  ILanguageExtensionPoint,
+  ILanguageService,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages/language';
 import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneServices';
 
 import { IEditorDocumentModelService } from '../../doc-model/types';
 
 import { TextmateRegistry } from './textmate-registry';
-import { createTextmateTokenizer, TokenizerOption } from './textmate-tokenizer';
+import { TextMateTokenizer, TokenizerOption } from './textmate-tokenizer';
 
 let wasmLoaded = false;
 
@@ -108,14 +108,11 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
   @Autowired(ILogger)
   private logger: ILogger;
 
-  @Autowired()
-  private readonly monacoService: MonacoService;
-
   @Autowired(IEditorDocumentModelService)
   editorDocumentModelService: IEditorDocumentModelService;
 
-  @Autowired(AppConfig)
-  private readonly appConfig: AppConfig;
+  @Autowired(RendererRuntime)
+  private rendererRuntime: RendererRuntime;
 
   public grammarRegistry: Registry;
 
@@ -125,9 +122,14 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
 
   private activatedLanguage = new Set<string>();
 
+  private languageConfigLocation: Map<string, URI> = new Map();
+  private languageConfiguration: Map<string, LanguagesContribution> = new Map();
+
   public initialized = false;
 
   private dynamicLanguages: ILanguageExtensionPoint[] = [];
+
+  private editorTheme?: IThemeData;
 
   /**
    * start contribution 做初始化
@@ -142,7 +144,10 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
   listenThemeChange() {
     this.eventBus.on(ThemeChangedEvent, (e) => {
       const themeData = e.payload.theme.themeData;
-      this.setTheme(themeData);
+      if (themeData !== this.editorTheme) {
+        this.editorTheme = themeData;
+        this.setTheme(themeData);
+      }
     });
   }
 
@@ -169,6 +174,17 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
     return StandaloneServices.get(ILanguageService);
   }
 
+  private isEmbeddedLanguageOnly(language: LanguagesContribution): boolean {
+    return (
+      !language.filenames &&
+      !language.extensions &&
+      !language.filenamePatterns &&
+      !language.firstLine &&
+      !language.mimetypes &&
+      (!language.aliases || language.aliases.length === 0)
+    );
+  }
+
   async registerLanguages(languages: LanguagesContribution[], baseUri: URI) {
     const newLanguages = languages.map((language) => ({
       id: language.id,
@@ -179,24 +195,23 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       firstLine: language.firstLine,
       mimetypes: language.mimetypes,
     }));
-    this.dynamicLanguages.push(...newLanguages);
+
+    this.dynamicLanguages.push(...newLanguages.filter((lang) => !this.isEmbeddedLanguageOnly(lang)));
 
     /**
      * ModesRegistry.registerLanguage 性能很差
      */
     this.monacoLanguageService['_registry']['_registerLanguages'](newLanguages);
-
-    const languageMap: Map<string, LanguagesContribution> = new Map();
-
     languages.forEach(async (language) => {
+      this.languageConfigLocation.set(language.id, baseUri);
       this.addDispose(
         monaco.languages.onLanguage(language.id, async () => {
-          this.activateLanguage(language.id);
           await this.loadLanguageConfiguration(language, baseUri);
+          this.activateLanguage(language.id);
         }),
       );
 
-      languageMap.set(language.id, language);
+      this.languageConfiguration.set(language.id, language);
     });
 
     if (this.initialized) {
@@ -205,8 +220,9 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
         const model = this.editorDocumentModelService.getModelReference(URI.parse(uri.codeUri.toString()));
         if (model && model.instance) {
           const langId = model.instance.getMonacoModel().getLanguageId();
-          if (languageMap.has(langId)) {
-            await this.loadLanguageConfiguration(languageMap.get(langId)!, baseUri);
+          if (this.languageConfiguration.has(langId)) {
+            const location = this.languageConfigLocation.get(langId)!;
+            await this.loadLanguageConfiguration(this.languageConfiguration.get(langId)!, location);
             this.activateLanguage(langId);
           }
         }
@@ -341,7 +357,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       return;
     }
     const tokenizerOption: TokenizerOption = {
-      lineLimit: this.preferenceService.get('editor.maxTokenizationLineLength') || 10000,
+      lineLimit: this.preferenceService.getValid('editor.maxTokenizationLineLength', 20000),
     };
     const configuration = this.textmateRegistry.getGrammarConfiguration(languageId)();
     const initialLanguage = getEncodedLanguageId(languageId);
@@ -353,9 +369,24 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
         configuration,
       );
       const options = configuration.tokenizerOption ? configuration.tokenizerOption : tokenizerOption;
+      const containsEmbeddedLanguages =
+        configuration.embeddedLanguages && Object.keys(configuration.embeddedLanguages).length > 0;
+
       // 要保证grammar把所有的languageID关联的语法都注册好了
       if (grammar) {
-        monaco.languages.setTokensProvider(languageId, createTextmateTokenizer(grammar, options));
+        const tokenizer = new TextMateTokenizer(grammar, options, containsEmbeddedLanguages);
+        this.addDispose(
+          tokenizer.onDidEncounterLanguage(async (language) => {
+            // https://github.com/microsoft/vscode/blob/301f450d9260d6e1c900e7e93b85aae5151bf11c/src/vs/editor/common/services/languagesRegistry.ts#L140
+            const languageId = this.monacoLanguageService['_registry']['languageIdCodec']['decodeLanguageId'](language);
+            const location = this.languageConfigLocation.get(languageId);
+            if (location && this.languageConfiguration.has(languageId)) {
+              await this.loadLanguageConfiguration(this.languageConfiguration.get(languageId)!, location);
+              this.activateLanguage(languageId);
+            }
+          }),
+        );
+        monaco.languages.setTokensProvider(languageId, tokenizer);
       }
     } catch (error) {
       this.logger.warn('No grammar for this language id', languageId, error);
@@ -406,7 +437,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       json = parseWithComments(content);
       return json;
     } catch (error) {
-      this.logger.error('语言配置文件解析出错！', content);
+      this.logger.error(`Language configuration file parsing error, ${error.stack}`);
       return;
     }
   }
@@ -460,10 +491,6 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       const scope = scopes[i];
       const langId = languages[scope];
       result[scope] = getEncodedLanguageId(langId);
-      // TODO 后置到 tokenize 使用到对应的 scope 时激活（vscode逻辑），现在先激活一个 language 时激活所有 embed language
-      if (!this.activatedLanguage.has(langId)) {
-        this.activateLanguage(langId);
-      }
     }
     return result;
   }
@@ -837,17 +864,7 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       return new OnigasmLib();
     }
 
-    let wasmUri: string;
-    if (this.appConfig.isElectronRenderer && electronEnv.onigWasmPath) {
-      wasmUri = URI.file(electronEnv.onigWasmPath).codeUri.toString();
-    } else if (this.appConfig.isElectronRenderer && electronEnv.onigWasmUri) {
-      wasmUri = electronEnv.onigWasmUri;
-    } else {
-      wasmUri =
-        this.appConfig.onigWasmUri ||
-        this.appConfig.onigWasmPath ||
-        'https://g.alicdn.com/kaitian/vscode-oniguruma-wasm/1.5.1/onig.wasm';
-    }
+    const wasmUri: string = await this.rendererRuntime.provideResourceUri(EKnownResources.OnigWasm);
 
     const response = await fetch(wasmUri);
     const bytes = await response.arrayBuffer();
@@ -892,5 +909,20 @@ export class TextmateService extends WithEventBus implements ITextmateTokenizerS
       );
     }
     ruleStack = lineTokens.ruleStack;
+  }
+
+  dispose() {
+    super.dispose();
+    if (this.monacoLanguageService['_requestedRichLanguages']) {
+      this.monacoLanguageService['_requestedRichLanguages'].clear();
+    } else {
+      this.logger.warn('monaco language service not found _requestedRichLanguages');
+    }
+
+    if (this.monacoLanguageService['_requestedBasicLanguages']) {
+      this.monacoLanguageService['_requestedBasicLanguages'].clear();
+    } else {
+      this.logger.warn('monaco language service not found _requestedBasicLanguages');
+    }
   }
 }

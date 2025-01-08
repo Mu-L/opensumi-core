@@ -1,29 +1,19 @@
-import { Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
-import { AppConfig, ClientAppContribution, electronEnv } from '@opensumi/ide-core-browser';
-import { ContributionProvider, Domain, getDebugLogger } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { ClientAppContribution } from '@opensumi/ide-core-browser';
+import { ContributionProvider, Domain, IApplicationService, getDebugLogger } from '@opensumi/ide-core-common';
 
-import { IRemoteOpenerService, RemoteOpenerServicePath } from '../common';
 import {
   IRemoteOpenerBrowserService,
+  IRemoteOpenerService,
   RemoteOpenerBrowserServiceToken,
   RemoteOpenerConverterContribution,
+  RemoteOpenerServicePath,
 } from '../common';
 
 // 从extension.contribution.ts中Copy过来，因为直接引入会有一定概率触发IDE初始化问题
 const getClientId = (injector: Injector) => {
-  let clientId: string;
-  const appConfig: AppConfig = injector.get(AppConfig);
-
-  // Electron 环境下，未指定 isRemote 时默认使用本地连接
-  // 否则使用 WebSocket 连接
-  if (appConfig.isElectronRenderer && !appConfig.isRemote) {
-    clientId = electronEnv.metadata.windowClientId;
-  } else {
-    const channelHandler = injector.get(WSChannelHandler);
-    clientId = channelHandler.clientId;
-  }
-  return clientId;
+  const service: IApplicationService = injector.get(IApplicationService);
+  return service.clientId;
 };
 
 @Domain(ClientAppContribution)

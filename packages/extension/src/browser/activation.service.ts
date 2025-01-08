@@ -1,8 +1,7 @@
 import pm from 'picomatch';
 
-import { Injectable } from '@opensumi/di';
-import { MaybePromise } from '@opensumi/ide-core-common';
-import { IDisposable } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { IDisposable, ILogger, MaybePromise, MultiMap } from '@opensumi/ide-core-common';
 
 import { IActivationEventService } from './types';
 
@@ -17,13 +16,20 @@ import { IActivationEventService } from './types';
 @Injectable()
 export class ActivationEventServiceImpl implements IActivationEventService {
   private eventListeners: Map<string, IActivationEventListener[]> = new Map();
+  private collectTopicData: MultiMap<string, string> = new MultiMap();
 
   private wildCardTopics: Set<string> = new Set();
-
   public activatedEventSet: Set<string> = new Set();
+
+  @Autowired(ILogger)
+  protected readonly logger: ILogger;
 
   constructor() {
     this.wildCardTopics.add('workspaceContains');
+  }
+
+  getTopicsData(topic: string): string[] {
+    return this.collectTopicData.get(topic) || [];
   }
 
   async fireEvent(topic: string, data = ''): Promise<void> {
@@ -38,7 +44,13 @@ export class ActivationEventServiceImpl implements IActivationEventService {
       listeners = this.eventListeners.get(topic + ':' + data);
     }
     if (listeners) {
-      await Promise.all(listeners.map((listener) => this.tryRun(topic, data, listener)));
+      const result = await Promise.allSettled(listeners.map((listener) => this.tryRun(topic, data, listener)));
+
+      for (const item of result) {
+        if (item.status === 'rejected') {
+          this.logger.error(`fire event ${topic}:${data} error: ${item.reason}`);
+        }
+      }
     }
   }
 
@@ -77,6 +89,8 @@ export class ActivationEventServiceImpl implements IActivationEventService {
    * @param listener
    */
   private addListener(topic: string, listener: IActivationEventListener): IDisposable {
+    this.collectTopicData.set(listener.topic, listener.data);
+
     if (this.wildCardTopics.has(topic)) {
       if (!this.eventListeners.has(topic)) {
         this.eventListeners.set(topic, []);

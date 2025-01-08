@@ -1,5 +1,6 @@
 import { BasicEvent, IDisposable, SlotLocation } from '@opensumi/ide-core-browser';
-import { ViewContainerOptions, View, SideStateManager } from '@opensumi/ide-core-browser/lib/layout';
+import { SideStateManager, View, ViewContainerOptions } from '@opensumi/ide-core-browser/lib/layout';
+import { ComponentRegistryInfo } from '@opensumi/ide-core-browser/lib/layout/layout.interface';
 import { IContextMenu } from '@opensumi/ide-core-browser/lib/menu/next';
 import { Deferred, Event } from '@opensumi/ide-core-common';
 import { IContextKeyExpression } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
@@ -7,9 +8,9 @@ import { IContextKeyExpression } from '@opensumi/monaco-editor-core/esm/vs/platf
 // eslint-disable-next-line import/no-restricted-paths
 import type { AccordionService } from '../browser/accordion/accordion.service';
 // eslint-disable-next-line import/no-restricted-paths
-import type { TabBarHandler } from '../browser/tabbar-handler';
-// eslint-disable-next-line import/no-restricted-paths
 import type { TabbarService } from '../browser/tabbar/tabbar.service';
+// eslint-disable-next-line import/no-restricted-paths
+import type { TabBarHandler } from '../browser/tabbar-handler';
 
 export interface ComponentCollection {
   views?: View[];
@@ -26,7 +27,9 @@ export interface IMainLayoutService {
   viewReady: Deferred<void>;
 
   didMount(): void;
-  // 切换tabbar位置的slot，支持left、right、bottom
+  /**
+   * 切换tabbar位置的slot，传 slot id
+   */
   toggleSlot(location: SlotLocation, show?: boolean, size?: number): void;
   /**
    * 获取注册到tabbar位置视图的handler，封装了常用的layout操作
@@ -41,6 +44,12 @@ export interface IMainLayoutService {
    * @param side 注册的位置，支持left、right、bottom
    */
   collectTabbarComponent(views: View[], options: ViewContainerOptions, side: string): string;
+
+  /**
+   * 获指定 containerId 的注册实例
+   * @param containerId container id
+   */
+  getContainer(containerId: string): ComponentRegistryInfo | undefined;
   /**
    * 向侧边栏container内附加新的子视图
    * @param view 子视图信息
@@ -66,8 +75,6 @@ export interface IMainLayoutService {
   disposeContainer(containerId: string): void;
   expandBottom(expand: boolean): void;
   bottomExpanded: boolean;
-  // @deprecated 提供小程序使用的额外位置控制
-  setFloatSize(size: number): void;
   // force reveal a view ignoring its when clause
   revealView(viewId: string): void;
   getTabbarService(location: string): TabbarService;
@@ -76,6 +83,7 @@ export interface IMainLayoutService {
   // 某一位置是否可见
   isVisible(location: string): boolean;
   isViewVisible(viewId: string): boolean;
+  getExtraTopMenu(): IContextMenu;
   getExtraMenu(): IContextMenu;
   getAllAccordionService(): Map<string, AccordionService>;
 }

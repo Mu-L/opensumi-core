@@ -1,29 +1,31 @@
 import debounce from 'lodash/debounce';
-import type vscode from 'vscode';
 
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { ISelection, Emitter, Event, IRange, getDebugLogger, Disposable } from '@opensumi/ide-core-common';
-import { ISingleEditOperation, IDecorationApplyOptions, IResourceOpenOptions } from '@opensumi/ide-editor';
+import { Disposable, Emitter, Event, IRange, ISelection, getDebugLogger } from '@opensumi/ide-core-common';
+
 
 import {
-  IExtensionHostEditorService,
   ExtensionDocumentDataManager,
+  IExtensionHostEditorService,
   MainThreadAPIIdentifier,
 } from '../../../../common/vscode';
 import * as TypeConverts from '../../../../common/vscode/converter';
 import {
-  IEditorStatusChangeDTO,
   IEditorChangeDTO,
-  TextEditorSelectionChangeKind,
   IEditorCreatedDTO,
-  IResolvedTextEditorConfiguration,
+  IEditorStatusChangeDTO,
   IMainThreadEditorsService,
+  IResolvedTextEditorConfiguration,
   ITextEditorUpdateConfiguration,
   TextEditorCursorStyle,
+  TextEditorSelectionChangeKind,
 } from '../../../../common/vscode/editor';
-import { Uri, Position, Range, Selection, TextEditorLineNumbersStyle } from '../../../../common/vscode/ext-types';
+import { Position, Range, Selection, TextEditorLineNumbersStyle, Uri } from '../../../../common/vscode/ext-types';
 
 import { TextEditorEdit } from './edit.builder';
+
+import type { IDecorationApplyOptions, IResourceOpenOptions, ISingleEditOperation } from '@opensumi/ide-editor';
+import type vscode from 'vscode';
 
 export class ExtensionHostEditorService implements IExtensionHostEditorService {
   private _editors: Map<string, TextEditorData> = new Map();
@@ -59,10 +61,6 @@ export class ExtensionHostEditorService implements IExtensionHostEditorService {
 
   constructor(rpcProtocol: IRPCProtocol, public readonly documents: ExtensionDocumentDataManager) {
     this._proxy = rpcProtocol.getProxy(MainThreadAPIIdentifier.MainThreadEditors);
-    // this._proxy.$getInitialState().then((change) => {
-    //   console.log('$getInitialState', change);
-    //   this.$acceptChange(change);
-    // });
   }
 
   $acceptChange(change: IEditorChangeDTO) {
@@ -159,9 +157,11 @@ export class ExtensionHostEditorService implements IExtensionHostEditorService {
     return this.openResource(uri, options);
   }
 
-  $acceptPropertiesChange(change: IEditorStatusChangeDTO) {
-    if (this._editors.get(change.id)) {
-      this._editors.get(change.id)!.acceptStatusChange(change);
+  $acceptPropertiesChanges(changes: IEditorStatusChangeDTO[]) {
+    for (const change of changes) {
+      if (this._editors.get(change.id)) {
+        this._editors.get(change.id)!.acceptStatusChange(change);
+      }
     }
   }
 

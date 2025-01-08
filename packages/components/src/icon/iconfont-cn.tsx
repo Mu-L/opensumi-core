@@ -1,7 +1,7 @@
-import clx from 'classnames';
+import cls from 'classnames';
 import React from 'react';
 
-import { _InternalIcon, IconProps } from './icon';
+import { IconProps, _InternalIcon } from './icon';
 import { getIconShapeClxList } from './util';
 
 // source code from '@ant-design/icons'
@@ -47,7 +47,7 @@ const svgBaseProps = {
   fill: 'currentColor',
 };
 
-export function createFromIconfontCN<T>(options: CustomIconOptions = {}): React.SFC<IconFontProps<T>> {
+export function createFromIconfontCN<T>(options: CustomIconOptions = {}) {
   const { scriptUrl, extraCommonProps = {} } = options;
 
   /**
@@ -90,7 +90,7 @@ export function createFromIconfontCN<T>(options: CustomIconOptions = {}): React.
 
       const iconShapeClx = getIconShapeClxList(iconShapeOptions);
       return (
-        <_InternalIcon {...extraCommonProps} {...restProps} className={clx(className, iconShapeClx)} ref={ref}>
+        <_InternalIcon {...extraCommonProps} {...restProps} className={cls(className, iconShapeClx)} ref={ref}>
           {content}
         </_InternalIcon>
       );

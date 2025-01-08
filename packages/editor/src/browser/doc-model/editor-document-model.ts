@@ -4,34 +4,48 @@ import { Autowired, Injectable } from '@opensumi/di';
 import {
   CommandService,
   Disposable,
+  EDITOR_COMMANDS,
   Emitter,
-  formatLocalize,
   IEventBus,
   ILogger,
   IRange,
   IReporterService,
-  isThenable,
-  isUndefinedOrNull,
-  localize,
   PreferenceService,
   REPORT_NAME,
   SaveTaskErrorCause,
   SaveTaskResponseState,
+  Throttler,
   URI,
+  formatLocalize,
+  isThenable,
+  isUndefinedOrNull,
+  localize,
 } from '@opensumi/ide-core-browser';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
-import { monaco, URI as MonacoURI } from '@opensumi/ide-monaco/lib/browser/monaco-api';
+import { URI as MonacoURI, monaco } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 import { EOL, EndOfLineSequence, ITextModel } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 import { IMessageService } from '@opensumi/ide-overlay';
+import {
+  EditOperation,
+  ISingleEditOperation,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/editOperation';
+import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
+import {
+  DefaultEndOfLine,
+  EndOfLinePreference,
+  ITextBuffer,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
+import { createTextBuffer } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model/textModel';
 
 import {
   IDocCache,
+  IDocCacheValue,
   IDocPersistentCacheProvider,
-  isDocContentCache,
-  parseRangeFrom,
-  SaveReason,
   IEditorDocumentModelContentChange,
+  SaveReason,
+  isDocContentCache,
 } from '../../common';
+import { AUTO_SAVE_MODE, IEditorDocumentModel } from '../../common/editor';
 import { EditorPreferences } from '../preference/schema';
 import { createEditorPreferenceProxy } from '../preference/util';
 import { CompareResult, ICompareService } from '../types';
@@ -43,11 +57,11 @@ import {
   EditorDocumentModelOptionChangedEvent,
   EditorDocumentModelRemovalEvent,
   EditorDocumentModelSavedEvent,
-  IEditorDocumentModel,
+  EditorDocumentModelWillSaveEvent,
+  IDocModelUpdateOptions,
   IEditorDocumentModelContentRegistry,
   IEditorDocumentModelService,
   ORIGINAL_DOC_SCHEME,
-  EditorDocumentModelWillSaveEvent,
 } from './types';
 
 export interface EditorDocumentModelConstructionOptions {
@@ -103,6 +117,8 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
 
   @Autowired(IHashCalculateService)
   private readonly hashCalculateService: IHashCalculateService;
+
+  private saveQueue = new Throttler();
 
   private monacoModel: ITextModel;
 
@@ -183,15 +199,15 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
     );
   }
 
-  updateOptions(options) {
+  updateOptions(options: IDocModelUpdateOptions) {
     const finalOptions = {
       tabSize: this.editorPreferences['editor.tabSize'] || 1,
       insertSpaces: this.editorPreferences['editor.insertSpaces'],
       detectIndentation: this.editorPreferences['editor.detectIndentation'],
       ...options,
-    };
+    } as IDocModelUpdateOptions;
     if (finalOptions.detectIndentation) {
-      this.monacoModel.detectIndentation(finalOptions.insertSpaces, finalOptions.tabSize);
+      this.monacoModel.detectIndentation(finalOptions.insertSpaces!, finalOptions.tabSize!);
     } else {
       this.monacoModel.updateOptions(finalOptions);
     }
@@ -249,6 +265,17 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
       return;
     }
 
+    const parseRangeFrom = (cacheValue: IDocCacheValue): Range => {
+      const [_text, startLineNumber, startColumn, endLineNumber, endColumn] = cacheValue;
+
+      return Range.lift({
+        startLineNumber,
+        startColumn,
+        endLineNumber,
+        endColumn,
+      });
+    };
+
     if (isDocContentCache(cache)) {
       this.monacoModel.setValue(cache.content);
     } else {
@@ -294,7 +321,7 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
   }
 
   set eol(eol) {
-    this.monacoModel.setEOL(eol === EOL.LF ? EndOfLineSequence.LF : (EndOfLineSequence.CRLF as any));
+    this.monacoModel.setEOL(eol === EOL.LF ? EndOfLineSequence.LF : EndOfLineSequence.CRLF);
     if (!this._isInitOption) {
       this.eventBus.fire(
         new EditorDocumentModelOptionChangedEvent({
@@ -317,6 +344,13 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
       return false;
     }
     if (this.monacoModel.isDisposed()) {
+      return false;
+    }
+    /**
+     * https://github.com/microsoft/vscode/blob/1.95.3/src/vscode-dts/vscode.d.ts#L14007
+     * 如果文档是只读状态，说明并不能进行保存, 自然不需要 dirty 状态
+     */
+    if (this.readonly) {
       return false;
     }
     return this._persistVersionId !== this.monacoModel.getAlternativeVersionId();
@@ -344,55 +378,93 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
     return this.monacoModel;
   }
 
-  async save(force = false, reason: SaveReason = SaveReason.Manual): Promise<boolean> {
-    await this.formatOnSave(reason);
-    // 发送willSave并等待完成
+  async syncDocumentModelToExtThread() {
     await this.eventBus.fireAndAwait(
-      new EditorDocumentModelWillSaveEvent({
+      new EditorDocumentModelOptionChangedEvent({
         uri: this.uri,
-        reason,
-        language: this.languageId,
+        languageId: this.languageId,
+        encoding: this.encoding,
+        eol: this.eol,
+        dirty: this.dirty,
       }),
     );
-    if (!this.editorPreferences['editor.askIfDiff']) {
-      force = true;
-    }
+  }
+
+  async save(force = false, reason: SaveReason = SaveReason.Manual): Promise<boolean> {
     if (!this.dirty) {
+      // 如果文档内容没有变化，则只同步新状态到插件进程
+      await this.syncDocumentModelToExtThread();
       return false;
     }
-    const versionId = this.monacoModel.getVersionId();
-    const lastSavingTask = this.savingTasks[this.savingTasks.length - 1];
-    if (lastSavingTask && lastSavingTask.versionId === versionId) {
-      lastSavingTask.cancel();
-      const task = this.savingTasks.pop();
-      task?.dispose();
+
+    const provider = await this.contentRegistry.getProvider(this.uri);
+    const isReadonly = await provider?.isReadonly(this.uri);
+
+    /**
+     * 只读文件不允许保存
+     * https://github.com/microsoft/vscode/blob/main/src/vscode-dts/vscode.d.ts#L13675
+     */
+    if (isReadonly) {
+      return false;
     }
-    const task = new SaveTask(this.uri, versionId, this.monacoModel.getAlternativeVersionId(), this.getText(), force);
-    this.savingTasks.push(task);
-    if (this.savingTasks.length === 1) {
-      this.initSave();
-    }
-    const res = await task.finished;
-    if (res.state === SaveTaskResponseState.SUCCESS) {
-      return true;
-    } else if (res.state === SaveTaskResponseState.ERROR) {
-      if (res.errorMessage !== SaveTaskErrorCause.CANCEL) {
-        this.logger.error(res.errorMessage);
-        this.messageService.error(localize('doc.saveError.failed') + '\n' + res.errorMessage);
+
+    const doSave = async (force = false, reason: SaveReason = SaveReason.Manual) => {
+      await this.formatOnSave(reason);
+      // 发送willSave并等待完成
+      await this.eventBus.fireAndAwait(
+        new EditorDocumentModelWillSaveEvent({
+          uri: this.uri,
+          reason,
+          language: this.languageId,
+          dirty: this.dirty,
+        }),
+      );
+      if (!this.editorPreferences['editor.askIfDiff']) {
+        force = true;
+      }
+      if (!this.dirty) {
+        return false;
+      }
+      const versionId = this.monacoModel.getVersionId();
+      const lastSavingTask = this.savingTasks[this.savingTasks.length - 1];
+      if (lastSavingTask && lastSavingTask.versionId === versionId) {
+        lastSavingTask.cancel();
+        const task = this.savingTasks.pop();
+        task?.dispose();
+      }
+      const task = new SaveTask(this.uri, versionId, this.monacoModel.getAlternativeVersionId(), this.getText(), force);
+      this.savingTasks.push(task);
+      if (this.savingTasks.length > 0) {
+        this.initSave();
+      }
+      const res = await task.finished;
+      if (res.state === SaveTaskResponseState.SUCCESS) {
+        this.monacoModel.pushStackElement();
+        return true;
+      } else if (res.state === SaveTaskResponseState.ERROR) {
+        if (res.errorMessage !== SaveTaskErrorCause.CANCEL) {
+          this.logger.error(res.errorMessage);
+          this.messageService.error(localize('doc.saveError.failed') + '\n' + res.errorMessage);
+        }
+        return false;
+      } else if (res.state === SaveTaskResponseState.DIFF) {
+        const diffAndSave = localize('doc.saveError.diffAndSave');
+        const overwrite = localize('doc.saveError.overwrite');
+        this.messageService
+          .error(formatLocalize('doc.saveError.diff', this.uri.toString()), [diffAndSave, overwrite])
+          .then((res) => {
+            if (res === diffAndSave) {
+              this.compareAndSave();
+            } else if (res === overwrite) {
+              doSave(true, reason);
+            }
+          });
+        this.logger.error('The file cannot be saved, the version is inconsistent with the disk');
+        return false;
       }
       return false;
-    } else if (res.state === SaveTaskResponseState.DIFF) {
-      this.messageService
-        .error(formatLocalize('doc.saveError.diff', this.uri.toString()), [localize('doc.saveError.diffAndSave')])
-        .then((res) => {
-          if (res) {
-            this.compareAndSave();
-          }
-        });
-      this.logger.error('文件无法保存，版本和磁盘不一致');
-      return false;
-    }
-    return false;
+    };
+    return this.saveQueue.queue(doSave.bind(this, force, reason));
   }
 
   private async compareAndSave() {
@@ -468,24 +540,104 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
   }
 
   updateContent(content: string, eol?: EOL, setPersist = false) {
-    this.monacoModel.pushEditOperations(
-      [],
-      [
-        {
-          range: this.monacoModel.getFullModelRange(),
-          text: content,
-        },
-      ],
-      () => [],
-    );
     if (eol) {
       this.eol = eol;
     }
+
+    const defaultEOL = this.eol === EOL.CRLF ? DefaultEndOfLine.CRLF : DefaultEndOfLine.LF;
+    const { textBuffer, disposable } = createTextBuffer(content, defaultEOL);
+    // 计算新旧 Monaco 文档的差异，避免全量更新导致的高亮闪烁问题
+    const singleEditOperation = EditorDocumentModel._computeEdits(this.monacoModel, textBuffer);
+    this.monacoModel.pushEditOperations([], singleEditOperation, () => []);
+
     if (setPersist) {
       this.setPersist(this.monacoModel.getAlternativeVersionId());
       this.baseContent = content;
       this.dirtyChanges = [];
     }
+    disposable.dispose();
+  }
+
+  /**
+   * Compute edits to bring `model` to the state of `textSource`.
+   */
+  public static _computeEdits(model: ITextModel, textBuffer: ITextBuffer): ISingleEditOperation[] {
+    const modelLineCount = model.getLineCount();
+    const textBufferLineCount = textBuffer.getLineCount();
+    const commonPrefix = this._commonPrefix(model, modelLineCount, 1, textBuffer, textBufferLineCount, 1);
+
+    if (modelLineCount === textBufferLineCount && commonPrefix === modelLineCount) {
+      // equality case
+      return [];
+    }
+
+    const commonSuffix = this._commonSuffix(
+      model,
+      modelLineCount - commonPrefix,
+      commonPrefix,
+      textBuffer,
+      textBufferLineCount - commonPrefix,
+      commonPrefix,
+    );
+
+    let oldRange: Range;
+    let newRange: Range;
+    if (commonSuffix > 0) {
+      oldRange = new Range(commonPrefix + 1, 1, modelLineCount - commonSuffix + 1, 1);
+      newRange = new Range(commonPrefix + 1, 1, textBufferLineCount - commonSuffix + 1, 1);
+    } else if (commonPrefix > 0) {
+      oldRange = new Range(
+        commonPrefix,
+        model.getLineMaxColumn(commonPrefix),
+        modelLineCount,
+        model.getLineMaxColumn(modelLineCount),
+      );
+      newRange = new Range(
+        commonPrefix,
+        1 + textBuffer.getLineLength(commonPrefix),
+        textBufferLineCount,
+        1 + textBuffer.getLineLength(textBufferLineCount),
+      );
+    } else {
+      oldRange = new Range(1, 1, modelLineCount, model.getLineMaxColumn(modelLineCount));
+      newRange = new Range(1, 1, textBufferLineCount, 1 + textBuffer.getLineLength(textBufferLineCount));
+    }
+
+    return [EditOperation.replaceMove(oldRange, textBuffer.getValueInRange(newRange, EndOfLinePreference.TextDefined))];
+  }
+
+  private static _commonPrefix(
+    a: ITextModel,
+    aLen: number,
+    aDelta: number,
+    b: ITextBuffer,
+    bLen: number,
+    bDelta: number,
+  ): number {
+    const maxResult = Math.min(aLen, bLen);
+
+    let result = 0;
+    for (let i = 0; i < maxResult && a.getLineContent(aDelta + i) === b.getLineContent(bDelta + i); i++) {
+      result++;
+    }
+    return result;
+  }
+
+  private static _commonSuffix(
+    a: ITextModel,
+    aLen: number,
+    aDelta: number,
+    b: ITextBuffer,
+    bLen: number,
+    bDelta: number,
+  ): number {
+    const maxResult = Math.min(aLen, bLen);
+
+    let result = 0;
+    for (let i = 0; i < maxResult && a.getLineContent(aDelta + aLen - i) === b.getLineContent(bDelta + bLen - i); i++) {
+      result++;
+    }
+    return result;
   }
 
   set baseContent(content: string) {
@@ -530,7 +682,11 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
   }
 
   private notifyChangeEvent(changes: IEditorDocumentModelContentChange[] = [], isRedoing: boolean, isUndoing: boolean) {
-    if (!this.closeAutoSave && this.savable && this.editorPreferences['editor.autoSave'] === 'afterDelay') {
+    if (
+      !this.closeAutoSave &&
+      this.savable &&
+      this.editorPreferences['editor.autoSave'] === AUTO_SAVE_MODE.AFTER_DELAY
+    ) {
       this.tryAutoSaveAfterDelay();
     }
     // 发出内容变化的事件
@@ -538,6 +694,7 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
       new EditorDocumentModelContentChangedEvent({
         uri: this.uri,
         dirty: this.dirty,
+        readonly: this.readonly,
         changes,
         eol: this.eol,
         isRedoing,
@@ -582,7 +739,7 @@ export class EditorDocumentModel extends Disposable implements IEditorDocumentMo
               reject(err);
             }, formatOnSaveTimeout);
           }),
-          this.commandService.executeCommand('editor.action.formatDocument'),
+          this.commandService.executeCommand(EDITOR_COMMANDS.FORMAT_DOCUMENT.id),
         ]);
       } catch (err) {
         if (err.name === 'FormatOnSaveTimeoutError') {

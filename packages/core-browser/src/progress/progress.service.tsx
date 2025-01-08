@@ -5,39 +5,41 @@
 
 import React = require('react');
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { MessageType, update, close } from '@opensumi/ide-components';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { MessageType, close, update } from '@opensumi/ide-components';
 import {
-  localize,
-  IProgressOptions,
-  IProgressNotificationOptions,
-  IProgressWindowOptions,
-  IProgressCompositeOptions,
-  IProgress,
-  IProgressStep,
-  ProgressLocation,
-  Progress,
-  strings,
   CommandService,
   Disposable,
   Emitter,
   Event,
-  toDisposable,
-  dispose,
-  parseLinkedText,
+  IAction,
   IDisposable,
+  IProgress,
+  IProgressCompositeOptions,
+  IProgressNotificationOptions,
+  IProgressOptions,
+  IProgressStep,
+  IProgressWindowOptions,
+  Progress,
+  ProgressLocation,
+  dispose,
+  localize,
+  parseLinkedText,
+  randomString,
+  strings,
   timeout,
+  toDisposable,
 } from '@opensumi/ide-core-common';
 
 import { open } from '../components';
 import { toMarkdown } from '../markdown';
 import { IOpenerService } from '../opener';
-import { StatusBarEntry, StatusBarAlignment, StatusBarEntryAccessor } from '../services';
+import { StatusBarAlignment, StatusBarEntry, StatusBarEntryAccessor } from '../services';
 
 import { ProgressBar } from './progress-bar';
 import { ProgressIndicator } from './progress-indicator';
 
-import { IProgressService, IProgressIndicator, IProgressRunner } from './index';
+import { IProgressIndicator, IProgressRunner, IProgressService } from './index';
 
 const { format } = strings;
 
@@ -305,17 +307,18 @@ export class ProgressService implements IProgressService {
     let isInfinite = false;
 
     const createNotification = (message: string, silent: boolean, increment?: number): string => {
-      const buttons: string[] = [];
+      const buttons: Array<string | IAction> = [];
       const closeable = options.closeable ?? true;
-      if (options.buttons) {
-        // TODO: with progress Notification暂不支持自定义按钮
-      }
 
       if (options.cancellable) {
         buttons.push(localize('ButtonCancel'));
       }
 
-      const notificationKey = Math.random().toString(18).slice(2, 5);
+      if (options.buttons) {
+        buttons.push(...options.buttons);
+      }
+
+      const notificationKey = randomString(3);
       const indicator = this.injector.get(ProgressIndicator);
       this.registerProgressIndicator(notificationKey, indicator);
 

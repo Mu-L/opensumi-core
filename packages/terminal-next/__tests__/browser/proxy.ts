@@ -7,6 +7,9 @@ import httpProxy from 'http-proxy';
 import * as pty from 'node-pty';
 import WebSocket from 'ws';
 
+import { WSChannel } from '@opensumi/ide-connection';
+import { createWSChannelForClient } from '@opensumi/ide-connection/__test__/common/ws-channel';
+import { WSWebSocketConnection } from '@opensumi/ide-connection/lib/common/connection';
 import { uuid } from '@opensumi/ide-core-browser';
 
 function getRandomInt(min: number, max: number) {
@@ -83,7 +86,7 @@ export function killPty(json: RPCRequest<{ sessionId: string }>) {
 }
 
 export function createPty(
-  socket: WebSocket,
+  channel: WSChannel,
   json: RPCRequest<{ sessionId: string; cols: number; rows: number }>,
 ): RPCResponse<{ sessionId: string }> {
   const { sessionId, cols, rows } = json.params;
@@ -98,12 +101,12 @@ export function createPty(
 
   ptyProcess.onData((data) => {
     // handleStdOutMessage
-    socket.send(JSON.stringify({ sessionId, data } as PtyStdOut));
+    channel.send(JSON.stringify({ sessionId, data } as PtyStdOut));
   });
 
   ptyProcess.onExit(() => {
     try {
-      socket.close();
+      channel.close();
     } catch (_e) {}
   });
 
@@ -121,10 +124,10 @@ export function resizePty(json: RPCRequest<{ sessionId: string; cols: number; ro
   return _makeResponse(json, { sessionId });
 }
 
-export function handleServerMethod(socket: WebSocket, json: RPCRequest): RPCResponse {
+export function handleServerMethod(channel: WSChannel, json: RPCRequest): RPCResponse {
   switch (json.method) {
     case MessageMethod.create:
-      return createPty(socket, json);
+      return createPty(channel, json);
     case MessageMethod.resize:
       return resizePty(json);
     case MessageMethod.close:
@@ -144,16 +147,21 @@ export function handleStdinMessage(json: PtyStdIn) {
 export function createWsServer() {
   const server = new WebSocket.Server({ port: getPort() });
   server.on('connection', (socket) => {
-    socket.on('message', (data) => {
+    const channel = createWSChannelForClient(new WSWebSocketConnection(socket), {
+      id: 'ws-server',
+    });
+
+    channel.onMessage((data) => {
       const json = JSON.parse(data.toString());
 
       if (json.method) {
-        const res = handleServerMethod(socket, json);
-        socket.send(JSON.stringify(res));
+        const res = handleServerMethod(channel, json);
+        channel.send(JSON.stringify(res));
       } else {
         handleStdinMessage(json);
       }
     });
+
     socket.on('error', () => {});
   });
 

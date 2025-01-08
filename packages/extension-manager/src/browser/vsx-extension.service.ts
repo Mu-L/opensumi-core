@@ -1,27 +1,34 @@
-import { observable, action } from 'mobx';
-
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
+  CommandService,
   Disposable,
-  fuzzyScore,
   IStatusBarService,
-  localize,
   StatusBarAlignment,
   StatusBarEntryAccessor,
   URI,
+  fuzzyScore,
+  localize,
+  pMemoize,
 } from '@opensumi/ide-core-browser';
 import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/browser';
 import { ExtensionManagementService } from '@opensumi/ide-extension/lib/browser/extension-management.service';
 import { AbstractExtInstanceManagementService } from '@opensumi/ide-extension/lib/browser/types';
+import { observableValue, transaction } from '@opensumi/ide-monaco/lib/common/observable';
+import { IIconService, IProductIconService, IThemeService } from '@opensumi/ide-theme';
+import {
+  ICON_THEME_TOGGLE_COMMAND,
+  PRODUCT_ICON_THEME_TOGGLE_COMMAND,
+  THEME_TOGGLE_COMMAND,
+} from '@opensumi/ide-theme/lib/browser/theme.contribution';
 
 import {
-  InstallState,
   IVSXExtensionBackService,
   IVSXExtensionService,
+  InstallState,
   VSXExtension,
   VSXExtensionServicePath,
 } from '../common';
-import { VSXExtensionRaw, VSXSearchParam, QueryParam } from '../common/vsx-registry-types';
+import { QueryParam, VSXExtensionRaw, VSXSearchParam } from '../common/vsx-registry-types';
 
 @Injectable()
 export class VSXExtensionService extends Disposable implements IVSXExtensionService {
@@ -37,14 +44,32 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
   @Autowired()
   protected extensionManagementService: ExtensionManagementService;
 
-  @observable
-  public extensions: VSXExtension[] = [];
+  @Autowired(IThemeService)
+  protected readonly themeService: IThemeService;
 
-  @observable
-  public installedExtensions: VSXExtension[] = [];
+  @Autowired(IIconService)
+  protected readonly iconService: IIconService;
 
-  @observable
-  public openVSXRegistry: string;
+  @Autowired(IProductIconService)
+  protected readonly productIconService: IProductIconService;
+
+  @Autowired(CommandService)
+  protected readonly commandService: CommandService;
+
+  public readonly extensionsObservable = observableValue<VSXExtension[]>(this, []);
+  get extensions() {
+    return this.extensionsObservable.get();
+  }
+
+  public readonly installedExtensionsObservable = observableValue<VSXExtension[]>(this, []);
+  get installedExtensions() {
+    return this.installedExtensionsObservable.get();
+  }
+
+  public readonly openVSXRegistryObservable = observableValue<string>(this, '');
+  get openVSXRegistry() {
+    return this.openVSXRegistryObservable.get();
+  }
 
   @Autowired(IStatusBarService)
   protected readonly statusBarService: IStatusBarService;
@@ -52,7 +77,6 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
   private installStatus?: StatusBarEntryAccessor;
   private searchValue: string;
 
-  @observable
   private tasks: Map<string, Promise<string>> = new Map();
 
   constructor() {
@@ -102,10 +126,35 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
     });
     this.tasks.set(id, task);
     this.updateStatusBar();
-    return task.then((res) => {
+    return task.then(async (res) => {
       this.tasks.delete(id);
       this.updateStatusBar();
-      this.extensionManagementService.postChangedExtension(false, res);
+      await this.extensionManagementService.postChangedExtension(false, res);
+
+      // 安装完插件后，如果是主题插件，自动弹出 quick open 选择主题
+      const colorThemes = this.themeService.getAvailableThemeInfos();
+      if (colorThemes.some((theme) => theme.extensionId === extension.originId)) {
+        this.commandService.executeCommand(THEME_TOGGLE_COMMAND.id, {
+          extensionId: extension.originId,
+        });
+        return;
+      }
+
+      const iconThemes = this.iconService.getAvailableThemeInfos();
+      if (iconThemes.some((theme) => theme.extensionId === extension.originId)) {
+        this.commandService.executeCommand(ICON_THEME_TOGGLE_COMMAND.id, {
+          extensionId: extension.originId,
+        });
+        return;
+      }
+
+      const productIconThemes = this.productIconService.getAvailableThemeInfos();
+      if (productIconThemes.some((theme) => theme.extensionId === extension.originId)) {
+        this.commandService.executeCommand(PRODUCT_ICON_THEME_TOGGLE_COMMAND.id, {
+          extensionId: extension.originId,
+        });
+        return;
+      }
     });
   }
 
@@ -154,7 +203,10 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
   }
 
   async getOpenVSXRegistry() {
-    this.openVSXRegistry = await this.backService.getOpenVSXRegistry();
+    const res = await this.backService.getOpenVSXRegistry();
+    transaction((tx) => {
+      this.openVSXRegistryObservable.set(res, tx);
+    });
   }
 
   async openExtensionEditor(extensionId: string, state: InstallState) {
@@ -163,7 +215,7 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
     });
   }
 
-  @action
+  @pMemoize((keyword: string) => keyword)
   async search(keyword: string) {
     const param: VSXSearchParam = {
       query: keyword,
@@ -174,36 +226,45 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
 
     const res = await this.backService.search(param);
     if (res.extensions) {
-      this.extensions = res.extensions
-        .filter((ext) => !this.installedExtensions.find((e) => this.getExtensionId(e) === this.getExtensionId(ext)))
-        .map((ext) => ({
-          ...ext,
-          publisher: ext.namespace,
-          iconUrl: ext.files.icon,
-          downloadUrl: ext.files.download,
-          readme: ext.files.readme,
-        }));
+      transaction((tx) => {
+        this.extensionsObservable.set(
+          res.extensions
+            .filter((ext) => !this.installedExtensions.find((e) => this.getExtensionId(e) === this.getExtensionId(ext)))
+            .map((ext) => ({
+              ...ext,
+              publisher: ext.namespace,
+              iconUrl: ext.files.icon,
+              downloadUrl: ext.files.download,
+              readme: ext.files.readme,
+            })),
+          tx,
+        );
+      });
     }
   }
 
-  @action
   async searchInstalledExtensions(keyword: string) {
-    this.installedExtensions = this.installedExtensions.sort((a, b) => {
-      const scoreA = fuzzyScore(keyword, keyword.toLowerCase(), 0, a.name, a.name.toLowerCase(), 0, true);
-      const scoreB = fuzzyScore(keyword, keyword.toLowerCase(), 0, b.name, b.name.toLowerCase(), 0, true);
-      if (!scoreA) {
-        return 1;
-      }
-      if (!scoreB) {
-        return -1;
-      }
-      return scoreB[0] - scoreA[0];
+    transaction((tx) => {
+      const prev = this.installedExtensions;
+      this.installedExtensionsObservable.set(
+        prev.sort((a, b) => {
+          const scoreA = fuzzyScore(keyword, keyword.toLowerCase(), 0, a.name, a.name.toLowerCase(), 0, true);
+          const scoreB = fuzzyScore(keyword, keyword.toLowerCase(), 0, b.name, b.name.toLowerCase(), 0, true);
+          if (!scoreA) {
+            return 1;
+          }
+          if (!scoreB) {
+            return -1;
+          }
+          return scoreB[0] - scoreA[0];
+        }),
+        tx,
+      );
     });
   }
 
-  @action
   getInstalledExtensions() {
-    this.installedExtensions = this.extensionInstanceService.getExtensionInstances().map((e) => {
+    const installedExtensions = this.extensionInstanceService.getExtensionInstances().map((e) => {
       const extensionId = e.extensionId;
       const namespace = extensionId && extensionId.includes('.') ? extensionId.split('.')[0] : e.packageJSON.publisher;
 
@@ -219,6 +280,9 @@ export class VSXExtensionService extends Disposable implements IVSXExtensionServ
         path: e.path,
         realpath: e.realPath,
       };
+    });
+    transaction((tx) => {
+      this.installedExtensionsObservable.set(installedExtensions, tx);
     });
   }
 }

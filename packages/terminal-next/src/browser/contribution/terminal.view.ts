@@ -1,11 +1,11 @@
 import {
-  Domain,
-  localize,
-  ToolbarRegistry,
-  ComponentRegistry,
   ComponentContribution,
-  TabBarToolbarContribution,
+  ComponentRegistry,
+  Domain,
   TERMINAL_COMMANDS,
+  TabBarToolbarContribution,
+  ToolbarRegistry,
+  localize,
 } from '@opensumi/ide-core-browser';
 import { TERMINAL_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 
@@ -48,7 +48,7 @@ export class TerminalRenderContribution implements ComponentContribution, TabBar
       '@opensumi/ide-terminal-next',
       {
         component: TerminalView,
-        id: 'ide-terminal-next',
+        id: TerminalRenderContribution.viewId,
       },
       {
         title: localize('terminal.name'),

@@ -1,31 +1,33 @@
 import debounce from 'lodash/debounce';
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  DisposableCollection,
-  Disposable,
   AppConfig,
   ConfigProvider,
+  Disposable,
+  DisposableCollection,
   IReporterService,
 } from '@opensumi/ide-core-browser';
-import type { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import * as monaco from '@opensumi/ide-monaco';
+import { monacoBrowser } from '@opensumi/ide-monaco/lib/browser';
 
 import {
-  DebugEditor,
-  IDebugSessionManager,
   DEBUG_REPORT_NAME,
-  IDebugHoverWidget,
-  ShowDebugHoverOptions,
+  DebugEditor,
   HideDebugHoverOptions,
+  IDebugHoverWidget,
+  IDebugSessionManager,
+  ShowDebugHoverOptions,
 } from '../../common';
 import { DebugSessionManager } from '../debug-session-manager';
 
 import { DebugExpressionProvider } from './debug-expression-provider';
 import { DebugHoverSource } from './debug-hover-source';
 import { DebugHoverView } from './debug-hover.view';
+
+import type { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
 
 @Injectable()
 export class DebugHoverWidget implements IDebugHoverWidget {
@@ -95,8 +97,8 @@ export class DebugHoverWidget implements IDebugHoverWidget {
       ? {
           position: new monaco.Position(position.lineNumber, word.startColumn),
           preference: [
-            monaco.editor.ContentWidgetPositionPreference.BELOW,
-            monaco.editor.ContentWidgetPositionPreference.ABOVE,
+            monacoBrowser.editor.ContentWidgetPositionPreference.BELOW,
+            monacoBrowser.editor.ContentWidgetPositionPreference.ABOVE,
           ],
         }
       : null;
@@ -152,15 +154,12 @@ export class DebugHoverWidget implements IDebugHoverWidget {
   }
 
   private renderView(): void {
-    ReactDOM.render(
+    ReactDOM.createRoot(this.getDomNode()).render(
       <ConfigProvider value={this.configContext}>
         <DebugHoverView />
       </ConfigProvider>,
-      this.getDomNode(),
-      () => {
-        this.layoutContentWidget();
-      },
     );
+    this.layoutContentWidget();
   }
 
   protected async doShow(options: ShowDebugHoverOptions | undefined = this.options): Promise<void> {

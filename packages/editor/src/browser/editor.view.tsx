@@ -1,21 +1,23 @@
-import classnames from 'classnames';
-import { observer } from 'mobx-react-lite';
+import cls from 'classnames';
 import React from 'react';
-import ReactDOM from 'react-dom';
-import ReactIs from 'react-is';
+import ReactDOM from 'react-dom/client';
 
+import { Scrollbars } from '@opensumi/ide-components';
 import {
   AppConfig,
   ComponentRegistry,
   ConfigContext,
   ConfigProvider,
+  DisposableStore,
   ErrorBoundary,
   IEventBus,
   MaybeNull,
-  PreferenceService,
   URI,
-  useDisposable,
   View,
+  renderView,
+  useDesignStyles,
+  useDisposable,
+  usePreference,
 } from '@opensumi/ide-core-browser';
 import {
   IResizeHandleDelegate,
@@ -23,27 +25,30 @@ import {
   ResizeHandleHorizontal,
   ResizeHandleVertical,
 } from '@opensumi/ide-core-browser/lib/components';
-import { Scroll } from '@opensumi/ide-core-browser/lib/components/scroll';
 import { VIEW_CONTAINERS } from '@opensumi/ide-core-browser/lib/layout/view-id';
-import { useInjectable } from '@opensumi/ide-core-browser/lib/react-hooks';
+import { useInjectable, useUpdateOnEventBusEvent } from '@opensumi/ide-core-browser/lib/react-hooks';
+import { monaco } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 
-import { IEditorOpenType, IResource, WorkbenchEditorService } from '../common';
+import { IResource, WorkbenchEditorService } from '../common';
 
 import { EditorComponentRegistryImpl } from './component';
+import { EditorContext, IEditorContext, defaultEditorContext } from './editor.context';
 import styles from './editor.module.less';
 import { EditorGrid, SplitDirection } from './grid/grid.service';
 import { NavigationBar } from './navigation.view';
 import { Tabs } from './tab.view';
 import {
+  CodeEditorDidVisibleEvent,
   DragOverPosition,
   EditorComponentRegistry,
   EditorComponentRenderMode,
   EditorGroupFileDropEvent,
   EditorGroupsResetSizeEvent,
-  RegisterEditorSideComponentEvent,
+  EditorOpenType,
   EditorSide,
   IEditorComponent,
-  CodeEditorDidVisibleEvent,
+  RegisterEditorSideComponentEvent,
+  ResoucesOfActiveComponentChangedEvent,
 } from './types';
 import { EditorGroup, WorkbenchEditorServiceImpl } from './workbench-editor.service';
 
@@ -55,6 +60,7 @@ export const EditorView = () => {
   const rightWidgetInfo = componentRegistry.getComponentRegistryInfo('editor-widget-right');
   const RightWidget: React.ComponentType<any> | undefined = rightWidgetInfo && rightWidgetInfo.views[0].component;
   const [ready, setReady] = React.useState<boolean>(workbenchEditorService.gridReady);
+  const styles_kt_workbench_editor = useDesignStyles(styles.kt_workbench_editor, 'kt_workbench_editor');
 
   React.useEffect(() => {
     if (!ready) {
@@ -75,7 +81,7 @@ export const EditorView = () => {
 
   return (
     <div
-      className={styles.kt_workbench_editor}
+      className={styles_kt_workbench_editor}
       id='workbench-editor'
       ref={(ele) => {
         ref.current = ele;
@@ -85,12 +91,12 @@ export const EditorView = () => {
       }}
     >
       <div className={styles.kt_editor_main_wrapper}>
-        <EditorGridView grid={workbenchEditorService.topGrid}></EditorGridView>
+        <EditorGridView grid={workbenchEditorService.topGrid} />
       </div>
       {RightWidget ? (
         <div className={styles.kt_editor_right_widget}>
           <ErrorBoundary>
-            <RightWidget></RightWidget>
+            <RightWidget />
           </ErrorBoundary>
         </div>
       ) : null}
@@ -119,11 +125,10 @@ export const EditorGridView = ({ grid }: { grid: EditorGrid }) => {
         cachedGroupView[grid.editorGroup!.name] = div;
         div.style.height = '100%';
         editorGroupContainer.appendChild(div);
-        ReactDOM.render(
+        ReactDOM.createRoot(div).render(
           <ConfigProvider value={context}>
             <EditorGroupView group={grid.editorGroup! as EditorGroup} />
           </ConfigProvider>,
-          div,
         );
       }
     }
@@ -187,7 +192,7 @@ export const EditorGridView = ({ grid }: { grid: EditorGrid }) => {
     }
     children.push(
       <div
-        className={classnames({
+        className={cls({
           [styles.kt_grid_vertical_child]: grid.splitDirection === SplitDirection.Vertical,
           [styles.kt_grid_horizontal_child]: grid.splitDirection === SplitDirection.Horizontal,
         })}
@@ -202,7 +207,7 @@ export const EditorGridView = ({ grid }: { grid: EditorGrid }) => {
 
   return (
     <div
-      className={classnames({
+      className={cls({
         [styles.kt_grid_vertical]: grid.splitDirection === SplitDirection.Vertical,
         [styles.kt_grid_horizontal]: grid.splitDirection === SplitDirection.Horizontal,
       })}
@@ -213,7 +218,6 @@ export const EditorGridView = ({ grid }: { grid: EditorGrid }) => {
 };
 
 const cachedEditor: { [key: string]: HTMLDivElement } = {};
-const cachedDiffEditor: { [key: string]: HTMLDivElement } = {};
 
 /**
  * 默认的 editor empty component
@@ -233,11 +237,11 @@ const EditorEmptyComponent: React.FC<{
   );
 };
 
-export const EditorGroupView = observer(({ group }: { group: EditorGroup }) => {
+export const EditorGroupView = ({ group }: { group: EditorGroup }) => {
   const groupWrapperRef = React.useRef<HTMLElement | null>();
 
-  const preferenceService = useInjectable(PreferenceService) as PreferenceService;
   const [isEmpty, setIsEmpty] = React.useState(group.resources.length === 0);
+  const styles_kt_editor_group = useDesignStyles(styles.kt_editor_group, 'kt_editor_group');
 
   const appConfig = useInjectable(AppConfig);
   const { editorBackgroundImage } = appConfig;
@@ -257,20 +261,7 @@ export const EditorGroupView = observer(({ group }: { group: EditorGroup }) => {
     };
   }, []);
 
-  const [showActionWhenGroupEmpty, setShowActionWhenGroupEmpty] = React.useState(
-    () => !!preferenceService.get<boolean>('editor.showActionWhenGroupEmpty'),
-  );
-
-  useDisposable(
-    () => [
-      preferenceService.onPreferenceChanged((change) => {
-        if (change.preferenceName === 'editor.showActionWhenGroupEmpty') {
-          setShowActionWhenGroupEmpty(!!change.newValue);
-        }
-      }),
-    ],
-    [],
-  );
+  const showActionWhenGroupEmpty = usePreference('editor.showActionWhenGroupEmpty', false);
 
   const componentRegistry = useInjectable<ComponentRegistry>(ComponentRegistry);
 
@@ -289,7 +280,7 @@ export const EditorGroupView = observer(({ group }: { group: EditorGroup }) => {
   return (
     <div
       ref={groupWrapperRef as any}
-      className={styles.kt_editor_group}
+      className={styles_kt_editor_group}
       tabIndex={1}
       onFocus={(e) => {
         group.gainFocus();
@@ -308,28 +299,36 @@ export const EditorGroupView = observer(({ group }: { group: EditorGroup }) => {
             backgroundImage: !EmptyEditorViewConfig && editorBackgroundImage ? `url(${editorBackgroundImage})` : 'none',
           }}
         >
-          {EmptyEditorViewConfig && ReactIs.isValidElementType(EmptyEditorViewConfig.component) ? (
-            <ErrorBoundary>
-              {React.createElement(EmptyEditorViewConfig.component, EmptyEditorViewConfig.initialProps)}
-            </ErrorBoundary>
-          ) : null}
+          {renderView(EmptyEditorViewConfig)}
         </div>
       )}
     </div>
   );
-});
+};
 
-export const EditorGroupBody = observer(({ group }: { group: EditorGroup }) => {
+export const EditorGroupBody = ({ group }: { group: EditorGroup }) => {
+  const [context, setContext] = React.useState<IEditorContext>(defaultEditorContext);
+
   const editorBodyRef = React.useRef<HTMLDivElement>(null);
   const editorService = useInjectable(WorkbenchEditorService) as WorkbenchEditorServiceImpl;
   const eventBus = useInjectable(IEventBus) as IEventBus;
+  const styles_kt_editor_component = useDesignStyles(styles.kt_editor_component, 'kt_editor_component');
   const components: React.ReactNode[] = [];
   const codeEditorRef = React.useRef<HTMLDivElement>(null);
   const diffEditorRef = React.useRef<HTMLDivElement>(null);
+  const mergeEditorRef = React.useRef<HTMLDivElement>(null);
   const [, updateState] = React.useState<any>();
   const forceUpdate = React.useCallback(() => updateState({}), []);
 
   React.useEffect(() => {
+    const disposables = new DisposableStore();
+
+    disposables.add(
+      group.onDidEditorGroupBodyChanged(() => {
+        forceUpdate();
+      }),
+    );
+
     if (codeEditorRef.current) {
       if (cachedEditor[group.name]) {
         cachedEditor[group.name].remove();
@@ -339,35 +338,41 @@ export const EditorGroupBody = observer(({ group }: { group: EditorGroup }) => {
         codeEditorRef.current.appendChild(container);
         cachedEditor[group.name] = container;
         group.createEditor(container);
-      }
-    }
-    if (diffEditorRef.current) {
-      if (cachedDiffEditor[group.name]) {
-        cachedDiffEditor[group.name].remove();
-        diffEditorRef.current.appendChild(cachedDiffEditor[group.name]);
-      } else {
-        const container = document.createElement('div');
-        diffEditorRef.current.appendChild(container);
-        cachedDiffEditor[group.name] = container;
-        group.createDiffEditor(container);
-      }
-    }
-  }, [codeEditorRef.current]);
+        const minimapWith = group.codeEditor.monacoEditor.getOption(monaco.editor.EditorOption.layoutInfo).minimap
+          .minimapWidth;
+        setContext({ minimapWidth: minimapWith });
 
-  useDisposable(
-    () =>
-      group.onDidEditorGroupBodyChanged(() => {
-        forceUpdate();
-      }),
-    [],
-  );
+        disposables.add(
+          group.codeEditor.monacoEditor.onDidChangeConfiguration((e) => {
+            if (e.hasChanged(monaco.editor.EditorOption.layoutInfo)) {
+              setContext({
+                minimapWidth: group.codeEditor.monacoEditor.getOption(monaco.editor.EditorOption.layoutInfo).minimap
+                  .minimapWidth,
+              });
+            }
+          }),
+        );
+      }
+    }
+
+    if (diffEditorRef.current) {
+      group.attachDiffEditorDom(diffEditorRef.current);
+    }
+    if (mergeEditorRef.current) {
+      group.attachMergeEditorDom(mergeEditorRef.current);
+    }
+
+    return () => {
+      disposables.dispose();
+    };
+  }, []);
 
   group.activeComponents.forEach((resources, component) => {
     const initialProps = group.activateComponentsProps.get(component);
     components.push(
       <div
         key={component.uid}
-        className={classnames({
+        className={cls({
           [styles.kt_hidden]: !(group.currentOpenType && group.currentOpenType.componentId === component.uid),
         })}
       >
@@ -388,19 +393,19 @@ export const EditorGroupBody = observer(({ group }: { group: EditorGroup }) => {
   );
 
   React.useEffect(() => {
-    if (group.currentOpenType?.type === 'code') {
+    if (group.currentOpenType?.type === EditorOpenType.code) {
       eventBus.fire(
         new CodeEditorDidVisibleEvent({
           groupName: group.name,
-          type: 'code',
+          type: EditorOpenType.code,
           editorId: group.codeEditor.getId(),
         }),
       );
-    } else if (group.currentOpenType?.type === 'diff') {
+    } else if (group.currentOpenType?.type === EditorOpenType.diff) {
       eventBus.fire(
         new CodeEditorDidVisibleEvent({
           groupName: group.name,
-          type: 'diff',
+          type: EditorOpenType.diff,
           editorId: group.diffEditor.modifiedEditor.getId(),
         }),
       );
@@ -408,74 +413,83 @@ export const EditorGroupBody = observer(({ group }: { group: EditorGroup }) => {
   });
 
   return (
-    <div
-      id={VIEW_CONTAINERS.EDITOR}
-      ref={editorBodyRef}
-      className={styles.kt_editor_body}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (editorBodyRef.current) {
-          const position = getDragOverPosition(e.nativeEvent, editorBodyRef.current);
-          decorateDragOverElement(editorBodyRef.current, position);
-        }
-      }}
-      onDragLeave={(e) => {
-        if (editorBodyRef.current) {
-          removeDecorationDragOverElement(editorBodyRef.current);
-        }
-      }}
-      onDrop={(e) => {
-        if (editorBodyRef.current) {
-          removeDecorationDragOverElement(editorBodyRef.current);
-          if (e.dataTransfer.getData('uri')) {
-            const uri = new URI(e.dataTransfer.getData('uri'));
-            let sourceGroup: EditorGroup | undefined;
-            if (e.dataTransfer.getData('uri-source-group')) {
-              sourceGroup = editorService.getEditorGroup(e.dataTransfer.getData('uri-source-group'));
+    <EditorContext.Provider value={context}>
+      <div
+        id={VIEW_CONTAINERS.EDITOR}
+        ref={editorBodyRef}
+        className={styles.kt_editor_body}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (editorBodyRef.current) {
+            const position = getDragOverPosition(e.nativeEvent, editorBodyRef.current);
+            decorateDragOverElement(editorBodyRef.current, position);
+          }
+        }}
+        onDragLeave={(e) => {
+          if (editorBodyRef.current) {
+            removeDecorationDragOverElement(editorBodyRef.current);
+          }
+        }}
+        onDrop={(e) => {
+          if (editorBodyRef.current) {
+            removeDecorationDragOverElement(editorBodyRef.current);
+            if (e.dataTransfer.getData('uri')) {
+              const uri = new URI(e.dataTransfer.getData('uri'));
+              let sourceGroup: EditorGroup | undefined;
+              if (e.dataTransfer.getData('uri-source-group')) {
+                sourceGroup = editorService.getEditorGroup(e.dataTransfer.getData('uri-source-group'));
+              }
+              group.dropUri(uri, getDragOverPosition(e.nativeEvent, editorBodyRef.current), sourceGroup);
             }
-            group.dropUri(uri, getDragOverPosition(e.nativeEvent, editorBodyRef.current), sourceGroup);
+            if (e.dataTransfer.files.length > 0) {
+              eventBus.fire(
+                new EditorGroupFileDropEvent({
+                  group,
+                  files: e.dataTransfer.files,
+                  position: getDragOverPosition(e.nativeEvent, editorBodyRef.current),
+                }),
+              );
+            }
           }
-          if (e.dataTransfer.files.length > 0) {
-            eventBus.fire(
-              new EditorGroupFileDropEvent({
-                group,
-                files: e.dataTransfer.files,
-                position: getDragOverPosition(e.nativeEvent, editorBodyRef.current),
-              }),
-            );
-          }
-        }
-      }}
-    >
-      {!editorHasNoTab && <NavigationBar editorGroup={group} />}
-      <div className={styles.kt_editor_components}>
-        <div
-          className={classnames({
-            [styles.kt_editor_component]: true,
-            [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== 'component',
-          })}
-        >
-          {components}
+        }}
+      >
+        {group.currentResource && <EditorSideView side={'top'} resource={group.currentResource}></EditorSideView>}
+        {!editorHasNoTab && <NavigationBar editorGroup={group} />}
+        <div className={styles.kt_editor_components}>
+          <div
+            className={cls({
+              [styles_kt_editor_component]: true,
+              [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== EditorOpenType.component,
+            })}
+          >
+            {components}
+          </div>
+          <div
+            className={cls({
+              [styles.kt_editor_code_editor]: true,
+              [styles_kt_editor_component]: true,
+              [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== EditorOpenType.code,
+            })}
+            ref={codeEditorRef}
+          />
+          <div
+            className={cls(styles.kt_editor_diff_editor, styles_kt_editor_component, {
+              [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== EditorOpenType.diff,
+            })}
+            ref={diffEditorRef}
+          />
+          <div
+            className={cls(styles.kt_editor_diff_3_editor, styles_kt_editor_component, {
+              [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== EditorOpenType.mergeEditor,
+            })}
+            ref={mergeEditorRef}
+          />
         </div>
-        <div
-          className={classnames({
-            [styles.kt_editor_code_editor]: true,
-            [styles.kt_editor_component]: true,
-            [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== 'code',
-          })}
-          ref={codeEditorRef}
-        />
-        <div
-          className={classnames(styles.kt_editor_diff_editor, styles.kt_editor_component, {
-            [styles.kt_hidden]: !group.currentOpenType || group.currentOpenType.type !== 'diff',
-          })}
-          ref={diffEditorRef}
-        />
+        {group.currentResource && <EditorSideView side={'bottom'} resource={group.currentResource}></EditorSideView>}
       </div>
-      {group.currentResource && <EditorSideView side={'bottom'} resource={group.currentResource}></EditorSideView>}
-    </div>
+    </EditorContext.Provider>
   );
-});
+};
 
 export const ComponentsWrapper = ({
   component,
@@ -486,19 +500,22 @@ export const ComponentsWrapper = ({
   component: IEditorComponent;
   resources: IResource[];
   current: MaybeNull<IResource>;
-}) => (
-  <div className={styles.kt_editor_component_wrapper}>
-    {resources.map((resource) => (
-      <ComponentWrapper
-        {...other}
-        key={resource.toString()}
-        component={component}
-        resource={resource}
-        hidden={!(current && current.uri.toString() === resource.uri.toString())}
-      />
-    ))}
-  </div>
-);
+}) => {
+  useUpdateOnEventBusEvent(ResoucesOfActiveComponentChangedEvent, [component], (t) => t.component === component);
+  return (
+    <div className={styles.kt_editor_component_wrapper}>
+      {resources.map((resource) => (
+        <ComponentWrapper
+          {...other}
+          key={resource.uri.toString()}
+          component={component}
+          resource={resource}
+          hidden={!(current && current.uri.toString() === resource.uri.toString())}
+        />
+      ))}
+    </div>
+  );
+};
 
 export const ComponentWrapper = ({ component, resource, hidden, ...other }) => {
   const componentService: EditorComponentRegistryImpl = useInjectable(EditorComponentRegistry);
@@ -516,11 +533,10 @@ export const ComponentWrapper = ({ component, resource, hidden, ...other }) => {
         div.style.height = '100%';
         componentService.perWorkbenchComponents[component.uid] = div;
         // 对于per_workbench的，resource默认为不会改变
-        ReactDOM.render(
+        ReactDOM.createRoot(div).render(
           <ConfigProvider value={context}>
             <component.component resource={resource} />
           </ConfigProvider>,
-          div,
         );
       }
       containerRef!.appendChild(componentService.perWorkbenchComponents[component.uid]);
@@ -530,11 +546,11 @@ export const ComponentWrapper = ({ component, resource, hidden, ...other }) => {
   return (
     <div
       key={resource.uri.toString()}
-      className={classnames({
+      className={cls({
         [styles.kt_hidden]: hidden,
       })}
     >
-      <Scroll>
+      <Scrollbars>
         <ErrorBoundary>
           <div
             ref={(el) => {
@@ -545,7 +561,7 @@ export const ComponentWrapper = ({ component, resource, hidden, ...other }) => {
             {componentNode}
           </div>
         </ErrorBoundary>
-      </Scroll>
+      </Scrollbars>
     </div>
   );
 };
@@ -610,7 +626,7 @@ const EditorSideView = ({ side, resource }: { side: EditorSide; resource: IResou
   useDisposable(() => eventBus.on(RegisterEditorSideComponentEvent, forceUpdate), []);
 
   return (
-    <div className={classnames(styles['kt_editor_side_widgets'], styles['kt_editor_side_widgets_' + side])}>
+    <div className={cls(styles['kt_editor_side_widgets'], styles['kt_editor_side_widgets_' + side])}>
       {widgets.map((widget) => {
         const C = widget.component;
         return <C resource={resource} key={widget.id} {...(widget.initialProps || {})}></C>;

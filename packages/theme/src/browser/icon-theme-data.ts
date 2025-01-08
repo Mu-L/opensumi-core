@@ -1,7 +1,7 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { getDebugLogger, URI, parseWithComments, formatLocalize } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { URI, formatLocalize, getDebugLogger, parseWithComments } from '@opensumi/ide-core-browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
 
 import { IIconTheme } from '../common';
 
@@ -36,7 +36,6 @@ export class IconThemeData implements IIconTheme {
   }
 }
 
-// tslint:disable: forin
 interface IconDefinition {
   iconPath: string;
   fontColor: string;
@@ -67,7 +66,7 @@ interface IconsAssociation {
   languageIds?: { [languageId: string]: string };
 }
 
-interface IconThemeDocument extends IconsAssociation {
+export interface IconThemeDocument extends IconsAssociation {
   iconDefinitions: { [key: string]: IconDefinition };
   fonts: FontDefinition[];
   light?: IconsAssociation;
@@ -289,6 +288,6 @@ function processIconThemeDocument(
 }
 
 function escapeCSS(str: string) {
-  str = str.replace(/[\11\12\14\15\40]/g, '/'); // HTML class names can not contain certain whitespace characters, use / instead, which doesn't exist in file names.
+  str = str.replace(/[\x09\x0a\x0c\x0d\x20]/g, '/'); // HTML class names can not contain certain whitespace characters, use / instead, which doesn't exist in file names.
   return window.CSS.escape(str);
 }

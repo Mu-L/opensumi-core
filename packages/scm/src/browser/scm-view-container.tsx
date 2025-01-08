@@ -1,17 +1,15 @@
-import { observer } from 'mobx-react-lite';
-import React, { useEffect, useMemo, useRef, useState, FC, useCallback } from 'react';
+import React, { FC, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ViewState } from '@opensumi/ide-core-browser';
-import { IContextKeyService, View, useInjectable } from '@opensumi/ide-core-browser';
+import { IContextKeyService, View, ViewState, useAutorun, useInjectable } from '@opensumi/ide-core-browser';
 import { InlineMenuBar } from '@opensumi/ide-core-browser/lib/components/actions';
-import { LAYOUT_VIEW_SIZE } from '@opensumi/ide-core-browser/lib/layout/constants';
+import { LayoutViewSizeConfig } from '@opensumi/ide-core-browser/lib/layout/constants';
 import { IContextMenu, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { DisposableCollection, localize } from '@opensumi/ide-core-common';
 import { AccordionContainer } from '@opensumi/ide-main-layout/lib/browser/accordion/accordion.view';
 import { TitleBar } from '@opensumi/ide-main-layout/lib/browser/accordion/titlebar.view';
 import { WelcomeView } from '@opensumi/ide-main-layout/lib/browser/welcome.view';
 
-import { ISCMRepository, scmProviderViewId, scmResourceViewId, scmContainerId, SCM_WELCOME_ID } from '../common';
+import { ISCMRepository, SCM_WELCOME_ID, scmContainerId, scmProviderViewId, scmResourceViewId } from '../common';
 
 import { SCMProviderList } from './components/scm-provider-list';
 import { SCMResourceInput } from './components/scm-resource-input';
@@ -27,8 +25,7 @@ const SCM_EXTRA_PADDING_TOP = 10;
 export const SCMResourcesView: FC<{
   repository: ISCMRepository;
   viewState: ViewState;
-  hasMultiRepos?: boolean;
-}> = observer(({ repository, viewState, hasMultiRepos }) => {
+}> = ({ repository, viewState }) => {
   const contextKeyService = useInjectable<IContextKeyService>(IContextKeyService);
   const menuRegistry = useInjectable<IMenuRegistry>(IMenuRegistry);
   const viewModel = useInjectable<ViewModelContext>(ViewModelContext);
@@ -50,7 +47,7 @@ export const SCMResourcesView: FC<{
       // @ts-ignore
       $that.current.ctx.createKey('scmRepository', repository);
     }
-
+    registerActionButton();
     const disposable = repository.provider.onDidChange(() => {
       registerActionButton();
     });
@@ -110,7 +107,6 @@ export const SCMResourcesView: FC<{
       <div className={styles.scm} style={{ paddingTop: SCM_EXTRA_PADDING_TOP }}>
         <SCMResourceInput repository={repository} menus={menus} />
         <SCMResourceTree
-          width={viewState.width}
           height={
             viewState.height -
             SCM_INPUT_HEIGHT -
@@ -121,57 +117,63 @@ export const SCMResourcesView: FC<{
       </div>
     </div>
   );
-});
+};
 
 SCMResourcesView.displayName = 'SCMResourcesView';
 
-export const SCMResourcesViewWrapper: FC<{ viewState: ViewState }> = observer((props) => {
+export const SCMResourcesViewWrapper: FC<{ viewState: ViewState }> = (props) => {
   const viewModel = useInjectable<ViewModelContext>(ViewModelContext);
+  const selectedRepos = useAutorun(viewModel.selectedRepos);
 
-  if (!viewModel.selectedRepos.length) {
+  if (!selectedRepos.length) {
     return <WelcomeView viewId={SCM_WELCOME_ID} />;
   }
-
-  const hasMultiRepos = viewModel.repoList.length > 1;
-  const selectedRepo = viewModel.selectedRepos[0];
+  const selectedRepo = selectedRepos[0];
 
   if (!selectedRepo || !selectedRepo.provider) {
     return null;
   }
 
-  return <SCMResourcesView hasMultiRepos={hasMultiRepos} repository={selectedRepo} viewState={props.viewState} />;
-});
+  return <SCMResourcesView repository={selectedRepo} viewState={props.viewState} />;
+};
 
 SCMResourcesViewWrapper.displayName = 'SCMResourcesViewWrapper';
 
 /**
- * 多 repo 列表
+ * 多 SCM Repository 列表
  */
-export const SCMProvidersView: FC<{ viewState: ViewState }> = observer((props) => {
-  const viewModel = useInjectable<ViewModelContext>(ViewModelContext);
-  const selectedRepo = viewModel.selectedRepos[0];
-
-  return (
+export const SCMProvidersView: FC<{ viewState: ViewState; repoList: ISCMRepository[]; selectedRepo?: ISCMRepository }> =
+  memo(({ viewState, repoList, selectedRepo }) => (
     <div className={styles.view}>
-      {viewModel.repoList.length > 1 && (
-        <SCMProviderList
-          viewState={props.viewState}
-          repositoryList={viewModel.repoList}
-          selectedRepository={selectedRepo}
-        />
+      {repoList.length > 1 && (
+        <SCMProviderList viewState={viewState} repositoryList={repoList} selectedRepository={selectedRepo} />
       )}
     </div>
-  );
-});
+  ));
 
 SCMProvidersView.displayName = 'SCMProvidersView';
 
-export const SCMViewContainer: FC<{ viewState: ViewState }> = observer((props) => {
+export const SCMViewContainer: FC<{ viewState: ViewState }> = (props) => {
   const viewModel = useInjectable<ViewModelContext>(ViewModelContext);
-
-  const repoList = viewModel.repoList;
-  const hasMultiRepos = viewModel.repoList.length > 1;
   const selectedRepo: ISCMRepository | undefined = viewModel.selectedRepo;
+  const layoutViewSize = useInjectable<LayoutViewSizeConfig>(LayoutViewSizeConfig);
+
+  const [repoList, setRepoList] = useState<ISCMRepository[]>([]);
+
+  const updateRepoList = useCallback(() => {
+    setRepoList([...viewModel.repoList]);
+  }, [repoList, viewModel]);
+
+  useEffect(() => {
+    const disposables = new DisposableCollection();
+    disposables.push(viewModel.onDidSCMListChange(updateRepoList));
+    disposables.push(viewModel.onDidSCMRepoListChange(updateRepoList));
+    return () => {
+      disposables.dispose();
+    };
+  }, [viewModel]);
+
+  const hasMultiRepos = repoList.length > 1;
 
   // title for scm panel
   const panelTitle = useMemo(
@@ -206,7 +208,7 @@ export const SCMViewContainer: FC<{ viewState: ViewState }> = observer((props) =
       component: SCMProvidersView,
       id: scmProviderViewId,
       name: localize('scm.provider.title'),
-      initialProps: { viewState: props.viewState },
+      initialProps: { viewState: props.viewState, repoList, selectedRepo },
       priority: 0,
     };
 
@@ -220,17 +222,19 @@ export const SCMViewContainer: FC<{ viewState: ViewState }> = observer((props) =
     };
 
     return (hasMultiRepos ? [scmProviderViewConfig] : []).concat(scmRepoViewConfig);
-  }, [hasMultiRepos, repoViewTitle, selectedRepo]);
+  }, [hasMultiRepos, repoViewTitle, selectedRepo, repoList]);
 
   return (
     <div className={styles.view}>
       <TitleBar
         title={panelTitle}
+        height={layoutViewSize.panelTitleBarHeight}
         menubar={
           !hasMultiRepos && titleMenu ? (
             <InlineMenuBar
               menus={titleMenu}
               context={selectedRepo && selectedRepo.provider && [selectedRepo.provider]}
+              moreTitle={localize('scm.action.git.more', 'More Actions')}
             />
           ) : null
         }
@@ -238,10 +242,10 @@ export const SCMViewContainer: FC<{ viewState: ViewState }> = observer((props) =
       <AccordionContainer
         views={views}
         containerId={scmContainerId}
-        style={{ height: `calc(100% - ${LAYOUT_VIEW_SIZE.PANEL_TITLEBAR_HEIGHT}px)` }}
+        style={{ height: `calc(100% - ${layoutViewSize.panelTitleBarHeight}px)` }}
       />
     </div>
   );
-});
+};
 
 SCMViewContainer.displayName = 'SCMViewContainer';

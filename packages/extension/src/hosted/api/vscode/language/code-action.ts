@@ -1,17 +1,17 @@
-import type vscode from 'vscode';
-
-import { Uri as URI, Cache, CancellationToken } from '@opensumi/ide-core-common';
-import { DisposableStore } from '@opensumi/ide-core-common';
-import type { CodeActionContext, WorkspaceEdit } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import { Cache, CancellationToken, DisposableStore, Uri as URI } from '@opensumi/ide-core-common';
+import { coalesce } from '@opensumi/ide-utils/lib/arrays';
 
 import { ExtensionDocumentDataManager, ICodeActionDto, ICodeActionListDto } from '../../../../common/vscode';
 import * as Converter from '../../../../common/vscode/converter';
 import { CodeActionKind } from '../../../../common/vscode/ext-types';
-import { Selection, Range, ChainedCacheId, IWorkspaceEditDto } from '../../../../common/vscode/model.api';
+import { ChainedCacheId, IWorkspaceEditDto, Range, Selection } from '../../../../common/vscode/model.api';
+import { CodeActionTriggerType } from '../../../../common/vscode/models';
 import { CommandsConverter } from '../ext.host.command';
 
 import { Diagnostics } from './diagnostics';
-import { createToken } from './util';
+
+import type { CodeActionContext, WorkspaceEdit } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import type vscode from 'vscode';
 
 export class CodeActionAdapter {
   private static readonly _maxCodeActionsPerFile: number = 1000;
@@ -25,7 +25,7 @@ export class CodeActionAdapter {
     private readonly diagnostics: Diagnostics,
   ) {}
 
-  async provideCodeAction(
+  async provideCodeActions(
     resource: URI,
     rangeOrSelection: Range | Selection,
     context: CodeActionContext,
@@ -56,7 +56,7 @@ export class CodeActionAdapter {
     const codeActionContext: vscode.CodeActionContext = {
       diagnostics: allDiagnostics,
       only: context.only ? new CodeActionKind(context.only) : undefined,
-      triggerKind: Converter.CodeActionTriggerKind.to(context.trigger),
+      triggerKind: Converter.CodeActionTriggerKind.to(context.trigger as unknown as CodeActionTriggerType),
     };
     let cacheId: number | undefined;
 
@@ -84,6 +84,7 @@ export class CodeActionAdapter {
           } else {
             if (codeActionContext.only) {
               if (!candidate.kind) {
+                // TODO: 当 kind 是 Empty 时， kind === ''，此时似乎不应该提示这个 warning
                 // eslint-disable-next-line no-console
                 console.warn(
                   `Code actions of kind '${codeActionContext.only.value}' requested but returned code action does not have a 'kind'. Code action will be dropped. Please set 'CodeAction.kind'.`,
@@ -100,11 +101,13 @@ export class CodeActionAdapter {
               cacheId: [cacheId, i],
               title: candidate.title,
               command: candidate.command && commandConverter.toInternal(candidate.command, disposables),
-              diagnostics: candidate.diagnostics && candidate.diagnostics.map(Converter.convertDiagnosticToMarkerData),
+              diagnostics: candidate.diagnostics && candidate.diagnostics.map(Converter.Diagnostic.toMarker),
               edit: candidate.edit && (Converter.WorkspaceEdit.from(candidate.edit) as WorkspaceEdit),
               kind: candidate.kind && candidate.kind.value,
               isPreferred: candidate.isPreferred,
+              isAI: candidate.isAI,
               disabled: candidate.disabled?.reason,
+              ranges: candidate.ranges ? coalesce(candidate.ranges.map(Converter.Range.from)) : [],
             });
           }
         }

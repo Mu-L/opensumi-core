@@ -8,13 +8,13 @@ import { ITheme } from '../common/theme.service';
 
 import {
   IColorRegistry,
-  registerColor,
-  getColorRegistry,
-  transparent,
   darken,
-  lighten,
+  getColorRegistry,
   lessProminent,
+  lighten,
+  registerColor,
   resolveColorValue,
+  transparent,
 } from './utils';
 
 //  ------ API types
@@ -23,8 +23,6 @@ import {
 export const Extensions = {
   ColorContribution: 'base.contributions.colors',
 };
-
-// < --- Workbench (not customizable) --- >
 
 export function WORKBENCH_BACKGROUND(theme: ITheme): Color {
   switch (theme.type) {

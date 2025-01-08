@@ -1,19 +1,19 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { RPCService } from '@opensumi/ide-connection';
-import { INodeLogger, OperatingSystem, isWindows, isMacintosh } from '@opensumi/ide-core-node';
+import { INodeLogger, OperatingSystem, isMacintosh, isWindows } from '@opensumi/ide-core-node';
 
 import {
+  INodePtyInstance,
   IShellLaunchConfig,
+  ITerminalError,
   ITerminalNodeService,
   ITerminalServiceClient,
-  INodePtyInstance,
-  ITerminalError,
 } from '../common';
 import { IDetectProfileOptions, ITerminalProfile } from '../common/profile';
-import { IPtyProcess } from '../common/pty';
-import { WindowsShellType, WINDOWS_DEFAULT_SHELL_PATH_MAPS } from '../common/shell';
+import { IPtyProcessProxy } from '../common/pty';
+import { WINDOWS_DEFAULT_SHELL_PATH_MAPS, WindowsShellType } from '../common/shell';
 
-import { findShellExecutableAsync, getSystemShell, WINDOWS_GIT_BASH_PATHS } from './shell';
+import { WINDOWS_GIT_BASH_PATHS, findShellExecutableAsync, getSystemShell } from './shell';
 import { ITerminalProfileServiceNode, TerminalProfileServiceNode } from './terminal.profile.service';
 
 /**
@@ -31,8 +31,6 @@ interface IRPCTerminalService {
  */
 @Injectable()
 export class TerminalServiceClientImpl extends RPCService<IRPCTerminalService> implements ITerminalServiceClient {
-  private terminalMap: Map<string, IPtyProcess> = new Map();
-
   @Autowired(ITerminalNodeService)
   private terminalService: ITerminalNodeService;
 
@@ -52,7 +50,7 @@ export class TerminalServiceClientImpl extends RPCService<IRPCTerminalService> i
 
   clientMessage(id: string, data: string) {
     if (this.client) {
-      this.client.onMessage(id, data);
+      return this.client.onMessage(id, data);
     } else {
       this.logger.warn(`clientMessage ${id} rpcClient not found`);
     }
@@ -68,6 +66,7 @@ export class TerminalServiceClientImpl extends RPCService<IRPCTerminalService> i
 
   processChange(clientId: string, processName: string): void {
     if (this.client) {
+      this.logger.log(`processChange ${clientId} ${processName}`);
       this.client.$processChange(clientId, processName);
     }
   }
@@ -92,7 +91,6 @@ export class TerminalServiceClientImpl extends RPCService<IRPCTerminalService> i
           `terminal client ${id} and clientID: ${this.clientId} create ${pty.pid} with options `,
           launchConfig,
         );
-        this.terminalMap.set(id, pty);
         return {
           id,
           pid: pty.pid,
@@ -185,6 +183,11 @@ export class TerminalServiceClientImpl extends RPCService<IRPCTerminalService> i
   }
 
   dispose() {
-    this.terminalService.closeClient(this.clientId);
+    // TODO 后续需要一个合理的 Dispose 逻辑，暂时不要 Dispose，避免重连时终端不可用
+    // this.terminalService.closeClient(this.clientId);
+  }
+
+  getCwd(id: string): Promise<string | undefined> {
+    return this.terminalService.getCwd(id);
   }
 }

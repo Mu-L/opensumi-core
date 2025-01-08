@@ -1,15 +1,15 @@
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
-import { useInjectable, ViewState } from '@opensumi/ide-core-browser';
+import { ViewState, useInjectable } from '@opensumi/ide-core-browser';
 
-import { IDebugSessionManager, IDebugSession } from '../../../common';
+import { IDebugSession, IDebugSessionManager } from '../../../common';
 import { DebugSession } from '../../debug-session';
 import { DebugSessionManager } from '../../debug-session-manager';
 
 import { DebugStackSessionView } from './debug-call-stack-session.view';
+import styles from './debug-call-stack.module.less';
 
-export const DebugCallStackView = observer(({ viewState }: React.PropsWithChildren<{ viewState: ViewState }>) => {
+export const DebugCallStackView = ({ viewState }: React.PropsWithChildren<{ viewState: ViewState }>) => {
   const manager = useInjectable<DebugSessionManager>(IDebugSessionManager);
   const [sessions, setSessions] = React.useState<DebugSession[]>([]);
 
@@ -32,7 +32,7 @@ export const DebugCallStackView = observer(({ viewState }: React.PropsWithChildr
   }, []);
 
   return (
-    <div style={{ width: viewState.width }}>
+    <div className={styles.call_stack_wrapper}>
       {sessions
         .filter((s: IDebugSession) => !s.parentSession)
         .map((session) => (
@@ -40,4 +40,4 @@ export const DebugCallStackView = observer(({ viewState }: React.PropsWithChildr
         ))}
     </div>
   );
-});
+};

@@ -1,34 +1,30 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector, Optional } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import {
-  IContextKeyService,
-  PreferenceService,
-  MonacoOverrideServiceRegistry,
-  ServiceNames,
-  Position,
-  positionToRange,
-} from '@opensumi/ide-core-browser';
-import {
-  IDisposable,
-  Disposable,
-  RunOnceScheduler,
   CancellationTokenSource,
-  onUnexpectedExternalError,
-  createMemoizer,
-  Event,
-  arrays,
   Constants,
+  Disposable,
+  Event,
+  IContextKeyService,
+  IDisposable,
+  MonacoOverrideServiceRegistry,
+  Position,
+  PreferenceService,
+  RunOnceScheduler,
+  ServiceNames,
+  arrays,
+  createMemoizer,
+  onUnexpectedExternalError,
   strings,
 } from '@opensumi/ide-core-browser';
-import { IEditor, IDecorationApplyOptions } from '@opensumi/ide-editor';
-import { WorkbenchEditorService } from '@opensumi/ide-editor';
+import { IDecorationApplyOptions, IEditor, WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IEditorFeatureContribution } from '@opensumi/ide-editor/lib/browser';
 import { MonacoCodeService } from '@opensumi/ide-editor/lib/browser/editor.override';
 import { WorkbenchEditorServiceImpl } from '@opensumi/ide-editor/lib/browser/workbench-editor.service';
+import * as monaco from '@opensumi/ide-monaco';
 import { languageFeaturesService } from '@opensumi/ide-monaco/lib/browser/monaco-api/languages';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
 import { StandardTokenType } from '@opensumi/monaco-editor-core/esm/vs/editor/common/encodedTokenAttributes';
 import { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
 import { DebugContextKey } from '../contextkeys/debug-contextkey.service';
@@ -332,7 +328,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
     codeEditorService.registerDecorationType('inline-value-decoration', INLINE_VALUE_DECORATION_KEY, {});
   }
 
-  public setHoverEnabled(editor: IEditor, isEnabled = !this.debugContextKey.contextInDdebugMode.get()) {
+  public setHoverEnabled(editor: IEditor, isEnabled = !this.debugContextKey.contextInDebugMode.get()) {
     editor.monacoEditor.updateOptions({
       hover: {
         enabled: isEnabled,
@@ -568,7 +564,7 @@ export class DebugEditorContribution implements IEditorFeatureContribution {
     const editor = debugSession?.currentEditor();
 
     this.debugExceptionWidget = this.injector.get(DebugExceptionWidget, [editor, exceptionInfo]);
-    this.debugExceptionWidget.show(positionToRange({ lineNumber, column }), 10);
+    this.debugExceptionWidget.show(monaco.positionToRange({ lineNumber, column }), 10);
     this.debugExceptionWidget.focus();
     editor?.revealRangeInCenter({
       startLineNumber: lineNumber,

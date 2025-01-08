@@ -1,9 +1,9 @@
 import { Injector } from '@opensumi/di';
 import {
-  PreferenceService,
   PreferenceProxy,
-  createPreferenceProxy,
   PreferenceSchema,
+  PreferenceService,
+  createPreferenceProxy,
   localize,
 } from '@opensumi/ide-core-browser';
 import { SearchSettingId } from '@opensumi/ide-core-common/lib/settings/search';
@@ -37,17 +37,17 @@ export const searchPreferenceSchema: PreferenceSchema = {
     },
     [SearchSettingId.UseReplacePreview]: {
       type: 'boolean',
-      description: localize('preference.search.useReplacePreview'),
+      description: '%preference.search.useReplacePreview%',
       default: true,
     },
     [SearchSettingId.SearchOnType]: {
       type: 'boolean',
-      description: localize('preference.search.searchOnType'),
+      description: '%preference.search.searchOnType%',
       default: true,
     },
     [SearchSettingId.SearchOnTypeDebouncePeriod]: {
       type: 'number',
-      description: localize('preference.search.searchOnTypeDebouncePeriod'),
+      description: '%preference.search.searchOnTypeDebouncePeriod%',
       default: 300,
     },
   },

@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'A valid ref, eg: v2.xx, main'
+        description: 'A valid ref, eg: v3.xx, main'
         required: true
         default: 'main'
+
+env:
+  NODE_ENV: production
 
 jobs:
   rc-version:
@@ -16,36 +19,42 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [14.x]
+        node-version: [20.x]
 
     steps:
       # 判断用户是否有写权限
       - name: 'Check if user has write access'
-        uses: 'lannonbr/repo-permission-check-action@2.0.0'
+        uses: 'opensumi/actions/permission-check@main'
         with:
           permission: 'write'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Checkout to specific branch
-      - uses: actions/checkout@v3
+      - uses: opensumi/actions/bot-token@main
         if: success()
         with:
-          ref: ${{ github.event.inputs.ref }}
+          token-server: ${{ secrets.BOT_TOKEN_SERVER }}
+          flag: ${{ secrets.BOT_FLAG }}
 
+      # Checkout to specific branch
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          token: ${{ env.GITHUB_TOKEN }}
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           registry-url: 'https://registry.npmjs.org'
       - name: Get yarn cache directory path
         id: yarn_cache_dir_path
-        run: echo "::set-output name=dir::$(yarn config get cacheFolder)"
-      - uses: actions/cache@v3
+        run: echo "dir=$(yarn config get cacheFolder)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
         id: yarn_cache
         with:
           path: ${{ steps.yarn_cache_dir_path.outputs.dir }}
-          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('./yarn.lock') }}
           restore-keys: |
             ${{ runner.os }}-yarn-
       # 安装依赖并构建
@@ -53,6 +62,8 @@ jobs:
         run: |
           yarn install --immutable
           yarn run init
+          yarn run build:cli-engine || echo "Skip build:cli-engine"
+
       - name: Setup .yarnrc.yml
         run: |
           yarn config set -H npmRegistryServer "https://registry.npmjs.org"
@@ -64,7 +75,7 @@ jobs:
         run: |
           lerna publish --exact --preid rc-$(date +%s) --dist-tag rc --force-publish='*' --no-push --no-git-tag-version prepatch --ignore-prepublish --ignore-scripts --no-private -y
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Adding markdown
         if: success()

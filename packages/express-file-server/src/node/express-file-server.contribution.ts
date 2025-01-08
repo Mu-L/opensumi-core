@@ -4,7 +4,7 @@ import path from 'path';
 import mount from 'koa-mount';
 
 import { Autowired } from '@opensumi/di';
-import { ServerAppContribution, Domain, IServerApp, AppConfig, URI } from '@opensumi/ide-core-node';
+import { AppConfig, Domain, IServerApp, ServerAppContribution, URI } from '@opensumi/ide-core-node';
 
 import { ALLOW_MIME } from '../common';
 
@@ -27,6 +27,18 @@ export class ExpressFileServerContribution implements ServerAppContribution {
         const uriPath = decodeURI(ctx.path.replace(/^\/assets/, ''));
         if (!uriPath) {
           ctx.status = 404;
+          return;
+        }
+
+        if (process.env.NODE_ENV === 'development' && uriPath.startsWith('/monaco/worker')) {
+          const filePath = path.resolve(__dirname, `../../../${uriPath}`);
+          const contentType = ALLOW_MIME[path.extname(filePath).slice(1)];
+          if (!contentType) {
+            ctx.status = 404;
+            return;
+          }
+          ctx.set('Content-Type', contentType);
+          ctx.body = fs.createReadStream(filePath);
           return;
         }
 

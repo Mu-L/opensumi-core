@@ -1,11 +1,12 @@
 import { Injectable } from '@opensumi/di';
+import { CommonServerProtocol } from '@opensumi/ide-connection/lib/common/protocols/common-server';
 import {
-  ICommonServer,
   CommonServerPath,
-  INativeCredentialService,
-  KeytarServicePath,
-  INativeCryptoService,
   CryptoServicePath,
+  ICommonServer,
+  INativeCredentialService,
+  INativeCryptoService,
+  KeytarServicePath,
 } from '@opensumi/ide-core-common';
 
 import { HashCalculateContribution } from '../hash-calculate/hash-calculate.contribution';
@@ -36,6 +37,7 @@ export class ServerCommonModule extends NodeModule {
     {
       servicePath: CommonServerPath,
       token: ICommonServer,
+      protocol: CommonServerProtocol,
     },
     {
       servicePath: KeytarServicePath,

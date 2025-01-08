@@ -1,23 +1,23 @@
-import { Barrier, RunOnceScheduler, Emitter, isThenable, Disposable, getDebugLogger } from '@opensumi/ide-core-common';
+import { Barrier, Disposable, Emitter, RunOnceScheduler, getDebugLogger, isThenable } from '@opensumi/ide-core-common';
 import {
+  ITestTag,
+  TestDiffOpType,
   TestItemExpandState,
   TestsDiff,
   TestsDiffOp,
-  TestDiffOpType,
   applyTestItemUpdate,
-  ITestTag,
 } from '@opensumi/ide-testing/lib/common/testCollection';
 import { TestId } from '@opensumi/ide-testing/lib/common/testId';
 
 import * as Convert from '../converter';
 
 import {
-  TestItemImpl,
-  TestItemRootImpl,
-  getPrivateApiFor,
   ExtHostTestItemEvent,
   ExtHostTestItemEventOp,
+  TestItemImpl,
+  TestItemRootImpl,
   diffTestItems,
+  getPrivateApiFor,
 } from './testApi';
 
 type TestItemRaw = Convert.TestItem.Raw;
@@ -434,7 +434,8 @@ export class SingleUseTestCollection extends Disposable {
       }
     };
 
-    let r: Thenable<void> | void;
+    // eslint-disable-next-line no-undef-init
+    let r: Thenable<void> | void = undefined;
     try {
       r = this._resolveHandler(internal.actual === this.root ? undefined : internal.actual);
     } catch (err) {

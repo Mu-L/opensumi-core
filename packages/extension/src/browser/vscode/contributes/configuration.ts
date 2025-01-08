@@ -1,16 +1,18 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  replaceLocalizePlaceholder,
-  PreferenceSchemaProvider,
+  IPreferenceSettingsService,
+  ISettingSection,
   PreferenceSchema,
   PreferenceSchemaProperties,
-  IPreferenceSettingsService,
+  PreferenceSchemaProvider,
   PreferenceService,
 } from '@opensumi/ide-core-browser';
-import { LifeCyclePhase } from '@opensumi/ide-core-common';
+import { ILogger, LifeCyclePhase } from '@opensumi/ide-core-common';
 
-import { VSCodeContributePoint, Contributes, LifeCycle } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 import { AbstractExtInstanceManagementService } from '../../types';
+
+import { LocalizationsContributionPoint } from './localization';
 
 export interface ConfigurationSnippets {
   body: {
@@ -21,7 +23,7 @@ export interface ConfigurationSnippets {
 
 @Injectable()
 @Contributes('configuration')
-@LifeCycle(LifeCyclePhase.Starting)
+@LifeCycle(LifeCyclePhase.Initialize)
 export class ConfigurationContributionPoint extends VSCodeContributePoint<PreferenceSchema[] | PreferenceSchema> {
   @Autowired(PreferenceSchemaProvider)
   protected preferenceSchemaProvider: PreferenceSchemaProvider;
@@ -35,26 +37,45 @@ export class ConfigurationContributionPoint extends VSCodeContributePoint<Prefer
   @Autowired(AbstractExtInstanceManagementService)
   protected readonly extensionManageService: AbstractExtInstanceManagementService;
 
-  contribute() {
+  @Autowired(LocalizationsContributionPoint)
+  protected readonly localizationsContributionPoint: LocalizationsContributionPoint;
+
+  @Autowired(ILogger)
+  private readonly logger: ILogger;
+
+  async contribute() {
+    //  当语言包插件被使用的时候，需要等待LocalizationsContributionPoint执行完成。否则配置项的多语言初始化的还是默认语言（英文）。
+    if (this.localizationsContributionPoint.hasUncontributedPoint()) {
+      try {
+        await this.localizationsContributionPoint.whenContributed;
+      } catch (error) {
+        this.logger.error('Failed to wait contribute localizations.', error);
+      }
+    }
+
     for (const contrib of this.contributesMap) {
       const { extensionId, contributes } = contrib;
       const extension = this.extensionManageService.getExtensionInstanceByExtId(extensionId);
       if (!extension) {
         continue;
       }
+      // 一个插件可以注册多个 preference 类别
       let configurations = contributes;
-      // 当前函数里只创建声明这一次变量，然后后面给这个函数赋值
-      let tmpProperties = {};
       if (!Array.isArray(configurations)) {
         configurations = [configurations];
       }
+
+      const sections = [] as ISettingSection[];
+
       for (const configuration of configurations) {
         if (configuration && configuration.properties) {
+          const tmpProperties = {};
+
           for (const prop of Object.keys(configuration.properties)) {
             const originalConfiguration = configuration.properties[prop];
             tmpProperties[prop] = originalConfiguration;
             if (originalConfiguration.description) {
-              tmpProperties[prop].description = replaceLocalizePlaceholder(
+              tmpProperties[prop].description = this.getLocalizeFromNlsJSON(
                 originalConfiguration.description,
                 extensionId,
               );
@@ -62,36 +83,48 @@ export class ConfigurationContributionPoint extends VSCodeContributePoint<Prefer
 
             if (originalConfiguration.enumDescriptions) {
               tmpProperties[prop].enumDescriptions = originalConfiguration.enumDescriptions.map((v) =>
-                replaceLocalizePlaceholder(v, extensionId),
+                this.getLocalizeFromNlsJSON(v, extensionId),
               );
             }
 
             if (originalConfiguration.markdownDescription) {
-              tmpProperties[prop].markdownDescription = replaceLocalizePlaceholder(
+              tmpProperties[prop].markdownDescription = this.getLocalizeFromNlsJSON(
                 originalConfiguration.markdownDescription,
                 extensionId,
               );
             }
           }
           configuration.properties = tmpProperties;
-          configuration.title =
-            replaceLocalizePlaceholder(configuration.title, extensionId) || extension.packageJSON.name;
+          configuration.title = this.getLocalizeFromNlsJSON(configuration.title, extensionId) || configuration.title;
           this.updateConfigurationSchema(configuration);
-          this.addDispose(
-            this.preferenceSettingsService.registerSettingSection('extension', {
-              title: configuration.title,
-              preferences: Object.keys(configuration.properties),
-            }),
-          );
-          tmpProperties = {};
+          sections.push({
+            title: configuration.title,
+            extensionId,
+            preferences: Object.keys(configuration.properties).map((v) => ({
+              id: v,
+            })),
+          });
         }
+      }
+      // 如果注册了多个 section, 注册为 subSections
+      if (sections.length === 1) {
+        const section = sections[0];
+        this.addDispose(this.preferenceSettingsService.registerSettingSection('extension', section));
+      } else if (sections.length > 1) {
+        this.addDispose(
+          this.preferenceSettingsService.registerSettingSection('extension', {
+            title:
+              this.getLocalizeFromNlsJSON(extension.packageJSON.displayName, extensionId) ||
+              extension.packageJSON.displayName,
+            subSections: sections,
+          }),
+        );
       }
     }
   }
 
   private updateConfigurationSchema(schema: PreferenceSchema): void {
     this.validateConfigurationSchema(schema);
-
     this.addDispose(this.preferenceSchemaProvider.setSchema(schema));
   }
 

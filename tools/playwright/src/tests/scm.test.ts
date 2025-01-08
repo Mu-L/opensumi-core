@@ -7,7 +7,7 @@ import { OpenSumiDiffEditor } from '../diff-editor';
 import { OpenSumiExplorerView } from '../explorer-view';
 import { OpenSumiFileTreeView } from '../filetree-view';
 import { OpenSumiSCMView } from '../scm-view';
-import { OpenSumiTerminal } from '../terminal';
+import { OpenSumiTerminalView } from '../terminal-view';
 import { OpenSumiWorkspace } from '../workspace';
 
 import test, { page } from './hooks';
@@ -20,12 +20,12 @@ let workspace: OpenSumiWorkspace;
 
 test.describe('OpenSumi SCM Panel', () => {
   test.beforeAll(async () => {
-    workspace = new OpenSumiWorkspace([path.resolve('./src/tests/workspaces/git-workspace')]);
+    workspace = new OpenSumiWorkspace([path.resolve(__dirname, '../../src/tests/workspaces/git-workspace')]);
     app = await OpenSumiApp.load(page, workspace);
     explorer = await app.open(OpenSumiExplorerView);
     explorer.initFileTreeView(workspace.workspace.displayName);
     fileTreeView = explorer.fileTreeView;
-    const terminal = await app.open(OpenSumiTerminal);
+    const terminal = await app.open(OpenSumiTerminalView);
     // There should have GIT on the PATH
     await terminal.sendText('git init');
   });
@@ -38,6 +38,9 @@ test.describe('OpenSumi SCM Panel', () => {
     await explorer.fileTreeView.open();
     const action = await fileTreeView.getTitleActionByName('Refresh');
     await action?.click();
+    // Reinitialize
+    const terminal = await app.open(OpenSumiTerminalView);
+    await terminal.sendText('git init');
     await app.page.waitForTimeout(2000);
     const node = await explorer.getFileStatTreeNodeByPath('a.js');
     const badge = await node?.badge();
@@ -79,6 +82,23 @@ test.describe('OpenSumi SCM Panel', () => {
       const currentTab = await editor.getCurrentTab();
       const dataUri = await currentTab?.getAttribute('data-uri');
       expect(dataUri?.startsWith('diff')).toBeTruthy();
+    }
+  });
+
+  test('SCM list view mode is work', async () => {
+    scm = await app.open(OpenSumiSCMView);
+    await scm.open();
+    const actionDom = await scm.scmView.getTitleActionById('workbench.scm.action.setListViewMode');
+    await actionDom?.click();
+    const stageAllAction = await scm.scmView.getTreeNodeActionById('git.stageAll');
+    await stageAllAction?.click();
+    await app.page.waitForTimeout(1000);
+    const treeItems = await scm.getTreeItems();
+    if (treeItems) {
+      expect(treeItems.length).toBe(3);
+      const firstTreeNode = treeItems[0];
+      const nodeTail = await firstTreeNode.getNodeTail();
+      expect(nodeTail).toBe('1');
     }
   });
 });

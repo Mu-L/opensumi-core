@@ -1,16 +1,18 @@
-import { observable, computed, action } from 'mobx';
-
-import { Injectable } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  QuickOpenItem,
-  HideReason,
-  QuickOpenActionProvider,
-  addDisposableListener,
-  EventType,
   DisposableCollection,
+  EventType,
+  HideReason,
   IKeyMods,
+  QuickOpenActionProvider,
+  QuickOpenItem,
+  addDisposableListener,
+  isNumber,
 } from '@opensumi/ide-core-browser';
 import { VALIDATE_TYPE } from '@opensumi/ide-core-browser/lib/components';
+import { VIEW_CONTAINERS } from '@opensumi/ide-core-browser/lib/layout/view-id';
+import { IProgressService } from '@opensumi/ide-core-browser/lib/progress';
+import { derived, observableValue, transaction } from '@opensumi/ide-monaco/lib/common/observable';
 
 import {
   IAutoFocus,
@@ -22,138 +24,93 @@ import {
 
 @Injectable({ multiple: true })
 export class QuickOpenWidget implements IQuickOpenWidget {
-  public MAX_HEIGHT = 440;
+  @Autowired(IProgressService)
+  protected readonly progressService: IProgressService;
 
-  @observable
-  public inputValue = '';
+  readonly MAX_HEIGHT = 440;
+  readonly inputValue = observableValue<string>(this, '');
+  readonly validateType = observableValue<VALIDATE_TYPE | undefined>(this, undefined);
+  readonly isShow = observableValue<boolean>(this, false);
+  readonly items = observableValue<QuickOpenItem[]>(this, []);
+  readonly actionProvider = observableValue<QuickOpenActionProvider | null>(this, null);
+  readonly autoFocus = observableValue<IAutoFocus | null>(this, null);
+  readonly selectAll = derived(this, (reader) => this.items.read(reader).every((item) => item.checked.read(reader)));
+  readonly isPassword = observableValue<boolean>(this, false);
+  readonly selectIndex = observableValue<number>(this, 0);
+  readonly keepScrollPosition = observableValue<boolean>(this, false);
+  readonly busy = observableValue<boolean>(this, false);
+  readonly valueSelection = observableValue<[number, number] | undefined>(this, undefined);
+  readonly canSelectMany = observableValue<boolean | undefined>(this, false);
+  readonly inputPlaceholder = observableValue<string | undefined>(this, '');
+  readonly inputEnable = observableValue<boolean | undefined>(this, false);
 
-  @observable
-  private _isShow = false;
-
-  @observable
-  public validateType?: VALIDATE_TYPE;
-
-  @observable.shallow
-  private _items: QuickOpenItem[];
-
-  @computed
-  public get isShow() {
-    return this._isShow;
-  }
-
-  @observable.ref
-  private _actionProvider?: QuickOpenActionProvider;
-
-  @observable.ref
-  private _autoFocus?: IAutoFocus;
-
-  @observable
-  private _isPassword?: boolean;
-
-  @observable
-  private _keepScrollPosition?: boolean;
-
-  @computed
-  get isPassword() {
-    return this._isPassword;
-  }
-
-  @computed
-  get selectAll() {
-    return this.items.every((item) => item.checked);
-  }
-
-  @observable
-  private _valueSelection?: [number, number];
-
-  @computed
-  get valueSelection() {
-    return this._valueSelection;
-  }
-
-  @observable
-  private _canSelectMany?: boolean;
-
-  @computed
-  get canSelectMany() {
-    return this._canSelectMany;
-  }
-
-  @observable
-  public selectIndex = 0;
-
-  @computed
-  public get items(): QuickOpenItem[] {
-    return this._items || [];
-  }
-
-  @observable
-  private _inputPlaceholder?: string;
-
-  @computed
-  get inputPlaceholder() {
-    return this._inputPlaceholder;
-  }
-
-  @observable
-  private _inputEnable?: boolean;
-
-  @computed
-  get inputEnable() {
-    return this._inputEnable;
-  }
-
-  @computed
-  get actionProvider() {
-    return this._actionProvider;
-  }
-
-  @computed
-  get autoFocus() {
-    return this._autoFocus;
-  }
-
-  @computed
-  get keepScrollPosition() {
-    return this._keepScrollPosition;
-  }
-
+  // Indicates whether the quick-open has been opened
+  private isAlreadyOpen: boolean = false;
+  private progressResolve?: (value: void | PromiseLike<void>) => void;
   private modifierListeners: DisposableCollection = new DisposableCollection();
 
   public renderTab?: () => React.ReactNode;
   public toggleTab?: () => void;
 
-  constructor(public callbacks: IQuickOpenCallbacks) {}
+  constructor(readonly callbacks: IQuickOpenCallbacks) {}
 
-  @action
-  show(prefix: string, options: QuickOpenInputOptions): void {
-    this._isShow = true;
-    this.inputValue = prefix;
-    this._inputPlaceholder = options.placeholder;
-    this._isPassword = options.password;
-    this._inputEnable = options.inputEnable;
-    this._valueSelection = options.valueSelection;
-    this._canSelectMany = options.canSelectMany;
-    this._keepScrollPosition = options.keepScrollPosition;
-    this.renderTab = options.renderTab;
-    this.toggleTab = options.toggleTab;
-    // 获取第一次要展示的内容
-    this.callbacks.onType(prefix);
-    this.registerKeyModsListeners();
+  setSelectIndex(index: number) {
+    transaction((tx) => {
+      const safeIndex = isNumber(index) ? index : 0;
+      this.selectIndex.set(safeIndex, tx);
+    });
   }
 
-  @action
+  setInputValue(value: string) {
+    transaction((tx) => {
+      this.inputValue.set(value, tx);
+    });
+  }
+
+  show(prefix: string, options: QuickOpenInputOptions): void {
+    transaction((tx) => {
+      if (this.isShow.get()) {
+        if (!this.isAlreadyOpen) {
+          // 弹框已经显示后 show 方法第一次被调用时调用
+          this.isAlreadyOpen = true;
+          this.callbacks.onType(prefix);
+        }
+      } else {
+        // 弹框第一次显示时调用
+        this.callbacks.onType(prefix);
+      }
+
+      this.isShow.set(true, tx);
+      this.inputValue.set(prefix, tx);
+      this.inputPlaceholder.set(options.placeholder, tx);
+      this.isPassword.set(!!options.password, tx);
+      this.inputEnable.set(options.inputEnable, tx);
+      this.valueSelection.set(options.valueSelection, tx);
+      this.canSelectMany.set(options.canSelectMany, tx);
+      this.keepScrollPosition.set(!!options.keepScrollPosition, tx);
+      this.busy.set(!!options.busy, tx);
+
+      this.renderTab = options.renderTab;
+      this.toggleTab = options.toggleTab;
+      this.registerKeyModsListeners();
+    });
+  }
+
   hide(reason?: HideReason): void {
+    this.isAlreadyOpen = false;
+
     if (!this.modifierListeners.disposed) {
       this.modifierListeners.dispose();
     }
 
-    if (!this._isShow) {
+    if (!this.isShow.get()) {
       return;
     }
 
-    this._isShow = false;
-    this._items = [];
+    transaction((tx) => {
+      this.isShow.set(false, tx);
+      this.items.set([], tx);
+    });
 
     // Callbacks
     if (reason === HideReason.ELEMENT_SELECTED) {
@@ -165,9 +122,8 @@ export class QuickOpenWidget implements IQuickOpenWidget {
     this.callbacks.onHide(reason);
   }
 
-  @action
   blur() {
-    if (!this._isShow) {
+    if (!this.isShow.get()) {
       return;
     }
     // 判断移出焦点后是否需要关闭组件
@@ -177,11 +133,47 @@ export class QuickOpenWidget implements IQuickOpenWidget {
     }
   }
 
-  @action
   setInput(model: IQuickOpenModel, autoFocus: IAutoFocus, ariaLabel?: string): void {
-    this._items = model.items;
-    this._actionProvider = model.actionProvider;
-    this._autoFocus = autoFocus;
+    transaction((tx) => {
+      this.items.set(model.items, tx);
+      this.actionProvider.set(model.actionProvider || null, tx);
+      this.autoFocus.set(autoFocus, tx);
+    });
+  }
+
+  updateOptions(options: Partial<QuickOpenInputOptions>) {
+    transaction((tx) => {
+      const optionsMap = {
+        placeholder: (value?: string) => this.inputPlaceholder.set(value, tx),
+        password: (value?: boolean) => this.isPassword.set(!!value, tx),
+        inputEnable: (value?: boolean) => this.inputEnable.set(!!value, tx),
+        valueSelection: (value?: [number, number]) => this.valueSelection.set(value, tx),
+        canSelectMany: (value?: boolean) => this.canSelectMany.set(!!value, tx),
+        keepScrollPosition: (value?: boolean) => this.keepScrollPosition.set(!!value, tx),
+        busy: (value?: boolean) => this.busy.set(!!value, tx),
+        enabled: (value?: boolean) => this.inputEnable.set(!!value, tx),
+      };
+
+      Object.entries(options).forEach(([key, value]) => {
+        if (key in optionsMap) {
+          optionsMap[key](value);
+        }
+      });
+    });
+  }
+
+  updateProgressStatus(visible: boolean) {
+    if (visible === true) {
+      this.progressService.withProgress(
+        { location: VIEW_CONTAINERS.QUICKPICK_PROGRESS },
+        () => new Promise<void>((resolve) => (this.progressResolve = resolve)),
+      );
+    } else {
+      if (this.progressResolve) {
+        this.progressResolve();
+        this.progressResolve = undefined;
+      }
+    }
   }
 
   private registerKeyModsListeners() {

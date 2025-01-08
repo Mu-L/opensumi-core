@@ -3,50 +3,57 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 // some code copied and modified from https://github.com/microsoft/vscode/blob/main/src/vs/workbench/api/common/extHostTask.ts
-
-import type vscode from 'vscode';
-import { TaskProvider, Task, TaskExecution, TaskFilter } from 'vscode';
+// eslint-disable-next-line import/no-unresolved
+import { Task, TaskExecution, TaskFilter, TaskProvider } from 'vscode';
 
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
-  getDebugLogger,
-  Event,
   CancellationToken,
-  asPromise,
   CancellationTokenSource,
-  Emitter,
   DisposableStore,
-  Uri,
+  Emitter,
+  Event,
   IDisposable,
+  Uri,
+  asPromise,
+  getDebugLogger,
 } from '@opensumi/ide-core-common';
-import { UriComponents } from '@opensumi/ide-editor/lib/common';
+
 
 import { IExtensionProps } from '../../../../common';
-import { MainThreadAPIIdentifier, IExtHostTerminal, IExtHostWorkspace } from '../../../../common/vscode';
+import {
+  IExtHostTerminal,
+  IExtHostWorkspace,
+  IExtensionDescription,
+  MainThreadAPIIdentifier,
+} from '../../../../common/vscode';
 import * as types from '../../../../common/vscode/ext-types';
 import {
+  CustomExecution2DTO,
+  CustomExecutionDTO,
   IExtHostTasks,
-  TaskHandlerData,
   IMainThreadTasks,
-  TaskSetDTO,
-  TaskPresentationOptionsDTO,
+  ProcessExecutionDTO,
   ProcessExecutionOptionsDTO,
   ShellExecutionDTO,
-  ProcessExecutionDTO,
-  CustomExecutionDTO,
-  CustomExecution2DTO,
   ShellExecutionOptionsDTO,
-  TaskFilterDTO,
   TaskDTO,
   TaskDefinitionDTO,
-  TaskProcessStartedDTO,
   TaskExecutionDTO,
+  TaskFilterDTO,
   TaskHandleDTO,
+  TaskHandlerData,
+  TaskPresentationOptionsDTO,
   TaskProcessEndedDTO,
+  TaskProcessStartedDTO,
+  TaskSetDTO,
 } from '../../../../common/vscode/tasks';
 import { Terminal } from '../ext.host.terminal';
 
-import { toTask, TaskDto } from './taskTypes';
+import { TaskDto, toTask } from './taskTypes';
+
+import type { UriComponents } from '@opensumi/ide-editor/lib/common';
+import type vscode from 'vscode';
 
 namespace TaskDefinitionDTO {
   export function from(value: vscode.TaskDefinition): TaskDefinitionDTO | undefined {
@@ -375,7 +382,6 @@ class TaskExecutionImpl implements vscode.TaskExecution {
   public fireDidEndProcess(value: TaskProcessEndedDTO): void {}
 }
 
-// tslint:disable-next-line: no-unused-variable
 class CustomExecutionData implements IDisposable {
   private _cancellationSource?: CancellationTokenSource;
   private readonly _onTaskExecutionComplete: Emitter<CustomExecutionData> = new Emitter<CustomExecutionData>();
@@ -384,7 +390,6 @@ class CustomExecutionData implements IDisposable {
   public result: number | undefined;
 
   constructor(
-    // tslint:disable-next-line: no-unused-variable
     private readonly customExecution: vscode.CustomExecution,
     private readonly terminalService: IExtHostTerminal,
   ) {}
@@ -683,7 +688,10 @@ export class ExtHostTasks implements IExtHostTasks {
   }
 }
 
-export function createTaskApiFactory(extHostTasks: IExtHostTasks, extension): typeof vscode.tasks {
+export function createTaskApiFactory(
+  extHostTasks: IExtHostTasks,
+  extension: IExtensionDescription,
+): typeof vscode.tasks {
   return {
     registerTaskProvider: (type: string, provider: TaskProvider) =>
       extHostTasks.registerTaskProvider(type, provider, extension),

@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 // Some code copied and modified from https://github.com/microsoft/vscode/tree/main/src/vs/workbench/contrib/testing/common
 
-import { Uri as URI, IRange, IPosition, Emitter, map, IMarkdownString } from '@opensumi/ide-core-common';
+import { Emitter, IMarkdownString, IPosition, IRange, Position, Uri as URI, map } from '@opensumi/ide-core-common';
+
+import type vscode from 'vscode';
 
 export type TestsDiffOp =
   | [op: TestDiffOpType.Add, item: InternalTestItem]
@@ -93,6 +95,7 @@ export interface ITestRunProfile {
   isDefault: boolean;
   tag: string | null;
   hasConfigurationHandler: boolean;
+  supportsContinuousRun: boolean;
 }
 
 /**
@@ -151,12 +154,20 @@ export interface ILocationDto {
   range: IRange;
 }
 
+export interface ITestMessageStackFrame {
+  label: string;
+  uri: URI | undefined;
+  position: vscode.Position | undefined;
+}
+
 export interface ITestErrorMessage {
   message: string | IMarkdownString;
   type: TestMessageType.Error;
   expected: string | undefined;
   actual: string | undefined;
+  contextValue: string | undefined;
   location: IRichLocation | undefined;
+  stackTrace: undefined | ITestMessageStackFrame[];
 }
 
 export type SerializedTestErrorMessage = Omit<ITestErrorMessage, 'location'> & { location?: ILocationDto };
@@ -184,6 +195,7 @@ export interface ITestRunTask {
   id: string;
   name: string | undefined;
   running: boolean;
+  ctrlId: string;
 }
 
 export interface ITestTag {

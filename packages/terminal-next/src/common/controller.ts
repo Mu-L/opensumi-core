@@ -1,19 +1,20 @@
 import { IContextKeyService } from '@opensumi/ide-core-browser';
-import { Event, Disposable, Deferred, IDisposable, Uri } from '@opensumi/ide-core-common';
-
-// eslint-disable-next-line import/no-restricted-paths
-import type { ILinkHoverTargetOptions } from '../browser/links/link-manager';
+import { Deferred, Disposable, Event, IDisposable, Uri } from '@opensumi/ide-core-common';
+import { IObservable } from '@opensumi/ide-monaco/lib/common/observable';
 
 import {
   ITerminalClient,
   ITerminalExitEvent,
-  ITerminalTitleChangeEvent,
   ITerminalExternalLinkProvider,
+  ITerminalTitleChangeEvent,
 } from './client';
-import { ITerminalLaunchError, ITerminalProcessExtHostProxy, IStartExtensionTerminalRequest } from './extension';
+import { IStartExtensionTerminalRequest, ITerminalLaunchError, ITerminalProcessExtHostProxy } from './extension';
 import { ITerminalProfile } from './profile';
-import { ITerminalInfo, ICreateTerminalOptions, TerminalOptions, IShellLaunchConfig } from './pty';
-import { IWidgetGroup, IWidget } from './resize';
+import { ICreateTerminalOptions, IShellLaunchConfig, ITerminalInfo, TerminalOptions } from './pty';
+import { IWidget, IWidgetGroup } from './resize';
+
+// eslint-disable-next-line import/no-restricted-paths
+import type { ILinkHoverTargetOptions } from '../browser/links/link-manager';
 
 export interface ITerminalExternalClient {
   readonly id: string;
@@ -89,6 +90,7 @@ export interface ITerminalController extends Disposable {
   clearAllGroups(): void;
   showTerminalPanel(): void;
   hideTerminalPanel(): void;
+  toggleTerminalPanel(): void;
   toJSON(): ITerminalBrowserHistory;
   convertTerminalOptionsToLaunchConfig(options: TerminalOptions): IShellLaunchConfig;
   convertProfileToLaunchConfig(
@@ -99,6 +101,7 @@ export interface ITerminalController extends Disposable {
   onDidCloseTerminal: Event<ITerminalExitEvent>;
   onDidTerminalTitleChange: Event<ITerminalTitleChangeEvent>;
   onDidChangeActiveTerminal: Event<string>;
+  onThemeBackgroundChange: Event<string>;
 
   requestStartExtensionTerminal(
     proxy: ITerminalProcessExtHostProxy,
@@ -112,28 +115,32 @@ export interface ITerminalController extends Disposable {
 
 export const ITerminalSearchService = Symbol('ITerminalSearchService');
 export interface ITerminalSearchService {
-  show: boolean;
-  input: string;
+  isVisible: boolean;
+  onVisibleChange: Event<boolean>;
+
+  text: string;
+
   open(): void;
   clear(): void;
   close(): void;
   search(): void;
-  onOpen: Event<void>;
 }
 
 export const ITerminalGroupViewService = Symbol('ITerminalGroupViewService');
 export interface ITerminalGroupViewService {
-  currentGroupIndex: number;
-  currentGroupId: string;
-  currentWidgetId: string;
-  currentGroup: IWidgetGroup;
-  currentWidget: IWidget;
-  groups: IWidgetGroup[];
+  readonly groups: IObservable<IWidgetGroup[]>;
+  readonly currentGroupIndex: IObservable<number>;
+  readonly currentGroup: IObservable<IWidgetGroup>;
+  readonly currentGroupId: IObservable<string>;
+  readonly currentWidgetId: IObservable<string>;
+  readonly currentWidget: IObservable<IWidget>;
 
   createGroup(): number;
   getGroup(index: number): IWidgetGroup;
   selectGroup(index: number): void;
   removeGroup(index: number): void;
+
+  swapGroup(i: number, j: number): void;
 
   createWidget(group: IWidgetGroup, id?: string, reuse?: boolean, isSimpleWidget?: boolean): IWidget;
   getWidget(id: string): IWidget;

@@ -1,15 +1,14 @@
-import clx from 'classnames';
+import cls from 'classnames';
 import debounce from 'lodash/debounce';
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
-import { ToolbarLocation, Disposable } from '@opensumi/ide-core-browser';
+import { Disposable, ToolbarLocation } from '@opensumi/ide-core-browser';
 
 import styles from './toolbar.module.less';
 
 declare let ResizeObserver: any;
 
-export const ToolBar = observer<Pick<React.HTMLProps<HTMLElement>, 'className'>>(({ className }) => {
+export const ToolBar = ({ className }: Pick<React.HTMLProps<HTMLElement>, 'className'>) => {
   const toolbarRef = React.useRef<HTMLDivElement>();
   React.useEffect(() => {
     if (toolbarRef.current) {
@@ -53,11 +52,13 @@ export const ToolBar = observer<Pick<React.HTMLProps<HTMLElement>, 'className'>>
   }, []);
 
   return (
-    <div className={clx(styles['tool-bar'], className)} ref={toolbarRef as any}>
+    <div className={cls(styles['tool-bar'], className)} ref={toolbarRef as any}>
       <ToolbarLocation className={styles.left} location='toolbar-left' preferences={{ noDropDown: true }} />
       <div id={styles.space1}></div>
       <ToolbarLocation className={styles.center} location='toolbar-center' preferences={{ noDropDown: true }} />
       <ToolbarLocation className={styles.right} location='toolbar-right' />
     </div>
   );
-});
+};
+
+ToolBar.displayName = 'ToolBar';

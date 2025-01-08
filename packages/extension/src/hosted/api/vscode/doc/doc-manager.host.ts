@@ -1,7 +1,14 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { BinaryBuffer, CancellationTokenSource, Emitter, IDisposable, isUTF8, URI } from '@opensumi/ide-core-common';
+import {
+  BinaryBuffer,
+  CancellationTokenSource,
+  Emitter,
+  IDisposable,
+  URI,
+  isDefined,
+  isUTF8,
+  normalizeFileUrl,
+} from '@opensumi/ide-core-common';
 
 import {
   ExtensionDocumentDataManager,
@@ -17,9 +24,11 @@ import {
 } from '../../../../common/vscode';
 import { TextEdit as TextEditConverter, toRange } from '../../../../common/vscode/converter';
 import { TextDocumentChangeReason, TextEdit, Uri } from '../../../../common/vscode/ext-types';
-import type * as model from '../../../../common/vscode/model.api';
 
 import { ExtHostDocumentData, setWordDefinitionFor } from './ext-data.host';
+
+import type * as model from '../../../../common/vscode/model.api';
+import type vscode from 'vscode';
 
 const OPEN_TEXT_DOCUMENT_TIMEOUT = 5000;
 
@@ -82,15 +91,16 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
     } else if (!options || typeof options === 'object') {
       uri = Uri.parse(await this._proxy.$tryCreateDocument(options));
     } else {
-      throw new Error('illegal argument -  uriOrFileNameOrOptions');
+      throw new Error('illegal argument - uriOrFileNameOrOptions');
     }
 
-    const doc = this._documents.get(uri.toString());
+    const docUrl = normalizeFileUrl(uri.toString());
+    const doc = this._documents.get(docUrl);
     if (doc) {
       return doc.document;
     } else {
-      await this._proxy.$tryOpenDocument(uri.toString());
-      const doc = this._documents.get(uri.toString());
+      await this._proxy.$tryOpenDocument(docUrl);
+      const doc = this._documents.get(docUrl);
       if (doc) {
         return doc.document;
       } else {
@@ -98,11 +108,15 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
           let resolved = false;
           setTimeout(() => {
             if (!resolved) {
-              reject('Open Text Document ' + uri.toString() + ' Timeout. Current Timeout is 5 seconds.');
+              reject(
+                `Open Text Document ${docUrl} Timeout. Current Timeout is ${
+                  OPEN_TEXT_DOCUMENT_TIMEOUT / 1000
+                } seconds.`,
+              );
             }
           }, OPEN_TEXT_DOCUMENT_TIMEOUT);
           const disposer = this.onDidOpenTextDocument((document) => {
-            if (uri.toString() === document.uri.toString()) {
+            if (docUrl === document.uri.toString()) {
               resolve(document);
               disposer.dispose();
               resolved = true;
@@ -165,8 +179,11 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
   $fireModelOptionsChangedEvent(e: IExtensionDocumentModelOptionsChangedEvent) {
     const document = this._documents.get(e.uri);
     if (document) {
-      // 和vscode中相同，接收到languages变更时，发送一个close和一个open事件
-      if (e.languageId) {
+      if (isDefined(e.dirty)) {
+        document._acceptIsDirty(e.dirty);
+      }
+      // 和 vscode 表现保持一致，接收到 languages 变更时，发送一个 close 和一个 open 事件
+      if (isDefined(e.languageId) && e.languageId !== document._getLanguageId()) {
         document._acceptLanguageId(e.languageId);
         this._onDidCloseTextDocument.fire(document.document);
         this._onDidOpenTextDocument.fire(document.document);
@@ -180,6 +197,7 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
     if (!document) {
       return;
     }
+    document._acceptIsDirty(dirty);
     document.onEvents({
       eol,
       versionId,
@@ -187,7 +205,6 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
       isRedoing,
       isUndoing,
     });
-    document._acceptIsDirty(dirty);
 
     let reason: vscode.TextDocumentChangeReason | undefined;
 
@@ -201,7 +218,7 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
       document: document.document,
       contentChanges: changes.map((change) => ({
         ...change,
-        range: toRange(change.range) as any,
+        range: toRange(change.range),
       })),
       reason,
     });
@@ -240,6 +257,8 @@ export class ExtensionDocumentDataManagerImpl implements ExtensionDocumentDataMa
     const document = this._documents.get(uri);
 
     if (document) {
+      document._acceptIsDirty(e.dirty);
+
       const promises: Promise<any>[] = [];
       const event: vscode.TextDocumentWillSaveEvent = {
         document: document.document,

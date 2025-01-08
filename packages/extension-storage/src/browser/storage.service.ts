@@ -1,16 +1,16 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { AppConfig } from '@opensumi/ide-core-browser';
 import { firstSessionDateStorageKey } from '@opensumi/ide-core-common';
 import { FileStat } from '@opensumi/ide-file-service';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import {
-  ExtensionStorageUri,
+  DEFAULT_EXTENSION_STORAGE_DIR_NAME,
+  IExtensionStorageServer,
   IExtensionStorageService,
+  IExtensionStorageUri,
   KeysToAnyValues,
   KeysToKeysToAnyValue,
-  IExtensionStorageServer,
-  DEFAULT_EXTENSION_STORAGE_DIR_NAME,
 } from '../common';
 
 @Injectable()
@@ -24,8 +24,8 @@ export class ExtensionStorageService implements IExtensionStorageService {
   @Autowired(AppConfig)
   private readonly appConfig: AppConfig;
 
-  private _init: Promise<ExtensionStorageUri>;
-  private _extensionStoragePath: ExtensionStorageUri;
+  private _init: Promise<IExtensionStorageUri>;
+  private _extensionStoragePath: IExtensionStorageUri;
 
   constructor() {
     this._init = this.init();
@@ -41,7 +41,7 @@ export class ExtensionStorageService implements IExtensionStorageService {
     return this._extensionStoragePath;
   }
 
-  public async init(): Promise<ExtensionStorageUri> {
+  public async init(): Promise<IExtensionStorageUri> {
     const roots: FileStat[] = await this.workspaceService.roots;
     const workspace = this.workspaceService.workspace;
     const extensionStorageDirName = this.appConfig.extensionStorageDirName || DEFAULT_EXTENSION_STORAGE_DIR_NAME;

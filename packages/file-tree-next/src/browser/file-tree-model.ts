@@ -1,6 +1,6 @@
-import { Injectable, Optional, Autowired } from '@opensumi/di';
-import { TreeModel, IOptionalMetaData, TreeNodeEvent, CompositeTreeNode } from '@opensumi/ide-components';
-import { URI, ThrottledDelayer, Emitter, Event } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
+import { IOptionalMetaData, TreeModel, TreeNodeEvent } from '@opensumi/ide-components';
+import { ThrottledDelayer, URI } from '@opensumi/ide-core-browser';
 import { FileStat } from '@opensumi/ide-file-service';
 
 import { Directory } from '../common/file-tree-node.define';
@@ -20,15 +20,10 @@ export class FileTreeModel extends TreeModel {
   public readonly decorationService: FileTreeDecorationService;
 
   private flushDispatchChangeDelayer = new ThrottledDelayer<void>(FileTreeModel.DEFAULT_FLUSH_DELAY);
-  private onWillUpdateEmitter: Emitter<void> = new Emitter();
 
   constructor(@Optional() root: Directory) {
     super();
     this.init(root);
-  }
-
-  get onWillUpdate(): Event<void> {
-    return this.onWillUpdateEmitter.event;
   }
 
   init(root: Directory) {
@@ -46,7 +41,6 @@ export class FileTreeModel extends TreeModel {
       this.flushDispatchChangeDelayer.cancel();
     }
     this.flushDispatchChangeDelayer.trigger(async () => {
-      await this.onWillUpdateEmitter.fireAndAwait();
       this.dispatchChange();
     });
   }

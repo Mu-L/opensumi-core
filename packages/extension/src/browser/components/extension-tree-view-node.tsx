@@ -1,9 +1,25 @@
 import cls from 'classnames';
-import React, { CSSProperties, FC, MouseEvent, ReactNode, useCallback, useEffect, useState, DragEvent } from 'react';
+import React, {
+  CSSProperties,
+  DragEvent,
+  FC,
+  FormEvent,
+  MouseEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
 
-import { INodeRendererProps, ClasslistComposite, PromptHandle, TreeNodeType } from '@opensumi/ide-components';
-import { Loading } from '@opensumi/ide-components';
-import { getIcon } from '@opensumi/ide-core-browser';
+import {
+  CheckBox,
+  ClasslistComposite,
+  INodeRendererProps,
+  Loading,
+  PromptHandle,
+  TreeNodeType,
+} from '@opensumi/ide-components';
+import { getIcon, useDesignStyles } from '@opensumi/ide-core-browser';
 import { TitleActionList } from '@opensumi/ide-core-browser/lib/components/actions';
 import { MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { useInjectable } from '@opensumi/ide-core-browser/lib/react-hooks/injectable-hooks';
@@ -12,7 +28,7 @@ import { IDecorationsService } from '@opensumi/ide-decoration/lib/common/decorat
 import { IIconService, IThemeService } from '@opensumi/ide-theme/lib/common/theme.service';
 
 import styles from '../vscode/api/tree-view/tree-view-node.module.less';
-import { ExtensionTreeNode, ExtensionCompositeTreeNode } from '../vscode/api/tree-view/tree-view.node.defined';
+import { ExtensionCompositeTreeNode, ExtensionTreeNode } from '../vscode/api/tree-view/tree-view.node.defined';
 
 export interface ITreeViewNodeProps {
   item: ExtensionTreeNode | ExtensionCompositeTreeNode;
@@ -22,6 +38,7 @@ export interface ITreeViewNodeProps {
   decorations?: ClasslistComposite;
   onTwistierClick?: (ev: MouseEvent, item: ExtensionTreeNode | ExtensionCompositeTreeNode, type: TreeNodeType) => void;
   onClick: (ev: MouseEvent, item: ExtensionTreeNode | ExtensionCompositeTreeNode, type: TreeNodeType) => void;
+  onChange: (item: ExtensionTreeNode | ExtensionCompositeTreeNode) => void;
   onContextMenu?: (ev: MouseEvent, item: ExtensionTreeNode | ExtensionCompositeTreeNode, type: TreeNodeType) => void;
   onDragStart?: (ev: MouseEvent, item: ExtensionTreeNode | ExtensionCompositeTreeNode) => void;
   onDragEnter?: (ev: MouseEvent, item: ExtensionTreeNode | ExtensionCompositeTreeNode) => void;
@@ -37,6 +54,7 @@ export type TreeViewNodeRenderedProps = ITreeViewNodeProps & INodeRendererProps;
 export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
   item,
   onClick,
+  onChange,
   onContextMenu,
   itemType,
   leftPadding = 8,
@@ -53,6 +71,8 @@ export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
   onDrop,
 }: TreeViewNodeRenderedProps) => {
   const iconService = useInjectable<IIconService>(IIconService);
+  const styles_expansion_toggle = useDesignStyles(styles.expansion_toggle, 'expansion_toggle');
+  const styles_tree_view_node = useDesignStyles(styles.tree_view_node, 'tree_view_node');
   const [decoration, setDecoration] = useState(item.uri && decorationService.getDecoration(item.uri, false));
 
   useEffect(() => {
@@ -87,7 +107,7 @@ export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
         }
       }
     },
-    [itemType, onTwistierClick, onClick],
+    [item, itemType, onTwistierClick, onClick],
   );
 
   const handleContextMenu = useCallback(
@@ -137,6 +157,14 @@ export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
     [item, onDrop],
   );
 
+  const handleCheckBoxChange = useCallback(
+    (event: FormEvent<HTMLInputElement>) => {
+      onChange(item);
+      event.stopPropagation();
+    },
+    [item, onChange],
+  );
+
   const isDirectory = itemType === TreeNodeType.CompositeTreeNode;
   const paddingLeft = isDirectory
     ? `${defaultLeftPadding + (item.depth || 0) * (leftPadding || 0)}px`
@@ -155,7 +183,7 @@ export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
     return (
       <div
         onClick={clickHandler}
-        className={cls(styles.tree_view_node_segment, styles.expansion_toggle, getIcon('arrow-right'), {
+        className={cls(styles.tree_view_node_segment, styles_expansion_toggle, getIcon('arrow-right'), {
           [`${styles.mod_collapsed}`]: !(node as ExtensionCompositeTreeNode).expanded,
         })}
       />
@@ -165,6 +193,24 @@ export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
   const renderIcon = (node: ExtensionCompositeTreeNode | ExtensionTreeNode) => (
     <div className={cls(styles.file_icon, node.icon)} style={{ maxHeight: TREE_VIEW_NODE_HEIGHT }}></div>
   );
+
+  const renderCheckbox = (node: ExtensionCompositeTreeNode | ExtensionTreeNode) => {
+    if (node.checkboxInfo === undefined) {
+      return null;
+    }
+
+    return (
+      <CheckBox
+        data-node-id={node.treeItemId}
+        readOnly
+        onChange={(event) => handleCheckBoxChange(event)}
+        checked={!!node.checkboxInfo.checked}
+        id={node.treeItemId}
+        role={node.checkboxInfo.accessibilityInformation?.role}
+        title={node.checkboxInfo.tooltip}
+      />
+    );
+  };
 
   const renderDisplayName = (node: ExtensionCompositeTreeNode | ExtensionTreeNode) => {
     const displayName = () => {
@@ -269,13 +315,14 @@ export const TreeViewNode: FC<TreeViewNodeRenderedProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       title={getItemTooltip()}
-      className={cls(styles.tree_view_node, decorations ? decorations.classlist : null)}
+      className={cls(styles_tree_view_node, decorations ? decorations.classlist : null)}
       data-id={item.id}
       style={fileTreeNodeStyle}
       draggable={draggable}
     >
       <div className={cls(styles.tree_view_node_content)}>
         {renderTwice(item)}
+        {renderCheckbox(item)}
         {renderIcon(item)}
         <div className={styles.tree_view_node_overflow_wrap}>
           {renderDisplayName(item)}

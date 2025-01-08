@@ -1,5 +1,6 @@
 import { Emitter, Event, Disposable, IDisposable } from '@opensumi/ide-core-common';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { IModelDecorationsChangedEvent } from '@opensumi/monaco-editor-core/esm/vs/editor/common/textModelEvents';
+import * as monaco from '../../../src/common';
 import { ContextKeyValue } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 
 export class MockedCodeEditor extends Disposable implements monaco.editor.ICodeEditor {
@@ -14,6 +15,25 @@ export class MockedCodeEditor extends Disposable implements monaco.editor.ICodeE
   constructor(public dom: any, public options: any, public override: any) {
     super();
     this.id = ++MockedCodeEditor.ID;
+  }
+  contextKeyService: any;
+  hasPendingScrollAnimation(): boolean {
+    throw new Error('Method not implemented.');
+  }
+  writeScreenReaderContent(reason: string): void {
+    throw new Error('Method not implemented.');
+  }
+  addGlyphMarginWidget(widget: monaco.editor.IGlyphMarginWidget): void {
+    throw new Error('Method not implemented.');
+  }
+  layoutGlyphMarginWidget(widget: monaco.editor.IGlyphMarginWidget): void {
+    throw new Error('Method not implemented.');
+  }
+  removeGlyphMarginWidget(widget: monaco.editor.IGlyphMarginWidget): void {
+    throw new Error('Method not implemented.');
+  }
+  handleInitialized?(): void {
+    throw new Error('Method not implemented.');
   }
 
   getBottomForLineNumber(lineNumber: number): number {
@@ -41,7 +61,18 @@ export class MockedCodeEditor extends Disposable implements monaco.editor.ICodeE
   createDecorationsCollection(
     decorations?: monaco.editor.IModelDeltaDecoration[] | undefined,
   ): monaco.editor.IEditorDecorationsCollection {
-    throw new Error('Method not implemented.');
+    return {
+      onDidChange: new Emitter<IModelDecorationsChangedEvent>().event,
+      clear: () => {},
+      length: 0,
+      set: () => [],
+      getRange: () => null,
+      getRanges: () => [],
+      has: () => true,
+      append: (newDecorations) => {
+        return [];
+      },
+    };
   }
   onDidChangeHiddenAreas: monaco.IEvent<void>;
   getDecorationsInRange(range: monaco.Range): monaco.editor.IModelDecoration[] | null {
@@ -62,7 +93,7 @@ export class MockedCodeEditor extends Disposable implements monaco.editor.ICodeE
   getConfiguredWordAtPosition(position: monaco.Position): monaco.editor.IWordAtPosition | null {
     throw new Error('Method not implemented.');
   }
-  _getViewModel() {
+  _getViewModel(): monaco.IViewModel {
     throw new Error('Method not implemented.');
   }
   getVisibleRangesPlusViewportAboveBelow(): monaco.Range[] {
@@ -199,6 +230,8 @@ export class MockedCodeEditor extends Disposable implements monaco.editor.ICodeE
 
   _onDidChangeModel = new Emitter<monaco.editor.IModelChangedEvent>();
   onDidChangeModel = this._onDidChangeModel.event;
+  _onWillChangeModel = new Emitter<monaco.editor.IModelChangedEvent>();
+  onWillChangeModel = this._onWillChangeModel.event;
 
   _onDidChangeModelDecorations = new Emitter<monaco.editor.IModelDecorationsChangedEvent>();
   onDidChangeModelDecorations = this._onDidChangeModelDecorations.event;
@@ -367,6 +400,7 @@ export class MockedCodeEditor extends Disposable implements monaco.editor.ICodeE
         top: 0,
         right: 0,
       },
+      glyphMarginDecorationLaneCount: 0,
     };
   }
   getVisibleRanges(): monaco.Range[] {
