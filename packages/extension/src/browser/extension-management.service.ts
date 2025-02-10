@@ -1,5 +1,5 @@
 import { Autowired, Injectable } from '@opensumi/di';
-import { getLanguageId, ILogger, WithEventBus } from '@opensumi/ide-core-common';
+import { ILogger, URI, WithEventBus, getLanguageId } from '@opensumi/ide-core-common';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
 import {
@@ -170,7 +170,7 @@ export class ExtensionManagementService extends WithEventBus implements Abstract
     await extension.initialize();
     this.eventBus.fire(new ExtensionDidEnabledEvent(extension.toJSON()));
 
-    this.sumiContributesService.register(extension.id, extension.packageJSON.kaitianContributes || {});
+    this.sumiContributesService.register(extension.id, extension.packageJSON.sumiContributes || {});
     this.contributesService.register(extension.id, extension.contributes);
     this.sumiContributesService.initialize();
     this.contributesService.initialize();
@@ -181,7 +181,7 @@ export class ExtensionManagementService extends WithEventBus implements Abstract
    */
   private async removeExtension(extensionPath: string) {
     try {
-      await this.fileService.delete(extensionPath);
+      await this.fileService.delete(URI.file(extensionPath).toString());
       return true;
     } catch (err) {
       this.logger.error(err);

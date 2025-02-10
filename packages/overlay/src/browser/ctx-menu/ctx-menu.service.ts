@@ -1,28 +1,22 @@
-import { observable, action } from 'mobx';
-
 import { Injectable } from '@opensumi/di';
 import { MenuNode } from '@opensumi/ide-core-browser/lib/menu/next/base';
 import { CtxMenuRenderParams } from '@opensumi/ide-core-browser/lib/menu/next/renderer/ctxmenu/base';
 import { IBrowserCtxMenu } from '@opensumi/ide-core-browser/lib/menu/next/renderer/ctxmenu/browser';
+import { observableValue, transaction } from '@opensumi/monaco-editor-core/esm/vs/base/common/observableInternal/base';
 
 @Injectable()
 export class BrowserCtxMenuService implements IBrowserCtxMenu {
-  @observable
-  visible = false;
+  readonly visibleObservable = observableValue<boolean>(this, false);
+  get visible() {
+    return this.visibleObservable.get();
+  }
 
-  @observable
   onHide: ((canceled: boolean) => void) | undefined = undefined;
 
-  @observable
   point: { pageX: number; pageY: number } | undefined = undefined;
-
-  @observable
   context: any = undefined;
+  menuNodes: MenuNode[] = [];
 
-  @observable
-  menuNodes: MenuNode[] = observable.array([]);
-
-  @action
   public show(payload: CtxMenuRenderParams): void {
     const { anchor, onHide, args: context, menuNodes } = payload;
     // 上层调用前已经将 MenuNodes 处理为数组了
@@ -35,10 +29,11 @@ export class BrowserCtxMenuService implements IBrowserCtxMenu {
     const { x, y } = anchor instanceof window.MouseEvent ? { x: anchor.clientX, y: anchor.clientY } : anchor;
     this.onHide = onHide;
     this.point = { pageX: x, pageY: y };
-    this.visible = true;
+    transaction((tx) => {
+      this.visibleObservable.set(true, tx);
+    });
   }
 
-  @action.bound
   public hide(canceled: boolean) {
     if (typeof this.onHide === 'function') {
       this.onHide(canceled);
@@ -46,8 +41,9 @@ export class BrowserCtxMenuService implements IBrowserCtxMenu {
     this.reset();
   }
 
-  @action.bound
   private reset() {
-    this.visible = false;
+    transaction((tx) => {
+      this.visibleObservable.set(false, tx);
+    });
   }
 }

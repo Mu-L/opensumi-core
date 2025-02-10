@@ -1,8 +1,9 @@
-import classNames from 'classnames';
+import cls from 'classnames';
 import React from 'react';
 
 import { Dropdown } from '../dropdown';
-import { Icon, DefaultIconKeys, getIcon } from '../icon';
+import { Placement } from '../dropdown/dropdown';
+import { DefaultIconKeys, Icon, getIcon } from '../icon';
 import './style.less';
 
 export type ButtonType = 'primary' | 'secondary' | 'ghost' | 'danger' | 'link' | 'icon' | 'default';
@@ -27,6 +28,8 @@ interface MoreActionProps {
   more?: boolean;
   moreIconClass?: string;
   menu?: React.ReactNode;
+  moreVisible?: boolean;
+  placement?: Placement;
   onVisibleChange?: (visible: boolean) => void;
 }
 
@@ -95,11 +98,13 @@ export const Button = React.memo(
     more,
     moreIconClass,
     menu,
+    moreVisible,
+    placement,
     title,
     onVisibleChange,
     ...otherProps
   }: ButtonProps<T>): React.ReactElement<ButtonProps<T>> => {
-    const classes = classNames('kt-button', className, {
+    const classes = cls('kt-button', className, {
       [`kt-${type}-button-loading`]: loading,
       [`ghost-${type}-button`]: ghost && !loading && type !== 'link',
       [`${type}-button`]: type,
@@ -107,7 +112,7 @@ export const Button = React.memo(
       ['ghost-button']: ghost && type !== 'link',
       ['block-button']: block,
     });
-    const iconClesses = classNames(className, {
+    const iconClasses = cls(className, {
       ['kt-clickable-icon']: !!onClick,
     });
 
@@ -118,7 +123,7 @@ export const Button = React.memo(
           disabled={disabled}
           icon={icon}
           onClick={loading || disabled ? noop : onClick}
-          className={iconClesses}
+          className={iconClasses}
           iconClass={iconClass}
           {...otherProps}
         />
@@ -127,9 +132,16 @@ export const Button = React.memo(
 
     const iconNode = iconClass ? <Icon iconClass={iconClass} disabled={disabled} /> : null;
 
-    if (more) {
+    if (menu) {
       return (
-        <Dropdown className={'kt-menu'} overlay={menu} trigger={['click']} onVisibleChange={onVisibleChange}>
+        <Dropdown
+          visible={moreVisible}
+          className={'kt-menu'}
+          overlay={menu}
+          trigger={['click']}
+          onVisibleChange={onVisibleChange}
+          placement={placement}
+        >
           <button
             {...otherProps}
             disabled={disabled}

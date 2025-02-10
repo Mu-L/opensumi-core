@@ -1,40 +1,25 @@
-import type vscode from 'vscode';
-
-import { Injector } from '@opensumi/di';
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { Event, Uri, Emitter, DisposableCollection, CancellationToken } from '@opensumi/ide-core-common';
+import { CancellationToken, DisposableCollection, Emitter, Event, Uri } from '@opensumi/ide-core-common';
 import { IDecorationsService } from '@opensumi/ide-decoration';
 import { FileDecorationsService } from '@opensumi/ide-decoration/lib/browser/decorationsService';
 import { MainThreadDecorations } from '@opensumi/ide-extension/lib/browser/vscode/api/main.thread.decoration';
 import {
+  ExtHostAPIIdentifier,
   IMainThreadEnv,
   MainThreadAPIIdentifier,
-  ExtHostAPIIdentifier,
 } from '@opensumi/ide-extension/lib/common/vscode';
 import { createWindowApiFactory } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.window.api.impl';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { mockExtensions } from '../../__mocks__/extensions';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { ExtHostDecorations } from '../../src/hosted/api/vscode/ext.host.decoration';
 import ExtensionHostextWindowAPIImpl from '../../src/hosted/ext.host';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
+import type vscode from 'vscode';
 
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
-
-describe('MainThreadDecorationAPI Test Suites ', () => {
+describe('MainThreadDecorationAPI Test Suites', () => {
   const injector = createBrowserInjector([]);
   let extWindowAPI: ReturnType<typeof createWindowApiFactory>;
   let extHostDecorations: ExtHostDecorations;

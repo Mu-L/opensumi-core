@@ -1,40 +1,42 @@
 import * as jsoncParser from 'jsonc-parser';
 
-import { Autowired, Injectable, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
+  COMMON_COMMANDS,
   ClientAppContribution,
-  PreferenceSchemaProvider,
-  URI,
-  Domain,
+  CodeSchemaId,
+  Command,
   CommandContribution,
   CommandRegistry,
-  COMMON_COMMANDS,
-  KeybindingContribution,
-  KeybindingRegistry,
-  PreferenceScope,
-  PreferenceProvider,
-  WithEventBus,
-  MaybePromise,
-  localize,
   CommandService,
+  ContributionProvider,
+  Domain,
   EDITOR_COMMANDS,
-  JsonSchemaContribution,
+  IDisposable,
   IJSONSchemaRegistry,
   IPreferenceSettingsService,
-  ContributionProvider,
   ISettingGroup,
-  IDisposable,
+  ISettingSection,
+  JsonSchemaContribution,
+  KeybindingContribution,
+  KeybindingRegistry,
+  MaybePromise,
+  PreferenceProvider,
+  PreferenceSchemaProvider,
+  PreferenceScope,
+  URI,
+  WithEventBus,
   arrays,
-  Command,
   getIcon,
   isString,
-  ISettingSection,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
-import { ResourceService, IResourceProvider, IResource } from '@opensumi/ide-editor';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IResource, IResourceProvider, ResourceService } from '@opensumi/ide-editor';
 import {
   BrowserEditorContribution,
   EditorComponentRegistry,
+  EditorOpenType,
   IEditor,
   IEditorFeatureRegistry,
   IResourceOpenResult,
@@ -90,19 +92,19 @@ export namespace PREFERENCE_COMMANDS {
 
   export const OPEN_USER_SETTING_FILE: Command = {
     id: 'preference.open.user',
-    label: localize('preference.editorTitle.openUserSource'),
+    label: '%preference.editorTitle.openUserSource%',
     category: CATEGORY,
   };
 
   export const OPEN_WORKSPACE_SETTING_FILE: Command = {
     id: 'preference.open.workspace',
-    label: localize('preference.editorTitle.openWorkspaceSource'),
+    label: '%preference.editorTitle.openWorkspaceSource%',
     category: CATEGORY,
   };
 
   export const OPEN_SOURCE_FILE: Command = {
     id: 'preference.open.source',
-    label: localize('preference.editorTitle.openSource'),
+    label: '%preference.editorTitle.openSource%',
     category: CATEGORY,
   };
 
@@ -181,21 +183,20 @@ export class PreferenceContribution
      */
     this.registerSettings();
     this.registerSettingSections();
-
-    this.preferenceService.fireDidSettingsChange();
   }
 
   registerCommands(commands: CommandRegistry) {
     commands.registerCommand(COMMON_COMMANDS.OPEN_PREFERENCES, {
       execute: async (search?: string) => {
         await this.openPreferences(search);
+        this.preferenceService.focusInput();
       },
     });
 
     commands.registerCommand(COMMON_COMMANDS.LOCATE_PREFERENCES, {
       execute: async (groupId: string) => {
         await this.openPreferences();
-        return await this.preferenceService.setCurrentGroup(groupId);
+        return await this.preferenceService.scrollToGroup(groupId);
       },
     });
 
@@ -313,12 +314,14 @@ export class PreferenceContribution
     });
   }
 
-  async openPreferences(search?: string, prefernceId?: string) {
+  async openPreferences(search?: string, preferenceId?: string) {
     await this.commandService.executeCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, new URI('/').withScheme(PREF_SCHEME), {
       preview: false,
     });
     if (isString(search)) {
       this.preferenceService.search(search);
+    } else if (isString(preferenceId)) {
+      this.preferenceService.scrollToPreference(preferenceId);
     }
   }
 
@@ -395,7 +398,7 @@ export class PreferenceContribution
   }
 
   registerSchema(registry: IJSONSchemaRegistry) {
-    registry.registerSchema('vscode://schemas/settings/user', this.schemaProvider.getCombinedSchema(), [
+    registry.registerSchema(CodeSchemaId.userSettings, this.schemaProvider.getCombinedSchema(), [
       'settings.json',
       USER_PREFERENCE_URI.toString(),
     ]);
@@ -415,7 +418,7 @@ export class PreferenceContribution
     editorComponentRegistry.registerEditorComponentResolver(PREF_SCHEME, (_, __, resolve) => {
       resolve([
         {
-          type: 'component',
+          type: EditorOpenType.component,
           componentId: PREF_PREVIEW_COMPONENT_ID,
         },
       ]);

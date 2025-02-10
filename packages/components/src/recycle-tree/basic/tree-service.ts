@@ -1,10 +1,14 @@
 import { DisposableCollection, Emitter } from '@opensumi/ide-utils';
 
-import { TreeModel, Tree, Decoration, DecorationsManager } from '../tree';
+import { Decoration, DecorationsManager, Tree, TreeModel } from '../tree';
 import { TreeNodeEvent } from '../types';
 
 import { BasicCompositeTreeNode, BasicTreeNode, BasicTreeRoot } from './tree-node.define';
-import { IBasicTreeData, DECORATIONS } from './types';
+import { DECORATIONS, IBasicTreeData } from './types';
+
+export interface IBasicTreeServiceOptions {
+  treeName?: string;
+}
 
 export class BasicTreeService extends Tree {
   private selectedDecoration: Decoration = new Decoration(DECORATIONS.SELECTED); // 选中态
@@ -22,21 +26,39 @@ export class BasicTreeService extends Tree {
   private _decorations: DecorationsManager;
 
   private disposableCollection: DisposableCollection = new DisposableCollection();
+  private decorationDisposableCollection: DisposableCollection = new DisposableCollection();
 
   private onDidUpdateTreeModelEmitter: Emitter<BasicTreeModel> = new Emitter();
 
   constructor(
     private _treeData?: IBasicTreeData[],
     private _resolveChildren?: (parent?: IBasicTreeData) => IBasicTreeData[] | null,
-    private _sortComparator?: (a: IBasicTreeData, b: IBasicTreeData) => number,
+    private _sortComparator?: (a: IBasicTreeData, b: IBasicTreeData) => number | undefined,
+    private treeOptions = {} as IBasicTreeServiceOptions,
   ) {
     super();
-    this._root = new BasicTreeRoot(this, undefined, { children: this._treeData, label: '', command: '', icon: '' });
+    this.disposableCollection.push(this.onDidUpdateTreeModelEmitter);
+  }
+
+  private setUpTreeModel() {
+    this._root = new BasicTreeRoot(
+      this,
+      undefined,
+      { children: this._treeData, label: '', command: '', icon: '' },
+      {
+        treeName: this.treeOptions.treeName,
+      },
+    );
     this._model = new BasicTreeModel();
     this._model.init(this._root);
     this.initDecorations(this._root as BasicTreeRoot);
     this.onDidUpdateTreeModelEmitter.fire(this._model);
-    this.disposableCollection.push(this.onDidUpdateTreeModelEmitter);
+  }
+
+  private resetState() {
+    this._selectedNodes = [];
+    this._contextMenuNode = undefined;
+    this._focusedNode = undefined;
   }
 
   get onDidUpdateTreeModel() {
@@ -56,22 +78,30 @@ export class BasicTreeService extends Tree {
   }
 
   private initDecorations(root: BasicTreeRoot) {
+    this.decorationDisposableCollection.dispose();
+
     this._decorations = new DecorationsManager(root as any);
     this._decorations.addDecoration(this.selectedDecoration);
     this._decorations.addDecoration(this.focusedDecoration);
     this._decorations.addDecoration(this.contextMenuDecoration);
     this._decorations.addDecoration(this.loadingDecoration);
-    this.disposableCollection.push(
+    this.decorationDisposableCollection.push(
       root.watcher.on(TreeNodeEvent.WillResolveChildren, (target) => {
         this.loadingDecoration.addTarget(target);
       }),
     );
-    this.disposableCollection.push(
+    this.decorationDisposableCollection.push(
       root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
         this.loadingDecoration.removeTarget(target);
       }),
     );
-    this.disposableCollection.push(this._decorations);
+    this.decorationDisposableCollection.push(this._decorations);
+  }
+
+  updateTreeData(treeData: IBasicTreeData[]) {
+    this._treeData = treeData;
+    this.resetState();
+    this.setUpTreeModel();
   }
 
   async resolveChildren(parent?: BasicCompositeTreeNode) {
@@ -84,7 +114,10 @@ export class BasicTreeService extends Tree {
 
   sortComparator = (a: BasicCompositeTreeNode, b: BasicCompositeTreeNode) => {
     if (this._sortComparator) {
-      return this._sortComparator(a.raw, b.raw);
+      const result = this._sortComparator(a.raw, b.raw);
+      if (typeof result !== 'undefined') {
+        return result;
+      }
     }
     return super.sortComparator(a, b);
   };
@@ -116,26 +149,27 @@ export class BasicTreeService extends Tree {
     return this._contextMenuNode;
   }
 
+  private clearDecoration(decoration: Decoration) {
+    for (const target of decoration.appliedTargets.keys()) {
+      decoration.removeTarget(target);
+    }
+  }
+
   // 清空其他选中/焦点态节点，更新当前焦点节点
   activeFocusedDecoration = (target: BasicCompositeTreeNode | BasicTreeNode) => {
     if (this._contextMenuNode) {
-      this.contextMenuDecoration.removeTarget(this._contextMenuNode);
-      this.focusedDecoration.removeTarget(this._contextMenuNode);
-      this.selectedDecoration.removeTarget(this._contextMenuNode);
+      this.clearDecoration(this.contextMenuDecoration);
+      this.clearDecoration(this.focusedDecoration);
+      this.clearDecoration(this.selectedDecoration);
       this._contextMenuNode = undefined;
     }
     if (target) {
       if (this.selectedNodes.length > 0) {
-        this.selectedNodes.forEach((file) => {
-          // 因为选择装饰器可能通过其他方式添加而不能及时在selectedNodes上更新
-          // 故这里遍历所有选中装饰器的节点进行一次统一清理
-          for (const target of this.selectedDecoration.appliedTargets.keys()) {
-            this.selectedDecoration.removeTarget(target);
-          }
-        });
+        this.clearDecoration(this.selectedDecoration);
       }
       if (this.focusedNode) {
-        this.focusedDecoration.removeTarget(this.focusedNode);
+        this.clearDecoration(this.focusedDecoration);
+        this._focusedNode = undefined;
       }
       this.selectedDecoration.addTarget(target);
       this.focusedDecoration.addTarget(target);
@@ -148,10 +182,11 @@ export class BasicTreeService extends Tree {
 
   activeContextMenuDecoration = (target: BasicCompositeTreeNode | BasicTreeNode) => {
     if (this._contextMenuNode) {
-      this.contextMenuDecoration.removeTarget(this._contextMenuNode);
+      this.clearDecoration(this.contextMenuDecoration);
+      this._contextMenuNode = undefined;
     }
     if (this.focusedNode) {
-      this.focusedDecoration.removeTarget(this.focusedNode);
+      this.clearDecoration(this.focusedDecoration);
       this._focusedNode = undefined;
     }
     this.contextMenuDecoration.addTarget(target);
@@ -162,14 +197,16 @@ export class BasicTreeService extends Tree {
   // 取消选中节点焦点
   enactiveFocusedDecoration = () => {
     if (this.focusedNode) {
-      this.focusedDecoration.removeTarget(this.focusedNode);
+      this.clearDecoration(this.focusedDecoration);
       this._focusedNode = undefined;
       this.model?.dispatchChange();
     }
   };
 
   dispose() {
+    super.dispose();
     this.disposableCollection.dispose();
+    this.decorationDisposableCollection.dispose();
   }
 }
 

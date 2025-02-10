@@ -1,4 +1,4 @@
-import { ITerminalOptions as IXtermTerminalOptions } from 'xterm';
+import { ITerminalOptions as IXtermTerminalOptions } from '@xterm/xterm';
 
 import { IDisposable, OperatingSystem } from '@opensumi/ide-core-common';
 
@@ -99,6 +99,7 @@ export interface ITerminalService {
   getProfiles(autoDetect: boolean): Promise<ITerminalProfile[]>;
   getDefaultSystemShell(): Promise<string>;
   getCodePlatformKey(): Promise<'osx' | 'windows' | 'linux'>;
+  getCwd(sessionId: string): Promise<string | undefined>;
 }
 
 export const ITerminalInternalService = Symbol('ITerminalInternalService');

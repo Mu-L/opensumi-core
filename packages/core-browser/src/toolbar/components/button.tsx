@@ -1,8 +1,9 @@
-import classnames from 'classnames';
-import React from 'react';
+import cls from 'classnames';
+import React, { PropsWithChildren } from 'react';
 import ReactDOM from 'react-dom';
+import ReactDOMClient from 'react-dom/client';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { Button } from '@opensumi/ide-components';
 import { BasicEvent, Disposable, Emitter, IDisposable } from '@opensumi/ide-core-common';
 
@@ -11,13 +12,13 @@ import { PreferenceService } from '../../preferences';
 import { useInjectable } from '../../react-hooks';
 import { AppConfig, ConfigProvider } from '../../react-providers/config-provider';
 import {
-  IToolbarActionReactElement,
-  IToolbarActionElementProps,
-  IToolbarActionBtnProps,
   IToolbarActionBtnDelegate,
+  IToolbarActionBtnProps,
   IToolbarActionBtnState,
-  IToolbarPopoverStyle,
+  IToolbarActionElementProps,
+  IToolbarActionReactElement,
   IToolbarPopoverRegistry,
+  IToolbarPopoverStyle,
 } from '../types';
 
 enum BUTTON_TITLE_STYLE {
@@ -28,8 +29,13 @@ enum BUTTON_TITLE_STYLE {
 export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionElementProps) => {
   const context = useInjectable<AppConfig>(AppConfig);
   const ref = React.useRef<HTMLDivElement>();
+
   const [viewState, setViewState] = React.useState(props.defaultState || 'default');
-  const [title, setTitle] = React.useState(undefined);
+
+  const viewStateRef = React.useRef<string>(viewState);
+  viewStateRef.current = viewState;
+
+  const [title, setTitle] = React.useState<string>('');
   const preferenceService: PreferenceService = useInjectable(PreferenceService);
   const [, updateState] = React.useState<any>();
   const forceUpdate = React.useCallback(() => updateState({}), []);
@@ -74,11 +80,11 @@ export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionE
       delegate.current = context.injector.get(ToolbarBtnDelegate, [
         ref.current,
         props.id,
-        (state, title) => {
+        (state: string, title: string) => {
           setViewState(state);
           setTitle(title);
         },
-        () => viewState,
+        () => viewStateRef.current,
         context,
         getPopoverParent,
         props.popoverComponent,
@@ -95,6 +101,9 @@ export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionE
     }
     return () => disposer.dispose();
   }, []);
+
+  const btnTitleStyle = styles.btnTitleStyle || preferenceService.get('toolbar.buttonTitleStyle');
+  const isVerticalButton = styles.btnStyle === 'button' && btnTitleStyle === BUTTON_TITLE_STYLE.VERTICAL;
   const iconContent = !props.inDropDown ? (
     <div
       className={styles.iconClass + ' kt-toolbar-action-btn-icon'}
@@ -102,7 +111,8 @@ export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionE
       style={{
         color: styles.iconForeground,
         backgroundColor: styles.iconBackground,
-        // 如果指定了按钮宽度，需要将padding清空，防止按钮比预期大16px
+        marginRight: styles.showTitle && !isVerticalButton ? 5 : 0,
+        // 如果指定了按钮宽度，需要将padding清空，防止按钮比预期大 16px
         ...(styles.width ? { width: styles.width } : null),
         ...(styles.height ? { height: styles.height } : null),
         ...(styles.iconSize ? { fontSize: styles.iconSize, WebkitMaskSize: styles.iconSize } : null),
@@ -148,7 +158,7 @@ export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionE
   if (props.inDropDown) {
     buttonElement = (
       <div
-        className={classnames({ 'kt-toolbar-action-btn': true, 'action-btn-in-dropdown': true })}
+        className={cls({ 'kt-toolbar-action-btn': true, 'action-btn-in-dropdown': true })}
         {...bindings}
         {...backgroundBindings}
         ref={ref as any}
@@ -158,7 +168,6 @@ export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionE
       </div>
     );
   } else {
-    const btnTitleStyle = styles.btnTitleStyle || preferenceService.get('toolbar.buttonTitleStyle');
     if (styles.btnStyle === 'button' && btnTitleStyle !== BUTTON_TITLE_STYLE.VERTICAL) {
       buttonElement = (
         <Button type='default' size='small' {...bindings} {...backgroundBindings}>
@@ -173,7 +182,7 @@ export const ToolbarActionBtn = (props: IToolbarActionBtnProps & IToolbarActionE
       }
       buttonElement = (
         <div
-          className={classnames({
+          className={cls({
             'kt-toolbar-action-btn': true,
             'kt-toolbar-action-btn-button': styles.btnStyle === 'button',
             'kt-toolbar-action-btn-inline': styles.btnStyle !== 'button',
@@ -210,7 +219,7 @@ export class ToolbarActionBtnClickEvent extends BasicEvent<{
 
 const popOverMap = new Map<string, Promise<HTMLDivElement>>();
 
-const PopOverComponentWrapper: React.FC<{ delegate: IToolbarActionBtnDelegate }> = (props) => {
+const PopOverComponentWrapper: React.FC<PropsWithChildren<{ delegate: IToolbarActionBtnDelegate }>> = (props) => {
   const [context, setContext] = React.useState();
 
   React.useEffect(() => {
@@ -300,6 +309,10 @@ class ToolbarBtnDelegate implements IToolbarActionBtnDelegate {
     });
   }
 
+  getState() {
+    return this._getState();
+  }
+
   setState(to, title?) {
     const from = this._getState();
     this._setState(to, title);
@@ -326,17 +339,14 @@ class ToolbarBtnDelegate implements IToolbarActionBtnDelegate {
       this._popOverElement = new Promise((resolve) => {
         const div = document.createElement('div');
         const C = this.popoverComponent!;
-        ReactDOM.render(
+        ReactDOMClient.createRoot(div).render(
           <ConfigProvider value={this.context}>
             <PopOverComponentWrapper delegate={this}>
               <C />
             </PopOverComponentWrapper>
           </ConfigProvider>,
-          div,
-          () => {
-            resolve(div);
-          },
         );
+        resolve(div);
       });
       popOverMap.set(this.actionId, this._popOverElement);
     }

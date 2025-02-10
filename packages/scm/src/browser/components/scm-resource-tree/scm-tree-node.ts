@@ -1,7 +1,7 @@
-import { TreeNode, CompositeTreeNode, ITree } from '@opensumi/ide-components';
+import { CompositeTreeNode, ITree, TreeNode } from '@opensumi/ide-components';
 import { URI, memoize, path } from '@opensumi/ide-core-browser';
 
-import { ISCMResourceGroup, ISCMResource } from '../../../common';
+import { ISCMResource, ISCMResourceGroup } from '../../../common';
 import { isSCMResourceGroup } from '../../scm-util';
 
 import { ISCMTreeNodeDescription, collectSCMResourceDesc } from './scm-tree-api';
@@ -44,7 +44,7 @@ export class SCMResourceGroup extends CompositeTreeNode {
     public raw: ISCMTreeNodeDescription<ISCMResourceGroup>,
     public readonly resource: ISCMResourceGroup,
   ) {
-    super(tree as ITree, parent, undefined, { name: resource.label });
+    super(tree as ITree, parent);
     // 目录节点默认全部展开
     this.isExpanded = true;
   }
@@ -67,8 +67,9 @@ export class SCMResourceFolder extends CompositeTreeNode {
     parent: CompositeTreeNode | undefined,
     public raw: ISCMTreeNodeDescription<ISCMResource>,
     public readonly resource: ISCMResource,
+    isTree?: boolean,
   ) {
-    super(tree as ITree, parent, undefined, { name: raw.pathname });
+    super(tree as ITree, parent, undefined, { name: isTree ? raw.name : raw.pathname });
     // 目录节点默认全部展开
     this.isExpanded = true;
   }
@@ -108,7 +109,7 @@ export class SCMResourceFile extends TreeNode {
     public readonly resource: ISCMResource,
     private readonly isTree?: boolean,
   ) {
-    super(tree as ITree, parent, undefined, { name: raw.pathname });
+    super(tree as ITree, parent, undefined, { name: isTree ? raw.name : raw.pathname });
   }
 
   @memoize

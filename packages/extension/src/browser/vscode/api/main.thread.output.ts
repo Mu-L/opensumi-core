@@ -1,4 +1,4 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
 import { OutputChannel } from '@opensumi/ide-output/lib/browser/output.channel';
 import { OutputService } from '@opensumi/ide-output/lib/browser/output.service';
@@ -37,6 +37,14 @@ export class MainThreadOutput implements IMainThreadOutput {
       outputChannel.append(value);
     }
 
+    return Promise.resolve();
+  }
+
+  $appendLine(channelName: string, value: string): PromiseLike<void> {
+    const outputChannel = this.getChannel(channelName);
+    if (outputChannel) {
+      outputChannel.appendLine(value);
+    }
     return Promise.resolve();
   }
 
@@ -84,5 +92,12 @@ export class MainThreadOutput implements IMainThreadOutput {
     }
 
     return outputChannel;
+  }
+
+  async $setLanguageId(channelName: string, languageId: string): Promise<void> {
+    const outputChannel = this.getChannel(channelName);
+    if (outputChannel) {
+      await outputChannel.setLanguageId(languageId);
+    }
   }
 }

@@ -1,29 +1,26 @@
-// tslint:disable:no-var-requires
 const path = require('path');
 
 const CopyPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const NodePolyfillPlugin = require('node-polyfill-webpack-plugin');
 const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
+const webpack = require('webpack');
 
 const tsConfigPath = path.join(__dirname, '../tsconfig.json');
 const srcDir = path.join(__dirname, '../src/browser');
 const distDir = path.join(__dirname, '../app/dist/browser');
 
+/** @type { import('webpack').Configuration } */
 module.exports = {
   entry: path.join(srcDir, './index.ts'),
-  node: {
-    net: 'empty',
-    child_process: 'empty',
-    path: true,
-    url: false,
-    fs: 'empty',
-    Buffer: false,
-    process: false,
-  },
   output: {
     filename: 'bundle.js',
     path: distDir,
+    clean: true,
+  },
+  cache: {
+    type: 'filesystem',
   },
   resolve: {
     extensions: ['.ts', '.tsx', '.js', '.json', '.less'],
@@ -32,6 +29,15 @@ module.exports = {
         configFile: tsConfigPath,
       }),
     ],
+    fallback: {
+      net: false,
+      path: false,
+      os: false,
+      crypto: false,
+      child_process: false,
+      url: false,
+      fs: false,
+    },
   },
   mode: 'development',
   devtool: 'source-map',
@@ -48,7 +54,7 @@ module.exports = {
       },
       {
         test: /\.png$/,
-        use: 'file-loader',
+        type: 'asset/resource',
       },
       {
         test: /\.css$/,
@@ -64,8 +70,9 @@ module.exports = {
             loader: 'css-loader',
             options: {
               sourceMap: true,
-              modules: true,
-              localIdentName: '[local]___[hash:base64:5]',
+              modules: {
+                localIdentName: '[local]___[hash:base64:5]',
+              },
             },
           },
           {
@@ -98,16 +105,18 @@ module.exports = {
         ],
       },
       {
-        test: /\.(woff(2)?|ttf|eot|svg)(\?v=\d+\.\d+\.\d+)?$/,
-        use: [
-          {
-            loader: 'file-loader',
-            options: {
-              name: '[name].[ext]',
-              outputPath: 'fonts/',
-            },
-          },
-        ],
+        test: /\.svg$/,
+        type: 'asset/resource',
+        generator: {
+          filename: 'images/[name][ext][query]',
+        },
+      },
+      {
+        test: /\.(woff(2)?|ttf|eot)(\?v=\d+\.\d+\.\d+)?$/,
+        type: 'asset/resource',
+        generator: {
+          filename: 'fonts/[name]-[hash:8][ext][query]',
+        },
       },
     ],
   },
@@ -115,22 +124,26 @@ module.exports = {
     modules: [path.join(__dirname, '../node_modules')],
     extensions: ['.ts', '.tsx', '.js', '.json', '.less'],
     mainFields: ['loader', 'main'],
-    moduleExtensions: ['-loader'],
   },
   plugins: [
     new HtmlWebpackPlugin({
       template: path.join(srcDir, '/index.html'),
     }),
-
     new MiniCssExtractPlugin({
       filename: '[name].[chunkhash:8].css',
       chunkFilename: '[id].css',
     }),
-    new CopyPlugin([
-      {
-        from: require.resolve('@opensumi/ide-core-electron-main/browser-preload/index.js'),
-        to: path.join(distDir, 'preload.js'),
-      },
-    ]),
+    new CopyPlugin({
+      patterns: [
+        {
+          from: require.resolve('@opensumi/ide-core-electron-main/browser-preload/index.js'),
+          to: path.join(distDir, 'preload.js'),
+        },
+      ],
+    }),
+    !process.env.CI && new webpack.ProgressPlugin(),
+    new NodePolyfillPlugin({
+      includeAliases: ['path', 'Buffer', 'process'],
+    }),
   ],
 };

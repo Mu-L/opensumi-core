@@ -1,7 +1,7 @@
 import { localize } from '@opensumi/ide-core-common';
 
 import { Color } from '../color';
-import { registerColor, darken, lighten } from '../utils';
+import { darken, lighten, registerColor } from '../utils';
 
 import { contrastBorder, foreground } from './base';
 
@@ -43,7 +43,7 @@ export const buttonBorder = registerColor(
 );
 /** secondary button */
 export const buttonSecondaryForeground = registerColor(
-  'button.foreground',
+  'button.secondaryForeground',
   {
     dark: Color.white,
     light: Color.white,

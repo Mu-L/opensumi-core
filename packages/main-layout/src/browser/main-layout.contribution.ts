@@ -1,19 +1,19 @@
 import { Autowired } from '@opensumi/di';
 import {
-  IContextKeyService,
   ClientAppContribution,
+  EDITOR_COMMANDS,
+  IContextKeyService,
+  IQuickOpenHandlerRegistry,
+  KeybindingRegistry,
+  LAYOUT_COMMANDS,
+  QUICK_OPEN_COMMANDS,
+  QuickOpenContribution,
   SlotLocation,
   SlotRendererContribution,
   SlotRendererRegistry,
+  getIcon,
   slotRendererRegistry,
-  KeybindingRegistry,
-  LAYOUT_COMMANDS,
-  IQuickOpenHandlerRegistry,
-  QuickOpenContribution,
-  QUICK_OPEN_COMMANDS,
-  EDITOR_COMMANDS,
 } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
 import {
   DEBUG_CONSOLE_CONTAINER_ID,
   DEBUG_CONTAINER_ID,
@@ -38,13 +38,13 @@ import {
   MenuContribution as MenuContribution,
   MenuId,
 } from '@opensumi/ide-core-browser/lib/menu/next';
-import { Domain, IEventBus, ContributionProvider, localize, WithEventBus } from '@opensumi/ide-core-common';
-import { CommandContribution, CommandRegistry, Command, CommandService } from '@opensumi/ide-core-common/lib/command';
+import { ContributionProvider, Domain, IEventBus, WithEventBus, localize } from '@opensumi/ide-core-common';
+import { Command, CommandContribution, CommandRegistry, CommandService } from '@opensumi/ide-core-common/lib/command';
 
 import { IMainLayoutService } from '../common';
 
 import { ViewQuickOpenHandler } from './quick-open-view';
-import { RightTabRenderer, LeftTabRenderer, BottomTabRenderer } from './tabbar/renderer.view';
+import { BottomTabRenderer, LeftTabRenderer, RightTabRenderer } from './tabbar/renderer.view';
 
 // NOTE 左右侧面板的展开、折叠命令请使用组合命令 activity-bar.left.toggle，layout命令仅做折叠展开，不处理tab激活逻辑
 export const HIDE_LEFT_PANEL_COMMAND: Command = {
@@ -105,9 +105,6 @@ export const IS_VISIBLE_LEFT_PANEL_COMMAND: Command = {
 };
 export const IS_VISIBLE_RIGHT_PANEL_COMMAND: Command = {
   id: 'main-layout.right-panel.is-visible',
-};
-export const SET_PANEL_SIZE_COMMAND: Command = {
-  id: 'main-layout.panel.size.set',
 };
 export const EXPAND_BOTTOM_PANEL: Command = {
   id: 'main-layout.bottom-panel.expand',
@@ -261,18 +258,13 @@ export class MainLayoutModuleContribution
     });
     commands.registerCommand(WORKBENCH_ACTION_CLOSEPANEL);
     commands.registerCommand(IS_VISIBLE_BOTTOM_PANEL_COMMAND, {
-      execute: () => this.mainLayoutService.getTabbarService('bottom').currentContainerId !== '',
+      execute: () => this.mainLayoutService.getTabbarService('bottom').currentContainerId.get() !== '',
     });
     commands.registerCommand(IS_VISIBLE_LEFT_PANEL_COMMAND, {
       execute: () => this.mainLayoutService.isVisible(SlotLocation.left),
     });
     commands.registerCommand(IS_VISIBLE_RIGHT_PANEL_COMMAND, {
       execute: () => this.mainLayoutService.isVisible(SlotLocation.left),
-    });
-    commands.registerCommand(SET_PANEL_SIZE_COMMAND, {
-      execute: (size: number) => {
-        this.mainLayoutService.setFloatSize(size);
-      },
     });
 
     commands.registerCommand(
@@ -330,7 +322,7 @@ export class MainLayoutModuleContribution
 
     commands.registerCommand(LAYOUT_COMMANDS.OPEN_VIEW, {
       execute: () => {
-        this.commandService.executeCommand(QUICK_OPEN_COMMANDS.OPEN.id, 'view');
+        this.commandService.executeCommand(QUICK_OPEN_COMMANDS.OPEN_VIEW.id);
       },
     });
   }
@@ -359,14 +351,13 @@ export class MainLayoutModuleContribution
         TERMINAL_CONTAINER_ID,
       ],
     }).forEach(([slotLocation, containerIds], index) => {
-      /**
-       * 这里使用 getContainer 是因为可能我们要注册到 menu 上的 id 在集成方并没有挂载。
-       * 所以如果 getContainer 有值，说明集成方也使用了这个 container，我们就把它注册到 menu 上
-       */
       const tabbarService = this.mainLayoutService.getTabbarService(slotLocation);
 
       tabbarService.viewReady.promise.then(() => {
         containerIds.forEach((id) => {
+          /**
+           * 这里先使用 getContainer 判断下这个 container id 在集成方上是否被挂载
+           */
           const info = tabbarService.getContainer(id);
           if (info) {
             menus.registerMenuItem(MenuId.MenubarViewMenu, {

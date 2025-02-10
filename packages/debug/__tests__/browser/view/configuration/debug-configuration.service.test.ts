@@ -1,7 +1,6 @@
 import { PreferenceService } from '@opensumi/ide-core-browser';
-import { Disposable, IEventBus, EventBusImpl, StorageProvider, URI } from '@opensumi/ide-core-common';
-import { IDebugSessionManager } from '@opensumi/ide-debug';
-import { DEFAULT_CONFIGURATION_NAME_SEPARATOR } from '@opensumi/ide-debug';
+import { Disposable, EventBusImpl, IEventBus, StorageProvider, URI } from '@opensumi/ide-core-common';
+import { DEFAULT_CONFIGURATION_NAME_SEPARATOR, IDebugSessionManager } from '@opensumi/ide-debug';
 import { DebugConfigurationManager } from '@opensumi/ide-debug/lib/browser/debug-configuration-manager';
 import { DebugConfigurationService } from '@opensumi/ide-debug/lib/browser/view/configuration/debug-configuration.service';
 import { DebugConsoleService } from '@opensumi/ide-debug/lib/browser/view/console/debug-console.service';
@@ -58,11 +57,13 @@ describe('Debug Configuration Service', () => {
     },
     addConfiguration: jest.fn(),
     openConfiguration: jest.fn(),
+    getDynamicConfigurationsSupportTypes: jest.fn(() => []),
   };
 
   const mockPreferenceService = {
     onPreferenceChanged: jest.fn(),
     get: jest.fn(() => true),
+    getValid: jest.fn(() => true),
   };
 
   const mockDebugConsoleService = {
@@ -115,11 +116,11 @@ describe('Debug Configuration Service', () => {
 
   it('should have enough API', () => {
     expect(typeof debugConfigurationService.init).toBe('function');
-    expect(debugConfigurationService.currentValue).toBe(
+    expect(debugConfigurationService.currentValue.get()).toBe(
       `test${DEFAULT_CONFIGURATION_NAME_SEPARATOR}file:///home/workspace__INDEX__0`,
     );
-    expect(debugConfigurationService.float).toBeTruthy();
-    expect(debugConfigurationService.configurationOptions).toEqual(mockDebugConfigurationManager.all);
+    expect(debugConfigurationService.float.get()).toBeTruthy();
+    expect(debugConfigurationService.configurationOptions.get()).toEqual(mockDebugConfigurationManager.all);
     expect(typeof debugConfigurationService.updateCurrentValue).toBe('function');
     expect(typeof debugConfigurationService.updateConfigurationOptions).toBe('function');
     expect(typeof debugConfigurationService.start).toBe('function');
@@ -132,30 +133,30 @@ describe('Debug Configuration Service', () => {
   });
 
   it('should init success', () => {
-    expect(mockDebugConfigurationManager.onDidChange).toBeCalledTimes(1);
-    expect(mockPreferenceService.onPreferenceChanged).toBeCalledTimes(1);
-    expect(mockPreferenceService.get).toBeCalledTimes(1);
+    expect(mockDebugConfigurationManager.onDidChange).toHaveBeenCalledTimes(1);
+    expect(mockPreferenceService.onPreferenceChanged).toHaveBeenCalledTimes(1);
+    expect(mockPreferenceService.get).toHaveBeenCalledTimes(1);
   });
 
   it('updateCurrentValue method should be work', () => {
     const value = 'test';
     debugConfigurationService.updateCurrentValue(value);
-    expect(debugConfigurationService.currentValue).toBe(value);
+    expect(debugConfigurationService.currentValue.get()).toBe(value);
   });
 
   it('updateConfigurationOptions method should be work', () => {
     debugConfigurationService.updateConfigurationOptions();
-    expect(debugConfigurationService.currentValue).toBe(
+    expect(debugConfigurationService.currentValue.get()).toBe(
       `test${DEFAULT_CONFIGURATION_NAME_SEPARATOR}file:///home/workspace__INDEX__0`,
     );
   });
 
   it('start method should be work', () => {
     debugConfigurationService.start();
-    expect(mockDebugSessionManager.start).toBeCalledTimes(1);
+    expect(mockDebugSessionManager.start).toHaveBeenCalledTimes(1);
     mockDebugConfigurationManager.current = undefined as any;
     debugConfigurationService.start();
-    expect(mockDebugConfigurationManager.addConfiguration).toBeCalledTimes(1);
+    expect(mockDebugConfigurationManager.addConfiguration).toHaveBeenCalledTimes(1);
     mockDebugConfigurationManager.current = {
       configuration: {
         name: 'test',
@@ -167,17 +168,17 @@ describe('Debug Configuration Service', () => {
 
   it('openConfiguration method should be work', () => {
     debugConfigurationService.openConfiguration();
-    expect(mockDebugConfigurationManager.openConfiguration).toBeCalledTimes(1);
+    expect(mockDebugConfigurationManager.openConfiguration).toHaveBeenCalledTimes(1);
   });
 
   it('openDebugConsole method should be work', () => {
     debugConfigurationService.openDebugConsole();
-    expect(mockDebugConsoleService.activate).toBeCalledTimes(1);
+    expect(mockDebugConsoleService.activate).toHaveBeenCalledTimes(1);
   });
 
   it('addConfiguration method should be work', () => {
     debugConfigurationService.addConfiguration();
-    expect(mockDebugConfigurationManager.addConfiguration).toBeCalledTimes(2);
+    expect(mockDebugConfigurationManager.addConfiguration).toHaveBeenCalledTimes(2);
   });
 
   it('toValue method should be work', () => {
@@ -191,7 +192,7 @@ describe('Debug Configuration Service', () => {
       configuration: { name: 'test' },
       workspaceFolderUri: URI.file('home/workspace').toString(),
     } as any);
-    expect(mockDebugConfigurationManager.find).toBeCalledTimes(1);
+    expect(mockDebugConfigurationManager.find).toHaveBeenCalledTimes(1);
     expect(value).toBe(`test${DEFAULT_CONFIGURATION_NAME_SEPARATOR}file:///home/workspace__INDEX__0`);
   });
 

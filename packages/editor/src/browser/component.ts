@@ -2,19 +2,19 @@ import isEqual from 'lodash/isEqual';
 import uniqWith from 'lodash/uniqWith';
 import ReactDOM from 'react-dom';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { ExtensionActivateEvent, IDisposable, IEventBus } from '@opensumi/ide-core-common';
 
-import { IResource, IEditorOpenType } from '../common';
+import { IEditorOpenType, IResource } from '../common';
 
 import {
+  EditorComponentDisposeEvent,
   EditorComponentRegistry,
+  EditorComponentRenderMode,
+  EditorSide,
   IEditorComponent,
   IEditorComponentResolver,
-  EditorComponentRenderMode,
   IEditorSideWidget,
-  EditorSide,
-  EditorComponentDisposeEvent,
   RegisterEditorComponentEvent,
   RegisterEditorSideComponentEvent,
 } from './types';
@@ -35,6 +35,7 @@ export class EditorComponentRegistryImpl implements EditorComponentRegistry {
 
   private sideWidgets = {
     bottom: new Set<IEditorSideWidget>(),
+    top: new Set<IEditorSideWidget>(),
   };
 
   private initialPropsMap: Map<string, any> = new Map();
@@ -107,7 +108,7 @@ export class EditorComponentRegistryImpl implements EditorComponentRegistry {
     let results: IEditorOpenType[] = [];
     const resolvers = this.getResolvers(resource.uri.scheme).slice(); // 防止异步操作时数组被改变
     let shouldBreak = false;
-    const resolve = (res) => {
+    const resolve = (res: IEditorOpenType[]) => {
       results = res;
       shouldBreak = true;
     };

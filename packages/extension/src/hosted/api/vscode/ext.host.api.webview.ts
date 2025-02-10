@@ -1,33 +1,34 @@
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
+  CancellationToken,
   Emitter,
   Event,
-  IExtensionInfo,
   Disposable as IDEDisposable,
-  CancellationToken,
+  IExtensionInfo,
   Schemes,
 } from '@opensumi/ide-core-common';
 
 import {
-  IMainThreadWebview,
   IExtHostWebview,
-  MainThreadAPIIdentifier,
-  IWebviewPanelViewState,
+  IExtHostWebviewView,
+  IExtensionDescription,
+  IMainThreadWebview,
+  IMainThreadWebviewView,
   IWebviewOptions,
-  Webview,
-  WebviewPanel,
   IWebviewPanelOptions,
+  IWebviewPanelViewState,
+  MainThreadAPIIdentifier,
+  ViewBadge,
   ViewColumn,
+  Webview,
+  WebviewHandle,
+  WebviewPanel,
   WebviewPanelOnDidChangeViewStateEvent,
   WebviewPanelSerializer,
   WebviewView,
-  WebviewHandle,
-  IMainThreadWebviewView,
-  IExtHostWebviewView,
-  IExtensionDescription,
   WebviewViewProvider,
 } from '../../../common/vscode';
-import { Uri, Disposable } from '../../../common/vscode/ext-types';
+import { Disposable, Uri } from '../../../common/vscode/ext-types';
 
 type IconPath = Uri | { light: Uri; dark: Uri };
 
@@ -41,7 +42,13 @@ export class ExtHostWebview implements Webview {
   public readonly _onMessageEmitter = new Emitter<any>();
   public readonly onDidReceiveMessage: Event<any> = this._onMessageEmitter.event;
 
-  constructor(handle: string, proxy: IMainThreadWebview, options: IWebviewOptions, private cspResourceRoots: string[]) {
+  constructor(
+    handle: string,
+    proxy: IMainThreadWebview,
+    options: IWebviewOptions,
+    private cspResourceRoots: string[],
+    private extensionLocation?: Uri,
+  ) {
     this._handle = handle;
     this._proxy = proxy;
     this._options = options;
@@ -91,7 +98,11 @@ export class ExtHostWebview implements Webview {
   }
 
   public get cspSource() {
-    return this.cspResourceRoots.join(' ');
+    let cspSource = this.cspResourceRoots.join(' ');
+    if (this.extensionLocation) {
+      cspSource += ` 'self' vscode-resource:/${this.extensionLocation.path}/`.toLowerCase();
+    }
+    return cspSource;
   }
 
   public toWebviewResource(resource: Uri): Uri {
@@ -315,7 +326,7 @@ export class ExtHostWebviewService implements IExtHostWebview {
     const handle = this.getNextHandle();
     this._proxy.$createWebviewPanel(handle, viewType, title, webviewShowOptions, options, extension);
 
-    const webview = new ExtHostWebview(handle, this._proxy, options, this.resourceRoots);
+    const webview = new ExtHostWebview(handle, this._proxy, options, this.resourceRoots, extensionLocation);
     const panel = new ExtHostWebviewPanel(handle, this._proxy, viewType, title, viewColumn, options, webview);
     this._webviewPanels.set(handle, panel);
     return panel;
@@ -420,6 +431,7 @@ class ExtHostWebviewView extends IDEDisposable implements WebviewView {
   #isVisible: boolean;
   #title: string | undefined;
   #description: string | undefined;
+  #badge?: ViewBadge;
 
   constructor(
     handle: WebviewHandle,
@@ -486,6 +498,19 @@ class ExtHostWebviewView extends IDEDisposable implements WebviewView {
     if (this.#description !== value) {
       this.#description = value;
       this.#proxy.$setWebviewViewDescription(this.#handle, value);
+    }
+  }
+
+  public get badge(): ViewBadge | undefined {
+    this.assertNotDisposed();
+    return this.#badge;
+  }
+
+  public set badge(badge: ViewBadge | undefined) {
+    this.assertNotDisposed();
+    if (this.#badge !== badge) {
+      this.#badge = badge;
+      this.#proxy.$setBadge(this.#handle, badge);
     }
   }
 

@@ -1,38 +1,42 @@
-import { observer } from 'mobx-react-lite';
+import cls from 'classnames';
+import debounce from 'lodash/debounce';
 import React from 'react';
 
-import { useInjectable, getIcon } from '@opensumi/ide-core-browser';
+import { FRAME_THREE, getIcon, localize, useAutorun, useEventEffect, useInjectable } from '@opensumi/ide-core-browser';
 
 import {
   ITerminalController,
+  ITerminalError,
+  ITerminalErrorService,
   ITerminalGroupViewService,
+  ITerminalNetwork,
   ITerminalSearchService,
   IWidget,
-  ITerminalErrorService,
-  ITerminalNetwork,
-  ITerminalError,
 } from '../../common';
 
 import ResizeView, { ResizeDirection } from './resize.view';
 import styles from './terminal.module.less';
 import TerminalWidget from './terminal.widget';
 
-import 'xterm/css/xterm.css';
+import '@xterm/xterm/css/xterm.css';
 
-export default observer(() => {
+export default () => {
   const controller = useInjectable<ITerminalController>(ITerminalController);
-  const view = useInjectable<ITerminalGroupViewService>(ITerminalGroupViewService);
   const searchService = useInjectable<ITerminalSearchService>(ITerminalSearchService);
   const errorService = useInjectable<ITerminalErrorService>(ITerminalErrorService);
   const network = useInjectable<ITerminalNetwork>(ITerminalNetwork);
-  const { errors } = errorService;
-  const { groups, currentGroupIndex, currentGroupId } = view;
+
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const wrapperRef: React.RefObject<HTMLDivElement> = React.createRef();
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+
+  const view = useInjectable<ITerminalGroupViewService>(ITerminalGroupViewService);
+  const currentGroupId = useAutorun(view.currentGroupId);
+  const currentGroupIndex = useAutorun(view.currentGroupIndex);
+  const groups = useAutorun(view.groups);
 
   React.useEffect(() => {
-    const dispose = searchService.onOpen(() => {
-      if (inputRef.current) {
+    const dispose = searchService.onVisibleChange((show) => {
+      if (show && inputRef.current) {
         inputRef.current.focus();
 
         if (inputRef.current.value.length > 0) {
@@ -42,6 +46,18 @@ export default observer(() => {
     });
     return () => dispose.dispose();
   }, [searchService, inputRef.current]);
+
+  const [themeBackground, setThemeBackground] = React.useState(controller.themeBackground);
+
+  useEventEffect(controller.onThemeBackgroundChange, (themeBackground) => {
+    setThemeBackground(themeBackground);
+  });
+
+  const [errors, setErrors] = React.useState(errorService.errors);
+  const func = debounce(() => {
+    setErrors(errorService.errors);
+  }, FRAME_THREE);
+  useEventEffect(errorService.onErrorsChange, func);
 
   const renderWidget = React.useCallback(
     (widget: IWidget, index: number) => {
@@ -57,10 +73,18 @@ export default observer(() => {
     [currentGroupIndex, controller, errors, network, view],
   );
 
+  const [isVisible, setIsVisible] = React.useState(searchService.isVisible);
+  useEventEffect(searchService.onVisibleChange, (visible) => {
+    setIsVisible(visible);
+  });
+
+  const [inputText, setInputText] = React.useState('');
+
   const searchInput = React.useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      searchService.input = event.target.value;
+      searchService.text = event.target.value;
       searchService.search();
+      setInputText(event.target.value);
     },
     [searchService],
   );
@@ -90,29 +114,31 @@ export default observer(() => {
     <div
       ref={wrapperRef}
       className={styles.terminalWrapper}
-      style={{ backgroundColor: controller.themeBackground }}
+      style={{ backgroundColor: themeBackground }}
       data-group-current={currentGroupId}
     >
-      {searchService.show && (
+      {isVisible && (
         <div className={styles.terminalSearch}>
-          <input
-            autoFocus
-            ref={inputRef}
-            placeholder='查找'
-            value={searchService.input}
-            onChange={searchInput}
-            onKeyDown={searchKeyDown}
-          />
-          <div className={getIcon('close')} onClick={() => searchService.close()}></div>
+          <div className='kt-input-box'>
+            <input
+              autoFocus
+              ref={inputRef}
+              placeholder={localize('common.find')}
+              value={inputText}
+              onChange={searchInput}
+              onKeyDown={searchKeyDown}
+            />
+          </div>
+          <div className={cls(styles.closeBtn, getIcon('close'))} onClick={() => searchService.close()}></div>
         </div>
       )}
       {groups.map((group, index) => {
-        if (!group.activated) {
+        if (!group.activated.get()) {
           return;
         }
         return (
           <div
-            data-group-rendered={group.activated}
+            data-group-rendered={group.activated.get()}
             key={`terminal-${group.id}`}
             style={{ display: currentGroupIndex === index ? 'block' : 'none' }}
             className={styles.group}
@@ -132,4 +158,4 @@ export default observer(() => {
       })}
     </div>
   );
-});
+};

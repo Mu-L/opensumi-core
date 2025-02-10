@@ -4,31 +4,31 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-  isStringArray,
-  isString,
-  ProblemMatcherType,
-  NamedProblemMatcher,
-  objects,
-  formatLocalize,
-  isBoolean,
-  isArray,
-  ProblemMatcher,
-  isUndefined,
   IJSONSchemaMap,
-  uuid,
-  IStringDictionary,
-  KeyedTaskIdentifier,
   IProblemMatcherRegistry,
-  ITaskDefinitionRegistry,
   IProblemPatternRegistry,
+  IStringDictionary,
+  ITaskDefinitionRegistry,
+  KeyedTaskIdentifier,
+  NamedProblemMatcher,
   NamedProblemPattern,
   Platform,
+  ProblemMatcher,
+  ProblemMatcherType,
+  formatLocalize,
+  isArray,
+  isBoolean,
+  isString,
+  isStringArray,
+  isUndefined,
+  objects,
+  uuid,
 } from '@opensumi/ide-core-common';
 
 import { IWorkspaceFolder } from '../common';
 import * as TaskTypes from '../common/task';
 
-import { IProblemReporterBase, ValidationStatus, ProblemMatcherParser, Config } from './parser';
+import { Config, IProblemReporterBase, ProblemMatcherParser, ValidationStatus } from './parser';
 
 const { deepClone } = objects;
 
@@ -1812,7 +1812,6 @@ namespace TaskParser {
     }
     const defaultBuildTask: { task: TaskTypes.Task | undefined; rank: number } = { task: undefined, rank: -1 };
     const defaultTestTask: { task: TaskTypes.Task | undefined; rank: number } = { task: undefined, rank: -1 };
-    // tslint:disable-next-line: variable-name
     const schema2_0_0: boolean = context.schemaVersion === TaskTypes.JsonSchemaVersion.V2_0_0;
     const baseLoadIssues = deepClone(context.taskLoadIssues);
     for (let index = 0; index < externals.length; index++) {
@@ -2054,7 +2053,6 @@ export interface ParseResult {
   engine: TaskTypes.ExecutionEngine;
 }
 
-// tslint:disable-next-line: no-empty-interface
 export type IProblemReporter = IProblemReporterBase;
 
 class UUIDMap {

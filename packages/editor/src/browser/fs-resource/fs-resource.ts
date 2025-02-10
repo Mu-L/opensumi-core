@@ -1,22 +1,20 @@
 import { Autowired, Injectable } from '@opensumi/di';
 import {
+  IApplicationService,
+  LRUMap,
+  MessageType,
   OperatingSystem,
   URI,
-  MaybePromise,
   WithEventBus,
-  localize,
   formatLocalize,
-  MessageType,
-  LRUMap,
-  IApplicationService,
+  localize,
 } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import { FileChangeType, path } from '@opensumi/ide-core-common';
-import { IFileServiceClient, FileStat } from '@opensumi/ide-file-service/lib/common';
+import { FileStat, IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import { IDialogService } from '@opensumi/ide-overlay';
 
-import { IResourceProvider, IResource, ResourceNeedUpdateEvent, AskSaveResult } from '../../common';
-import { DIFF_SCHEME } from '../../common';
+import { AskSaveResult, DIFF_SCHEME, IResource, IResourceProvider, ResourceNeedUpdateEvent } from '../../common';
 import { IEditorDocumentModelService } from '../doc-model/types';
 
 import { FileTreeSet } from './file-tree-set';
@@ -47,6 +45,8 @@ export class FileSystemResourceProvider extends WithEventBus implements IResourc
   private involvedFiles: FileTreeSet;
 
   private ready: Promise<void>;
+
+  private userhomePath: URI | null;
 
   constructor() {
     super();
@@ -103,21 +103,47 @@ export class FileSystemResourceProvider extends WithEventBus implements IResourc
     return this.cachedFileStat.get(uri);
   }
 
+  private async getCurrentUserHome() {
+    if (!this.userhomePath) {
+      try {
+        const userhome = await this.fileServiceClient.getCurrentUserHome();
+        if (userhome) {
+          this.userhomePath = new URI(userhome.uri);
+        }
+      } catch (err) {}
+    }
+    return this.userhomePath;
+  }
+
+  private async getReadableTooltip(path: URI) {
+    const pathStr = path.toString();
+    const userhomePath = await this.getCurrentUserHome();
+    if (!userhomePath) {
+      return decodeURIComponent(path.withScheme('').toString());
+    }
+    if (userhomePath.isEqualOrParent(path)) {
+      const userhomePathStr = userhomePath && userhomePath.toString();
+      return decodeURIComponent(pathStr.replace(userhomePathStr, '~'));
+    }
+    return decodeURIComponent(path.withScheme('').toString());
+  }
+
   async provideResource(uri: URI): Promise<IResource<any>> {
-    // 获取文件类型 getFileType: (path: string) => string
     await this.ready;
     this.involvedFiles.add(uri.codeUri.fsPath);
     return Promise.all([
       this.getFileStat(uri.toString()),
       this.labelService.getName(uri),
       this.labelService.getIcon(uri),
-    ] as const).then(([stat, name, icon]) => ({
+      this.getReadableTooltip(uri),
+    ] as const).then(([stat, name, icon, title]) => ({
       name: stat ? name : name + localize('file.resource-deleted', '(已删除)'),
       icon,
       uri,
       metadata: null,
       deleted: !stat,
       supportsRevive: true,
+      title,
     }));
   }
 
@@ -155,8 +181,8 @@ export class FileSystemResourceProvider extends WithEventBus implements IResourc
     this.cachedFileStat.delete(resource.uri.toString());
   }
   async shouldCloseResourceWithoutConfirm(resource: IResource) {
-    const documentModelRef = this.documentModelService.getModelReference(resource.uri, 'close-resource-check');
-    if (documentModelRef && documentModelRef.instance.dirty) {
+    const documentModelRef = this.documentModelService.getModelDescription(resource.uri, 'close-resource-check');
+    if (documentModelRef && documentModelRef.dirty) {
       return true;
     }
     return false;
@@ -178,6 +204,7 @@ export class FileSystemResourceProvider extends WithEventBus implements IResourc
       documentModelRef.dispose();
       return false;
     } else {
+      documentModelRef.dispose();
       return true;
     }
   }
@@ -196,11 +223,8 @@ export class FileSystemResourceProvider extends WithEventBus implements IResourc
         }
       }
     }
-    const documentModelRef = this.documentModelService.getModelReference(resource.uri, 'close-resource-check');
-    if (!documentModelRef || !documentModelRef.instance.dirty) {
-      if (documentModelRef) {
-        documentModelRef.dispose();
-      }
+    const documentModelRef = this.documentModelService.getModelDescription(resource.uri, 'close-resource-check');
+    if (!documentModelRef || !documentModelRef.dirty) {
       return true;
     }
 
@@ -210,11 +234,11 @@ export class FileSystemResourceProvider extends WithEventBus implements IResourc
       [localize('file.prompt.save', 'Save')]: AskSaveResult.SAVE,
       [localize('file.prompt.cancel', 'Cancel')]: AskSaveResult.CANCEL,
     };
-    const selection = await this.dialogService.open(
-      formatLocalize('saveChangesMessage', resource.name),
-      MessageType.Info,
-      Object.keys(buttons),
-    );
+    const selection = await this.dialogService.open({
+      message: formatLocalize('saveChangesMessage', resource.name),
+      type: MessageType.Info,
+      buttons: Object.keys(buttons),
+    });
     const result = buttons[selection!];
     return this.close(resource, result);
   }

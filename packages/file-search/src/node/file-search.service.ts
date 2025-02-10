@@ -2,9 +2,9 @@ import readline from 'readline';
 
 import fuzzy from 'fuzzy';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { CancellationToken, CancellationTokenSource, path } from '@opensumi/ide-core-common';
-import { URI, FileUri, INodeLogger } from '@opensumi/ide-core-node';
+import { INodeLogger } from '@opensumi/ide-core-node';
 import { IProcessFactory } from '@opensumi/ide-process';
 import { rgPath } from '@opensumi/vscode-ripgrep';
 
@@ -20,6 +20,12 @@ export class FileSearchService implements IFileSearchService {
   @Autowired(INodeLogger)
   logger: INodeLogger;
 
+  private isAbsolutePathPattern(pattern: string): boolean {
+    return path.isAbsolute(pattern) || pattern.startsWith('/') || pattern.startsWith('\\');
+  }
+
+  // 这里应该返回文件的 `fsPath` 而非 `file://` 协议文件路径
+  // 否则在 Windows 下，盘符路径会被隐藏
   async find(
     searchPattern: string,
     options: IFileSearchService.Options,
@@ -38,6 +44,15 @@ export class FileSearchService implements IFileSearchService {
     };
 
     const roots: IFileSearchService.RootOptions = options.rootOptions || {};
+    let stringPattern = searchPattern.toLocaleLowerCase();
+
+    // 如果传入绝对路径，则将父级目录作为根目录
+    if (this.isAbsolutePathPattern(searchPattern)) {
+      const parent = path.dirname(searchPattern);
+      roots[parent] = {};
+      stringPattern = path.basename(searchPattern).toLocaleLowerCase();
+    }
+
     if (options.rootUris) {
       for (const rootUri of options.rootUris) {
         if (!roots[rootUri]) {
@@ -45,6 +60,7 @@ export class FileSearchService implements IFileSearchService {
         }
       }
     }
+
     // eslint-disable-next-line guard-for-in
     for (const rootUri in roots) {
       const rootOptions = roots[rootUri];
@@ -66,17 +82,16 @@ export class FileSearchService implements IFileSearchService {
 
     const exactMatches = new Set<string>();
     const fuzzyMatches = new Set<string>();
-    const stringPattern = searchPattern.toLocaleLowerCase();
+
     await Promise.all(
-      Object.keys(roots).map(async (root) => {
+      Object.keys(roots).map(async (cwd) => {
         try {
-          const rootUri = new URI(root);
-          const rootOptions = roots[root];
+          const rootOptions = roots[cwd];
           await this.doFind(
-            rootUri,
+            cwd,
             rootOptions,
             (candidate) => {
-              const fileUri = FileUri.create(path.join(rootUri.codeUri.fsPath, candidate)).toString();
+              const fileUri = path.join(cwd, candidate);
               if (exactMatches.has(fileUri) || fuzzyMatches.has(fileUri)) {
                 return;
               }
@@ -96,8 +111,7 @@ export class FileSearchService implements IFileSearchService {
             token,
           );
         } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('Failed to search:', root, e);
+          this.logger.error(`Failed to search on path ${cwd}.\n${e}`);
         }
       }),
     );
@@ -117,14 +131,13 @@ export class FileSearchService implements IFileSearchService {
   }
 
   private doFind(
-    rootUri: URI,
+    cwd: string,
     options: IFileSearchService.BaseOptions,
     accept: (fileUri: string) => void,
     token: CancellationToken,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        const cwd = FileUri.fsPath(rootUri);
         const args = this.getSearchArgs(options);
         const process = this.processFactory.create({ command: replaceAsarInPath(rgPath), args, options: { cwd } });
         process.onError(reject);
@@ -148,7 +161,7 @@ export class FileSearchService implements IFileSearchService {
   }
 
   private getSearchArgs(options: IFileSearchService.BaseOptions): string[] {
-    const args = ['--files', '--hidden', '--case-sensitive'];
+    const args = ['--files', '--hidden', '--case-sensitive', '--no-require-git'];
     if (options.includePatterns) {
       for (const includePattern of options.includePatterns) {
         if (includePattern) {

@@ -1,9 +1,9 @@
 import { Injector } from '@opensumi/di';
 import {
-  createPreferenceProxy,
   PreferenceProxy,
-  PreferenceService,
   PreferenceSchema,
+  PreferenceService,
+  createPreferenceProxy,
 } from '@opensumi/ide-core-browser';
 
 export const workspacePreferenceSchema: PreferenceSchema = {
@@ -15,7 +15,7 @@ export const workspacePreferenceSchema: PreferenceSchema = {
       default: false,
     },
     'workspace.supportMultiRootWorkspace': {
-      description: 'Enable the multi-root workspace support to test this feature internally',
+      description: 'Enable multi-root workspace support',
       type: 'boolean',
       default: false,
     },

@@ -1,24 +1,24 @@
 import cls from 'classnames';
-import { action, observable } from 'mobx';
-import { observer } from 'mobx-react-lite';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import { Injectable } from '@opensumi/di';
 import { Option, Select } from '@opensumi/ide-components';
 import {
   AppConfig,
+  DisposableCollection,
+  PreferenceService,
+  electronEnv,
   getIcon,
   localize,
-  PreferenceService,
+  useAutorun,
+  useDesignStyles,
   useInjectable,
-  DisposableCollection,
-  electronEnv,
-  isMacintosh,
 } from '@opensumi/ide-core-browser';
 import { InlineMenuBar } from '@opensumi/ide-core-browser/lib/components/actions';
 import { Select as NativeSelect } from '@opensumi/ide-core-browser/lib/components/select';
-import { LAYOUT_VIEW_SIZE } from '@opensumi/ide-core-browser/lib/layout/constants';
+import { LayoutViewSizeConfig } from '@opensumi/ide-core-browser/lib/layout/constants';
 import { IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
+import { derived, observableValue, transaction } from '@opensumi/ide-monaco/lib/common/observable';
 
 import { DebugState } from '../../../common';
 import { DebugAction } from '../../components';
@@ -31,57 +31,58 @@ import { DebugToolbarService } from './debug-toolbar.service';
 
 @Injectable()
 class FloatController {
-  @observable
-  x: number;
+  private _x = observableValue(this, 0);
+  private _line = observableValue(this, 0);
+  private _enable = observableValue(this, false);
 
-  @observable
-  line: number;
+  private y: number = 0;
+  private last: number = 0;
+  private origin: number = 0;
 
-  @observable
-  enable: boolean;
+  state = derived(this, (reader) => ({
+    enable: this._enable.read(reader),
+    x: this._x.read(reader),
+    line: this._line.read(reader),
+  }));
 
-  private _origin: number;
-  private _last: number;
-
-  private _y: number;
-
-  constructor() {
-    this.x = 0;
-    this.line = 0;
-    this.enable = false;
-    this._origin = 0;
-    this._last = 0;
-    this._y = 0;
+  setEnable(value: boolean) {
+    transaction((tx) => {
+      this._enable.set(value, tx);
+    });
   }
 
-  @action.bound
   onMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-    this.enable = true;
-    this._origin = e.clientX;
-    this._y = e.clientY;
+    this.setEnable(true);
+    this.y = e.clientY;
+    this.origin = e.clientX;
   }
 
-  @action.bound
   onMouseMove(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
     e.stopPropagation();
-    if (this.enable) {
-      this.x = e.clientX - this._origin + this._last;
-      this.line = e.clientY - this._y > 10 ? 1 : 0;
-    }
+    transaction((tx) => {
+      if (this._enable.get()) {
+        this._x.set(e.clientX - this.origin + this.last, tx);
+        this._line.set(e.clientY - this.y > 10 ? 1 : 0, tx);
+      }
+    });
   }
 
-  @action.bound
   onMouseUp() {
-    this.enable = false;
-    this._last = this.x;
+    this.setEnable(false);
+    this.last = this._x.get();
   }
 }
 
 export interface DebugToolbarViewProps {
   float: boolean;
+  className?: string;
 }
 
-export const DebugToolbarView = observer((props: DebugToolbarViewProps) => {
+/**
+ * 该组件支持用户导入
+ * 后续如果有一些改动需要考虑是否有 breakchange
+ */
+export const DebugToolbarView = (props: DebugToolbarViewProps) => {
   const {
     state,
     toolBarMenuMap,
@@ -96,183 +97,204 @@ export const DebugToolbarView = observer((props: DebugToolbarViewProps) => {
     sessions,
     updateCurrentSession,
   } = useInjectable<DebugToolbarService>(DebugToolbarService);
+  const autorunState = useAutorun(state);
+  const autorunCurrentSession = useAutorun(currentSession);
+  const autorunSessions = useAutorun(sessions);
+
   const { isElectronRenderer } = useInjectable<AppConfig>(AppConfig);
   const isAttach =
-    !!currentSession &&
-    currentSession.configuration.request === 'attach' &&
-    !isExtensionHostDebugging(currentSession.configuration);
+    !!autorunCurrentSession &&
+    autorunCurrentSession.configuration?.request === 'attach' &&
+    !isExtensionHostDebugging(autorunCurrentSession.configuration);
 
-  const currentSessionId = currentSession && currentSession.id;
+  const currentSessionId = autorunCurrentSession && autorunCurrentSession.id;
 
-  const renderToolBar = (session: DebugSession | undefined): React.ReactNode => {
-    if (session && session.id && toolBarMenuMap.has(session.id)) {
-      return <InlineMenuBar menus={toolBarMenuMap.get(session.id)!} />;
-    }
-    return null;
-  };
-  const renderStop = (state: DebugState): React.ReactNode => {
-    if (isAttach) {
-      return (
-        <DebugAction
-          run={doStop}
-          enabled={typeof state === 'number' && state !== DebugState.Inactive}
-          icon={'disconnect'}
-          label={localize('debug.action.disattach')}
-        />
-      );
-    }
-    return (
-      <DebugAction
-        run={doStop}
-        enabled={typeof state === 'number' && state !== DebugState.Inactive}
-        icon={'stop'}
-        label={localize('debug.action.stop')}
-      />
-    );
-  };
-  const renderContinue = (state: DebugState): React.ReactNode => {
-    if (state === DebugState.Stopped) {
-      return <DebugAction run={doContinue} icon={'continue'} label={localize('debug.action.continue')} />;
-    }
-    return (
-      <DebugAction
-        run={doPause}
-        enabled={typeof state === 'number' && state === DebugState.Running}
-        icon={'pause'}
-        label={localize('debug.action.pause')}
-      />
-    );
-  };
+  const renderToolBar = useCallback(
+    (session: DebugSession | undefined): React.ReactNode => {
+      if (session && session.id) {
+        const menus = toolBarMenuMap.get(session.id);
+        if (menus) {
+          return <InlineMenuBar menus={menus} />;
+        }
+      }
+      return null;
+    },
+    [toolBarMenuMap],
+  );
 
-  const renderSessionOptions = (sessions: DebugSession[]) =>
-    sessions.map((session: DebugSession) => {
-      if (isElectronRenderer) {
+  const renderStop = useCallback(
+    (state: DebugState): React.ReactNode => {
+      if (isAttach) {
         return (
-          <option key={session.id} value={session.id}>
-            {session.label}
-          </option>
+          <DebugAction
+            run={doStop}
+            enabled={state !== DebugState.Inactive}
+            icon={'disconnect'}
+            label={localize('debug.action.disattach')}
+          />
         );
       }
       return (
-        <Option key={session.id} label={session.label} value={session.id}>
-          {session.label}
-        </Option>
+        <DebugAction
+          run={doStop}
+          enabled={state !== DebugState.Inactive}
+          icon={'stop'}
+          label={localize('debug.action.stop')}
+        />
       );
-    });
+    },
+    [doStop],
+  );
 
-  const renderSelections = (sessions: DebugSession[]) => {
-    if (sessions.length > 1) {
-      return (
-        <div className={cls(styles.debug_selection)}>
-          {isElectronRenderer ? (
-            <NativeSelect value={currentSessionId} onChange={setCurrentSession}>
-              {renderSessionOptions(sessions)}
-            </NativeSelect>
-          ) : (
-            <Select
-              className={cls(styles.debug_selection, styles.special_radius)}
-              size={props.float ? 'small' : 'default'}
-              value={currentSessionId}
-              options={sessions.map((s) => ({ label: s.label, value: s.id }))}
-              onChange={setCurrentSession}
-            >
-              {renderSessionOptions(sessions)}
-            </Select>
-          )}
-        </div>
-      );
-    }
-  };
-
-  const setCurrentSession = (event: React.ChangeEvent<HTMLSelectElement> | string | number) => {
-    let value = event;
-    if (isElectronRenderer) {
-      value = (event as React.ChangeEvent<HTMLSelectElement>).target.value;
-    }
-
-    if (!sessions) {
-      return;
-    }
-    for (const session of sessions) {
-      if (session.id === value) {
-        updateCurrentSession(session);
+  const renderContinue = useCallback(
+    (state: DebugState): React.ReactNode => {
+      if (state === DebugState.Stopped) {
+        return <DebugAction run={doContinue} icon={'continue'} label={localize('debug.action.continue')} />;
       }
-    }
-  };
+      return (
+        <DebugAction
+          run={doPause}
+          enabled={autorunState === DebugState.Running}
+          icon={'pause'}
+          label={localize('debug.action.pause')}
+        />
+      );
+    },
+    [doPause, doContinue],
+  );
+
+  const renderSessionOptions = useCallback(
+    (sessions: DebugSession[]) =>
+      sessions.map((session: DebugSession) => {
+        if (isElectronRenderer) {
+          return (
+            <option key={session.id} value={session.id}>
+              {session.label}
+            </option>
+          );
+        }
+        return (
+          <Option key={session.id} label={session.label} value={session.id}>
+            {session.label}
+          </Option>
+        );
+      }),
+    [],
+  );
+
+  const renderSelections = useCallback(
+    (sessions: DebugSession[]) => {
+      if (sessions.length > 1) {
+        return (
+          <div className={cls(styles.debug_selection)}>
+            {isElectronRenderer ? (
+              <NativeSelect value={currentSessionId} onChange={setCurrentSession}>
+                {renderSessionOptions(sessions)}
+              </NativeSelect>
+            ) : (
+              <Select
+                className={cls(styles.debug_selection, styles.special_radius)}
+                size={props.float ? 'small' : 'default'}
+                value={currentSessionId}
+                options={sessions.map((s) => ({ label: s.label, value: s.id }))}
+                onChange={setCurrentSession}
+              >
+                {renderSessionOptions(sessions)}
+              </Select>
+            )}
+          </div>
+        );
+      }
+    },
+    [currentSessionId],
+  );
+
+  const setCurrentSession = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement> | string | number) => {
+      let value = event;
+      if (isElectronRenderer) {
+        value = (event as React.ChangeEvent<HTMLSelectElement>).target.value;
+      }
+
+      if (!autorunSessions) {
+        return;
+      }
+      for (const session of autorunSessions) {
+        if (session.id === value) {
+          updateCurrentSession(session);
+        }
+      }
+    },
+    [autorunSessions, updateCurrentSession],
+  );
 
   return (
-    <React.Fragment>
-      <div className={styles.debug_action_bar}>
-        {renderSelections(sessions.filter((s: DebugSession) => !s.parentSession))}
-        <div className={styles.debug_actions}>
-          {renderContinue(state)}
-          <DebugAction
-            run={doStepOver}
-            enabled={typeof state === 'number' && state === DebugState.Stopped}
-            icon={'step'}
-            label={localize('debug.action.step-over')}
-          />
-          <DebugAction
-            run={doStepIn}
-            enabled={typeof state === 'number' && state === DebugState.Stopped}
-            icon={'step-in'}
-            label={localize('debug.action.step-into')}
-          />
-          <DebugAction
-            run={doStepOut}
-            enabled={typeof state === 'number' && state === DebugState.Stopped}
-            icon={'step-out'}
-            label={localize('debug.action.step-out')}
-          />
-          <DebugAction
-            run={doRestart}
-            enabled={typeof state === 'number' && state !== DebugState.Inactive}
-            icon={'reload'}
-            label={localize('debug.action.restart')}
-          />
-          {renderStop(state)}
-          {renderToolBar(currentSession)}
-        </div>
+    <div className={cls(styles.debug_action_bar, props.className || '')}>
+      {renderSelections(autorunSessions.filter((s: DebugSession) => !s.parentSession))}
+      <div className={styles.debug_actions}>
+        {renderContinue(autorunState)}
+        <DebugAction
+          run={doStepOver}
+          enabled={autorunState === DebugState.Stopped}
+          icon={'step'}
+          label={localize('debug.action.step-over')}
+        />
+        <DebugAction
+          run={doStepIn}
+          enabled={autorunState === DebugState.Stopped}
+          icon={'step-in'}
+          label={localize('debug.action.step-into')}
+        />
+        <DebugAction
+          run={doStepOut}
+          enabled={autorunState === DebugState.Stopped}
+          icon={'step-out'}
+          label={localize('debug.action.step-out')}
+        />
+        <DebugAction
+          run={doRestart}
+          enabled={autorunState !== DebugState.Inactive}
+          icon={'reload'}
+          label={localize('debug.action.restart')}
+        />
+        {renderStop(autorunState)}
+        {renderToolBar(autorunCurrentSession)}
       </div>
-    </React.Fragment>
+    </div>
   );
-});
+};
 
 const DebugPreferenceTopKey = 'debug.toolbar.top';
 const DebugPreferenceHeightKey = 'debug.toolbar.height';
 
-const FloatDebugToolbarView = observer(() => {
-  const controller = useInjectable<FloatController>(FloatController);
+const FloatDebugToolbarView = () => {
   const preference = useInjectable<PreferenceService>(PreferenceService);
   const { isElectronRenderer } = useInjectable<AppConfig>(AppConfig);
-  const debugToolbarService = useInjectable<DebugToolbarService>(DebugToolbarService);
+  const layoutViewSize = useInjectable<LayoutViewSizeConfig>(LayoutViewSizeConfig);
+  const styles_debug_toolbar_wrapper = useDesignStyles(styles.debug_toolbar_wrapper, 'debug_toolbar_wrapper');
   const [toolbarOffsetTop, setToolbarOffsetTop] = useState<number>(0);
-  const { state } = debugToolbarService;
+
+  const controller = useInjectable<FloatController>(FloatController);
+  const derivedController = useAutorun(controller.state);
+
+  const debugToolbarService = useInjectable<DebugToolbarService>(DebugToolbarService);
+  const state = useAutorun(debugToolbarService.state);
 
   useEffect(() => {
     const disposableCollection = new DisposableCollection();
     const value = preference.get<number>(DebugPreferenceTopKey) || 0;
     if (isElectronRenderer) {
       const uiService: IElectronMainUIService = debugToolbarService.mainUIService;
-      const isNewMacHeaderBar = () => isMacintosh && parseFloat(electronEnv.osRelease) >= 20;
       // Electron 环境下需要在非全屏情况下追加 Header 高度
       uiService.isFullScreen(electronEnv.currentWindowId).then((fullScreen) => {
-        fullScreen
-          ? setToolbarOffsetTop(value)
-          : setToolbarOffsetTop(
-              value +
-                (isNewMacHeaderBar() ? LAYOUT_VIEW_SIZE.TITLEBAR_HEIGHT : LAYOUT_VIEW_SIZE.BIG_SUR_TITLEBAR_HEIGHT),
-            );
+        fullScreen ? setToolbarOffsetTop(value) : setToolbarOffsetTop(value + layoutViewSize.calcOnlyTitleBarHeight());
       });
       disposableCollection.push(
         uiService.on('fullScreenStatusChange', (windowId, fullScreen) => {
           if (windowId === electronEnv.currentWindowId) {
             fullScreen
               ? setToolbarOffsetTop(value)
-              : setToolbarOffsetTop(
-                  value +
-                    (isNewMacHeaderBar() ? LAYOUT_VIEW_SIZE.TITLEBAR_HEIGHT : LAYOUT_VIEW_SIZE.BIG_SUR_TITLEBAR_HEIGHT),
-                );
+              : setToolbarOffsetTop(value + layoutViewSize.calcOnlyTitleBarHeight());
           }
         }),
       );
@@ -287,22 +309,22 @@ const FloatDebugToolbarView = observer(() => {
   const customHeight = preference.get<number>(DebugPreferenceHeightKey) || 0;
 
   const debugToolbarWrapperClass = cls({
-    [styles.debug_toolbar_wrapper]: true,
+    [styles_debug_toolbar_wrapper]: true,
     [styles.debug_toolbar_wrapper_electron]: isElectronRenderer,
   });
 
   if (state) {
     return (
       <div
-        style={{ pointerEvents: controller.enable ? 'all' : 'none' }}
+        style={{ pointerEvents: derivedController.enable ? 'all' : 'none' }}
         className={styles.debug_toolbar_container}
         onMouseMove={(e) => controller.onMouseMove(e)}
         onMouseUp={(e) => controller.onMouseUp()}
       >
         <div
           style={{
-            transform: `translateX(${controller.x}px) translateY(${
-              toolbarOffsetTop + controller.line * customHeight
+            transform: `translateX(${derivedController.x}px) translateY(${
+              toolbarOffsetTop + derivedController.line * customHeight
             }px)`,
             height: `${customHeight}px`,
           }}
@@ -321,15 +343,17 @@ const FloatDebugToolbarView = observer(() => {
     );
   }
 
-  controller.enable = false;
+  controller.setEnable(false);
   return null;
-});
+};
 
-export const DebugToolbarOverlayWidget = observer(() => {
-  const { float } = useInjectable<DebugConfigurationService>(DebugConfigurationService);
+export const DebugToolbarOverlayWidget = () => {
+  const debugConfigurationService = useInjectable<DebugConfigurationService>(DebugConfigurationService);
+  const float = useAutorun(debugConfigurationService.float);
+
   if (!float) {
     return null;
   }
 
   return <FloatDebugToolbarView />;
-});
+};

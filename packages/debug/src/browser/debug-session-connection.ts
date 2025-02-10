@@ -1,31 +1,31 @@
-import { Injectable, Optional, Autowired } from '@opensumi/di';
-import { IWebSocket } from '@opensumi/ide-connection';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
+import { BaseConnection } from '@opensumi/ide-connection/lib/common/connection';
 import {
-  Event,
-  Emitter,
-  DisposableCollection,
-  Disposable,
-  IDisposable,
   Deferred,
+  Disposable,
+  DisposableCollection,
+  Emitter,
+  Event,
+  IDisposable,
   getDebugLogger,
 } from '@opensumi/ide-core-browser';
-import { CancellationToken } from '@opensumi/ide-core-common';
+import { CancellationToken, MaybePromise } from '@opensumi/ide-core-common';
 import { OutputChannel } from '@opensumi/ide-output/lib/browser/output.channel';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
 import {
+  DEBUG_REPORT_NAME,
   DebugConfiguration,
   DebugEventTypes,
   DebugExitEvent,
   DebugRequestTypes,
-  DEBUG_REPORT_NAME,
-  getSequenceId,
   IDebugSessionManager,
+  getSequenceId,
 } from '../common';
 
 import { DebugSessionManager } from './debug-session-manager';
 
-export type DebugRequestHandler = (request: DebugProtocol.Request) => any;
+export type DebugRequestHandler = (request: DebugProtocol.Request) => MaybePromise<any>;
 
 const standardDebugEvents = new Set<Required<keyof DebugEventTypes>>([
   'breakpoint',
@@ -52,7 +52,7 @@ export class DebugSessionConnection implements IDisposable {
   protected readonly manager: DebugSessionManager;
 
   protected readonly pendingRequests = new Map<number, (response: DebugProtocol.Response) => void>();
-  protected readonly connection: Promise<IWebSocket>;
+  protected readonly connection: Promise<BaseConnection<string>>;
 
   protected readonly requestHandlers = new Map<string, DebugRequestHandler>();
 
@@ -67,7 +67,7 @@ export class DebugSessionConnection implements IDisposable {
 
   constructor(
     @Optional() readonly sessionId: string,
-    @Optional() protected readonly connectionFactory: (sessionId: string) => Promise<IWebSocket>,
+    @Optional() protected readonly connectionFactory: (sessionId: string) => Promise<BaseConnection<string>>,
     @Optional() protected readonly traceOutputChannel: OutputChannel | undefined,
   ) {
     this.connection = this.createConnection();
@@ -82,15 +82,14 @@ export class DebugSessionConnection implements IDisposable {
   }
 
   /**
-   * 通过 Connection 模块创建可与 Node 进程通信的链接
-   * @returns IWebSocket
+   * Create a connection that can communicate with the Node process through the Connection module.
    */
-  protected async createConnection(): Promise<IWebSocket> {
+  protected async createConnection(): Promise<BaseConnection<string>> {
     if (this.disposed) {
       throw new Error('Connection has been already disposed.');
     } else {
       const connection = await this.connectionFactory(this.sessionId);
-      connection.onClose((code, reason) => {
+      connection.onceClose((code, reason) => {
         this.fire('exited', { code, reason });
       });
 
@@ -98,7 +97,7 @@ export class DebugSessionConnection implements IDisposable {
 
       this.toDispose.push(
         Disposable.create(() => {
-          connection.close();
+          connection.dispose();
         }),
       );
       return connection;
@@ -182,7 +181,7 @@ export class DebugSessionConnection implements IDisposable {
     };
 
     let cancelationListener: IDisposable;
-    if (args && Object.keys(args).length > 0) {
+    if (args) {
       request.arguments = args;
     }
 
@@ -259,7 +258,9 @@ export class DebugSessionConnection implements IDisposable {
     const handler = this.requestHandlers.get(request.command);
     if (handler) {
       try {
-        response.body = handler(request);
+        // 这里之前没有 await, 是有问题的, 会导致 Server 拿不到对应的结果
+        // 这也就是为什么之前 debug 时选择 console integrated 会导致打不上断点
+        response.body = await handler(request);
       } catch (error) {
         response.success = false;
         response.message = error.message;

@@ -1,14 +1,16 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   AppConfig,
+  DisposableCollection,
+  Emitter,
+  OnEvent,
+  WithEventBus,
+  isMacintosh,
   localize,
   replaceLocalizePlaceholder,
-  Emitter,
-  DisposableCollection,
-  isMacintosh,
 } from '@opensumi/ide-core-browser';
-import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/browser';
-import { basename, dirname, relative } from '@opensumi/ide-utils/lib/path';
+import { ResourceDidUpdateEvent, WorkbenchEditorService } from '@opensumi/ide-editor/lib/browser';
+import { basename, dirname, posix, toSlashes } from '@opensumi/ide-utils/lib/path';
 import { template } from '@opensumi/ide-utils/lib/strings';
 
 import { IElectronHeaderService } from '../../common/header';
@@ -24,17 +26,14 @@ if (isMacintosh) {
 }
 
 @Injectable()
-export class ElectronHeaderService implements IElectronHeaderService {
+export class ElectronHeaderService extends WithEventBus implements IElectronHeaderService {
   disposableCollection = new DisposableCollection();
 
   @Autowired(WorkbenchEditorService)
-  editorService: WorkbenchEditorService;
-
-  @Autowired(INJECTOR_TOKEN)
-  injector: Injector;
+  private readonly editorService: WorkbenchEditorService;
 
   @Autowired(AppConfig)
-  appConfig: AppConfig;
+  private readonly appConfig: AppConfig;
 
   private _onTitleChanged = new Emitter<string>();
   onTitleChanged = this._onTitleChanged.event;
@@ -59,11 +58,17 @@ export class ElectronHeaderService implements IElectronHeaderService {
   }
 
   constructor() {
+    super();
     this.disposableCollection.push(
       this.editorService.onActiveResourceChange(() => {
         this.updateAppTitle();
       }),
     );
+  }
+
+  @OnEvent(ResourceDidUpdateEvent)
+  onResourceDidUpdateEvent() {
+    this.updateAppTitle();
   }
 
   updateAppTitle() {
@@ -94,9 +99,11 @@ export class ElectronHeaderService implements IElectronHeaderService {
     const workspaceDir = appConfig.workspaceDir ? appConfig.workspaceDir : '';
     const workspaceBasename = basename(workspaceDir);
     const activeEditorFull = currentResource?.name ?? '';
-    const activeEditorRelative = activeEditorFull && workspaceDir ? relative(workspaceDir, activeEditorFull) : '';
+    const activeEditorRelative =
+      activeEditorFull && workspaceDir ? makeRelativePath(workspaceDir, activeEditorFull) : '';
     const activeFolderFull = activeEditorFull ? dirname(activeEditorFull) : '';
-    const activeFolderRelative = activeFolderFull && workspaceDir ? relative(workspaceDir, activeFolderFull) : '';
+    const activeFolderRelative =
+      activeFolderFull && workspaceDir ? makeRelativePath(workspaceDir, activeFolderFull) : '';
 
     const activeEditorShort = basename(activeEditorFull);
     const activeEditorMedium = activeEditorRelative;
@@ -142,4 +149,23 @@ export class ElectronHeaderService implements IElectronHeaderService {
   dispose() {
     this.disposableCollection.dispose();
   }
+}
+
+function makeRelativePath(workspaceDir: string, path: string) {
+  if (!path || !workspaceDir) {
+    return '';
+  }
+
+  workspaceDir = toSlashes(workspaceDir);
+  path = toSlashes(path);
+
+  if (!workspaceDir.endsWith(posix.sep)) {
+    workspaceDir += posix.sep;
+  }
+
+  if (path.startsWith(workspaceDir)) {
+    return path.substring(workspaceDir.length);
+  }
+
+  return path;
 }

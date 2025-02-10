@@ -1,9 +1,11 @@
-import type React from 'react';
+import { BasicEvent, Event, MaybeNull } from '@opensumi/ide-core-common';
 
-import { MaybeNull, BasicEvent } from '@opensumi/ide-core-common';
+import { Layout } from '../components/layout/index';
 
-import type { IMenu, IContextMenu } from '../menu/next';
+import type { IContextMenu, IMenu } from '../menu/next';
 import type { SlotLocation } from '../react-providers';
+import type React from 'react';
+import type { ViewBadge } from 'vscode';
 
 export type Side = 'left' | 'right' | 'bottom';
 
@@ -35,6 +37,7 @@ export interface View {
   weight?: number;
   priority?: number;
   collapsed?: boolean;
+  badge?: string | ViewBadge;
   hidden?: boolean;
   component?: React.ComponentType<any>;
   // 使用该参数时, view 的 toolbar 默认不渲染
@@ -58,7 +61,7 @@ export interface ExtViewContainerOptions {
   size?: number;
   activateKeyBinding?: string;
   hidden?: boolean;
-  badge?: string;
+  badge?: string | ViewBadge;
   // 直接使用自定义的React组件，会失去一些对面板的控制能力
   component?: React.ComponentType<any>;
   // 使用自定义组件时可以传入，否则请作为View的一部分传入
@@ -75,6 +78,7 @@ export interface ExtViewContainerOptions {
   fromExtension?: boolean;
   // viewContainer 最小高度，默认 120
   miniSize?: number;
+  alignment?: Layout.alignment;
 }
 export const ComponentRegistry = Symbol('ComponentRegistry');
 
@@ -89,6 +93,11 @@ export interface ComponentRegistryInfo {
   options?: ViewContainerOptions;
 }
 
+export interface ComponentRegistryProvider extends ComponentRegistryInfo {
+  fireChange: (component: ComponentRegistryProvider) => void;
+  onChange: Event<ComponentRegistryProvider>;
+}
+
 export class ResizePayload {
   /**
    * Resize事件，会在用户拖动resize或窗口resize时触发
@@ -96,6 +105,10 @@ export class ResizePayload {
    */
   constructor(public slotLocation: SlotLocation) {}
 }
-export class ResizeEvent extends BasicEvent<ResizePayload> {}
+export class ResizeEvent extends BasicEvent<ResizePayload> {
+  static createDirective(location: SlotLocation) {
+    return `resize:${location}`;
+  }
+}
 
 export class RenderedEvent extends BasicEvent<void> {}

@@ -1,17 +1,17 @@
-import { Optional, Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import {
-  IContextKey,
-  Event,
-  IContextKeyService,
   ContextKeyChangeEvent,
-  getDebugLogger,
   Emitter,
+  Event,
+  IContextKey,
+  IContextKeyService,
   IScopedContextKeyService,
-  PreferenceService,
   PreferenceChanges,
-  PreferenceScope,
   PreferenceSchemaProvider,
+  PreferenceScope,
+  PreferenceService,
   createPreferenceProxy,
+  getDebugLogger,
 } from '@opensumi/ide-core-browser';
 import { Disposable, ILogger } from '@opensumi/ide-core-common';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
@@ -20,17 +20,17 @@ import { StandaloneServices } from '@opensumi/monaco-editor-core/esm/vs/editor/s
 import {
   ConfigurationTarget,
   IConfigurationChangeEvent,
-  IConfigurationService,
-  IConfigurationOverrides,
   IConfigurationData,
+  IConfigurationOverrides,
+  IConfigurationService,
   IConfigurationValue,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/configuration/common/configuration';
 import { ContextKeyService } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService';
 import {
-  ContextKeyExpression,
-  IContextKeyServiceTarget,
   ContextKeyExpr,
+  ContextKeyExpression,
   ContextKeyValue,
+  IContextKeyServiceTarget,
 } from '@opensumi/monaco-editor-core/esm/vs/platform/contextkey/common/contextkey';
 import { KeybindingResolver } from '@opensumi/monaco-editor-core/esm/vs/platform/keybinding/common/keybindingResolver';
 import { IWorkspaceFolder } from '@opensumi/monaco-editor-core/esm/vs/platform/workspace/common/workspace';
@@ -61,6 +61,8 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
     this.preferenceService.onPreferencesChanged(this.triggerPreferencesChanged, this, this.disposables);
     const monacoConfigService = StandaloneServices.get(IConfigurationService);
     monacoConfigService.getValue = this.getValue.bind(this);
+    monacoConfigService.updateValue = this.updateValue.bind(this);
+    monacoConfigService.inspect = this.inspect.bind(this);
   }
 
   public keys() {
@@ -86,7 +88,7 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
     // 在 monaco-editor 内部，default scope 变化时需要刷新内置所有的 config 打头的对应的值
     if (defaultScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: defaultScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(defaultScopeChanges.map((n) => n.preferenceName)),
         source: ConfigurationTarget.DEFAULT,
         change: {
           keys: [],
@@ -96,13 +98,12 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
 
     if (userScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: userScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(userScopeChanges.map((n) => n.preferenceName)),
         source: ConfigurationTarget.USER,
         change: {
           keys: [],
@@ -111,13 +112,12 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
 
     if (workspaceScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: workspaceScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(workspaceScopeChanges.map((n) => n.preferenceName)),
         source: ConfigurationTarget.WORKSPACE,
         change: {
           keys: [],
@@ -126,13 +126,12 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
 
     if (workspaceFolderScopeChanges.length) {
       this._onDidChangeConfiguration.fire({
-        affectedKeys: workspaceFolderScopeChanges.map((n) => n.preferenceName),
+        affectedKeys: new Set(workspaceFolderScopeChanges.map((n) => n.preferenceName)),
         source: this.workspaceService.isMultiRootWorkspaceOpened
           ? ConfigurationTarget.WORKSPACE_FOLDER
           : ConfigurationTarget.WORKSPACE,
@@ -143,7 +142,6 @@ export class ConfigurationService extends Disposable implements IConfigurationSe
         affectsConfiguration(configuration: string) {
           return true;
         },
-        sourceConfig: {},
       });
     }
   }

@@ -1,31 +1,35 @@
-import {
-  MaybePromise,
-  IDisposable,
-  BasicEvent,
-  IRange,
-  MaybeNull,
-  ISelection,
-  URI,
-  Event,
-} from '@opensumi/ide-core-browser';
-import { IMenu } from '@opensumi/ide-core-browser/lib/menu/next';
-import { IThemeColor } from '@opensumi/ide-core-common';
-import { editor } from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { ReactNode } from 'react';
 
 import {
-  IResource,
-  ResourceService,
-  IEditorGroup,
-  IDecorationRenderOptions,
-  ITextEditorDecorationType,
-  TrackedRangeStickiness,
-  OverviewRulerLane,
-  IEditorOpenType,
-  IEditor,
+  BasicEvent,
+  Event,
+  IDisposable,
+  IRange,
+  ISelection,
+  MaybeNull,
+  MaybePromise,
+  URI,
+} from '@opensumi/ide-core-browser';
+import { IContextMenu } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IThemeColor } from '@opensumi/ide-core-common';
+import { editor } from '@opensumi/ide-monaco';
+
+import {
   DragOverPosition,
+  EditorOpenType,
+  IDecorationRenderOptions,
+  IEditor,
+  IEditorGroup,
+  IEditorOpenType,
+  IResource,
+  ITextEditorDecorationType,
+  OverviewRulerLane,
+  ResourceService,
+  TrackedRangeStickiness,
 } from '../common';
 
 import { IEditorDocumentModelContentRegistry } from './doc-model/types';
+import { EditorGroup } from './workbench-editor.service';
 
 export * from '../common';
 
@@ -44,9 +48,14 @@ export interface IEditorComponent<MetaData = any> {
 
   // 渲染模式 默认为 ONE_PER_GROUP
   renderMode?: EditorComponentRenderMode;
+
+  /**
+   * 有关该 component 的额外信息
+   */
+  metadata?: Record<string, any>;
 }
 
-export type EditorSide = 'bottom';
+export type EditorSide = 'bottom' | 'top';
 
 export interface IEditorSideWidget<MetaData = any> {
   /**
@@ -80,10 +89,16 @@ export interface IEditorSideWidget<MetaData = any> {
   initialProps?: unknown;
 }
 
+/**
+ * 默认值: ONE_PER_GROUP
+ * ONE_PER_RESOURCE  - 每个资源只初始化一次组件
+ * ONE_PER_GROUP     - 每个资源在同个 Group 下只初始化一次组件
+ * ONE_PER_WORKBENCH - 整个渲染过程复用同一个组件，即组件仅会初始化一次
+ */
 export enum EditorComponentRenderMode {
-  ONE_PER_RESOURCE = 1, // 每个resource渲染一个新的
-  ONE_PER_GROUP = 2, // 每个Group最多存在一个新的
-  ONE_PER_WORKBENCH = 3, // 整个IDE只有一个, 视图会被重用
+  ONE_PER_RESOURCE = 1,
+  ONE_PER_GROUP = 2,
+  ONE_PER_WORKBENCH = 3,
 }
 
 /**
@@ -99,13 +114,10 @@ export class RegisterEditorComponentEvent extends BasicEvent<string> {}
 export abstract class EditorComponentRegistry {
   abstract registerEditorComponent<T>(component: IEditorComponent<T>, initialProps?: any): IDisposable;
 
-  // 等同于 handlesScheme => 10
-  abstract registerEditorComponentResolver<T>(scheme: string, resolver: IEditorComponentResolver<T>): IDisposable;
-
-  // handlesScheme 返回权重， 小于 0 表示不处理
   abstract registerEditorComponentResolver<T>(
-    // eslint-disable-next-line @typescript-eslint/unified-signatures
-    handlesScheme: (scheme: string) => number,
+    handlesScheme:
+      | string // 等同于 handlesScheme => 10
+      | ((scheme: string) => number), // handlesScheme 返回权重， 小于 0 表示不处理
     resolver: IEditorComponentResolver<T>,
   ): IDisposable;
 
@@ -118,7 +130,7 @@ export abstract class EditorComponentRegistry {
   abstract clearPerWorkbenchComponentCache(componentId: string): void;
 
   /**
-   * 注册一个编辑器的边缘组件（目前只开放了bottom)
+   * 注册一个编辑器的边缘组件（目前只开放了bottom、top)
    * @param widget
    */
   abstract registerEditorSideWidget(widget: IEditorSideWidget): IDisposable;
@@ -180,7 +192,11 @@ export interface IGridResizeEventPayload {
   gridId: string;
 }
 
-export class GridResizeEvent extends BasicEvent<IGridResizeEventPayload> {}
+export class GridResizeEvent extends BasicEvent<IGridResizeEventPayload> {
+  static createDirective(uid: string) {
+    return `grid-resize-${uid}`;
+  }
+}
 
 export class EditorGroupOpenEvent extends BasicEvent<{ group: IEditorGroup; resource: IResource }> {}
 export class EditorGroupCloseEvent extends BasicEvent<{ group: IEditorGroup; resource: IResource }> {}
@@ -258,6 +274,14 @@ export interface IThemedCssStyle extends IDisposable {
   afterContentClassName?: string;
   beforeContentClassName?: string;
   overviewRulerColor?: string | IThemeColor;
+}
+
+export interface IThemedCssStyleCollection {
+  default: IThemedCssStyle;
+  light: IThemedCssStyle | null;
+  dark: IThemedCssStyle | null;
+
+  dispose(): void;
 }
 
 export const IEditorDecorationCollectionService = Symbol('IEditorDecorationCollectionService');
@@ -340,7 +364,7 @@ export interface IEditorActionRegistry {
    */
   registerEditorAction(action: IEditorActionItem): IDisposable;
 
-  getMenu(group: IEditorGroup): IMenu;
+  getMenu(group: IEditorGroup): IContextMenu;
 }
 
 export interface IEditorActionItem {
@@ -386,7 +410,7 @@ export enum CompareResult {
 export interface IBreadCrumbService {
   registerBreadCrumbProvider(provider: IBreadCrumbProvider): IDisposable;
 
-  getBreadCrumbs(uri: URI, editor?: MaybeNull<IEditor>): IBreadCrumbPart[] | undefined;
+  getBreadCrumbs(uri: URI, editor?: MaybeNull<IEditor>, editorGroup?: EditorGroup): IBreadCrumbPart[] | undefined;
 
   disposeCrumb(uri: URI): void;
 
@@ -407,6 +431,10 @@ export interface IBreadCrumbPart {
   name: string;
 
   icon?: string;
+
+  uri?: URI;
+
+  isSymbol?: boolean;
 
   getSiblings?(): MaybePromise<{ parts: IBreadCrumbPart[]; currentIndex: number }>;
 
@@ -461,7 +489,19 @@ export class ResourceOpenTypeChangedEvent extends BasicEvent<URI> {}
 export class EditorComponentDisposeEvent extends BasicEvent<IEditorComponent> {}
 
 export class CodeEditorDidVisibleEvent extends BasicEvent<{
-  type: 'code' | 'diff';
+  type: EditorOpenType.code | EditorOpenType.diff;
   groupName: string;
   editorId: string;
 }> {}
+
+export class ResoucesOfActiveComponentChangedEvent extends BasicEvent<{
+  component: IEditorComponent;
+  resources: IResource[];
+}> {}
+
+export const IEditorTabService = Symbol('IEditorTabService');
+
+export interface IEditorTabService {
+  renderEditorTab(component: ReactNode, isCurrent?: boolean): ReactNode;
+  renderTabCloseComponent(component: ReactNode): ReactNode;
+}

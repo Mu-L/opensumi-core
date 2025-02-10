@@ -1,26 +1,27 @@
 import { Autowired } from '@opensumi/di';
 import {
-  Domain,
-  localize,
+  ClientAppContribution,
   CommandContribution,
   CommandRegistry,
-  OPEN_EDITORS_COMMANDS,
   CommandService,
-  FILE_COMMANDS,
+  Domain,
   EDITOR_COMMANDS,
+  FILE_COMMANDS,
+  OPEN_EDITORS_COMMANDS,
+  URI,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { ClientAppContribution } from '@opensumi/ide-core-browser';
-import { ToolbarRegistry, TabBarToolbarContribution } from '@opensumi/ide-core-browser/lib/layout';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { TabBarToolbarContribution, ToolbarRegistry } from '@opensumi/ide-core-browser/lib/layout';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { EXPLORER_CONTAINER_ID } from '@opensumi/ide-explorer/lib/browser/explorer-contribution';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
 
+import { ExplorerOpenedEditorViewId } from '../common/index';
+
 import { ExplorerOpenEditorPanel } from './opened-editor';
 import { EditorFile, EditorFileGroup } from './opened-editor-node.define';
 import { OpenedEditorModelService } from './services/opened-editor-model.service';
-
-export const ExplorerOpenedEditorViewId = 'file-opened-editor';
 
 @Domain(ClientAppContribution, TabBarToolbarContribution, CommandContribution, MenuContribution)
 export class OpenedEditorContribution
@@ -129,6 +130,12 @@ export class OpenedEditorContribution
     commands.registerCommand(OPEN_EDITORS_COMMANDS.COPY_RELATIVE_PATH, {
       execute: (node: EditorFile) => {
         this.commandService.executeCommand(FILE_COMMANDS.COPY_RELATIVE_PATH.id, node.uri, [node.uri]);
+      },
+    });
+
+    commands.registerCommand(OPEN_EDITORS_COMMANDS.LOCATION, {
+      execute: (uri: URI) => {
+        this.openedEditorModelService.location(uri);
       },
     });
   }

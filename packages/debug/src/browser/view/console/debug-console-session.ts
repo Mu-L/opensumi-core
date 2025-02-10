@@ -1,15 +1,15 @@
 import throttle from 'lodash/throttle';
 
 import { Autowired, Injectable, Optional } from '@opensumi/di';
-import { DisposableCollection, Emitter, Event, MessageType, ILogger } from '@opensumi/ide-core-common';
+import { DisposableCollection, Emitter, Event, ILogger, MessageType, localize } from '@opensumi/ide-core-common';
 import { IThemeService } from '@opensumi/ide-theme';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol/lib/debugProtocol';
 
-import { IDebugConsoleSession } from '../../../common';
+import { IDebugConsoleSession, IDebugSession } from '../../../common';
 import { handleANSIOutput } from '../../debug-ansi-handle';
 import { LinkDetector } from '../../debug-link-detector';
 import { DebugSession } from '../../debug-session';
-import { ExpressionContainer, AnsiConsoleNode, DebugConsoleNode, DebugVariableContainer } from '../../tree';
+import { AnsiConsoleNode, DebugConsoleNode, DebugVariableContainer, ExpressionContainer } from '../../tree';
 
 import { DebugConsoleTreeModel } from './debug-console-model';
 
@@ -55,8 +55,12 @@ export class DebugConsoleSession implements IDebugConsoleSession {
     return lastBranch ? (this.treeModel.root.getTreeNodeById(lastBranch) as ConsoleNodes) : undefined;
   }
 
-  async init() {
-    this.session.on('output', (event) => this.logOutput(this.session, event));
+  init() {
+    this.toDispose.push(this.session.on('output', (event) => this.logOutput(this.session, event)));
+  }
+
+  addChildSession(child: IDebugSession): void {
+    this.toDispose.push(child.on('output', (event) => this.logOutput(child as DebugSession, event)));
   }
 
   get onDidChange(): Event<void> {
@@ -68,6 +72,8 @@ export class DebugConsoleSession implements IDebugConsoleSession {
   }
 
   protected async logOutput(session: DebugSession, event: DebugProtocol.OutputEvent): Promise<void> {
+    // [2J is the ansi escape sequence for clearing the display http://ascii-table.com/ansi-escape-sequences.php
+    const clearAnsiSequence = '\u001b[2J';
     const body = event.body;
     const { category, variablesReference, source, line } = body;
     if (!this.treeModel) {
@@ -76,7 +82,9 @@ export class DebugConsoleSession implements IDebugConsoleSession {
     const severity =
       category === 'stderr'
         ? MessageType.Error
-        : event.body.category === 'console'
+        : category === 'stdout'
+        ? MessageType.Info
+        : category === 'console'
         ? MessageType.Warning
         : MessageType.Info;
     if (category === 'telemetry') {
@@ -84,22 +92,36 @@ export class DebugConsoleSession implements IDebugConsoleSession {
       return;
     }
     if (variablesReference) {
-      const node = new ExpressionContainer(
-        { session, variablesReference, source, line },
+      const expression = new DebugConsoleNode(
+        {
+          session,
+          variablesReference,
+          source,
+          line,
+        },
+        '',
         this.treeModel?.root as ExpressionContainer,
       );
-      await node.hardReloadChildren();
-      if (node.children) {
-        for (const child of node.children) {
-          this.treeModel.root.insertItem(child as DebugConsoleNode);
-        }
-      }
+      await expression.evaluate();
+      this.treeModel.root.insertItem(expression);
     } else if (typeof body.output === 'string') {
+      let output = body.output;
+      if (output.indexOf(clearAnsiSequence) >= 0) {
+        this.clearConsole();
+        await this.insertItemWithAnsi(localize('debug.console.consoleCleare'), MessageType.Info);
+        output = output.substring(output.lastIndexOf(clearAnsiSequence) + clearAnsiSequence.length);
+      }
       const previousItem = this.getLastItem();
       /**
-       * 如果上一条 output 结尾没有换行符则应该与下一条 output 拼接在一起
+       * 如果上一次输出结尾没有换行符并且输出类型（MessageType）一致
+       * 则将接下来的输出拼接至上一次输出后
        */
-      if (previousItem && !previousItem.description.endsWith('\n') && !previousItem.description.endsWith('\r\n')) {
+      if (
+        previousItem &&
+        !previousItem.description.endsWith('\n') &&
+        !previousItem.description.endsWith('\r\n') &&
+        (previousItem as AnsiConsoleNode).severity === severity
+      ) {
         this.treeModel.root.unlinkItem(previousItem);
         await this.insertItemWithAnsi(previousItem.description + body.output, severity, source, line);
       } else {
@@ -108,6 +130,16 @@ export class DebugConsoleSession implements IDebugConsoleSession {
     }
 
     this.fireDidChange();
+  }
+
+  private async clearConsole() {
+    const items = this.treeModel.root.flattenedBranch?.map((id) => this.treeModel.root.getTreeNodeById(id));
+    if (!items) {
+      return;
+    }
+    for (const item of items) {
+      this.treeModel.root.unlinkItem(item as AnsiConsoleNode);
+    }
   }
 
   private async insertItemWithAnsi(
@@ -126,7 +158,12 @@ export class DebugConsoleSession implements IDebugConsoleSession {
     this.treeModel.root.insertItem(
       new AnsiConsoleNode(value, this.treeModel.root, this.linkDetector, undefined, MessageType.Info),
     );
-    const expression = new DebugConsoleNode(this.session, value, this.treeModel?.root as ExpressionContainer);
+    const expression = new DebugConsoleNode(
+      { session: this.session },
+      value,
+      this.treeModel?.root as ExpressionContainer,
+    );
+    await expression.evaluate();
     this.treeModel.root.insertItem(expression);
     this.fireDidChange();
   }

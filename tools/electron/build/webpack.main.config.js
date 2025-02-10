@@ -1,21 +1,19 @@
-// tslint:disable:no-var-requires
 const path = require('path');
 
-const CopyPlugin = require('copy-webpack-plugin');
-const HtmlWebpackPlugin = require('html-webpack-plugin');
-const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 
 const tsConfigPath = path.join(__dirname, '../tsconfig.json');
 const srcDir = path.join(__dirname, '../src/main');
 const distDir = path.join(__dirname, '../app/dist/main');
 
+/** @type { import('webpack').Configuration } */
 module.exports = {
   entry: path.join(srcDir, './index.ts'),
   target: 'electron-main',
   output: {
     filename: 'index.js',
     path: distDir,
+    clean: true,
   },
   node: false,
   resolve: {
@@ -51,11 +49,10 @@ module.exports = {
     modules: [path.join(__dirname, '../node_modules')],
     extensions: ['.ts', '.tsx', '.js', '.json', '.less'],
     mainFields: ['loader', 'main'],
-    moduleExtensions: ['-loader'],
   },
   externals: [
-    (context, request, callback) => {
-      if (['node-pty', '@parcel/watcher', 'spdlog', 'electron'].includes(request)) {
+    ({ request }, callback) => {
+      if (['node-pty', '@parcel/watcher', 'spdlog', 'nsfw', 'electron'].includes(request)) {
         return callback(null, 'commonjs ' + request);
       }
       callback();

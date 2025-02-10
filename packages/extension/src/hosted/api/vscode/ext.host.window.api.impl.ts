@@ -1,34 +1,32 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { MessageType, IDisposable, CancellationToken, Emitter, IExtensionInfo } from '@opensumi/ide-core-common';
-import { QuickInputOptions } from '@opensumi/ide-quick-open';
+import { CancellationToken, Emitter, Event, IDisposable, IExtensionInfo, MessageType } from '@opensumi/ide-core-common';
 
 import {
+  ICreateOutputChannelOptions,
   IExtHostMessage,
-  IExtHostTreeView,
-  ViewColumn,
-  IWebviewPanelOptions,
-  IWebviewOptions,
-  WebviewPanel,
-  WebviewPanelSerializer,
-  IExtHostWindowState,
-  IExtHostStatusBar,
-  IExtHostQuickOpen,
   IExtHostOutput,
+  IExtHostQuickOpen,
+  IExtHostStatusBar,
   IExtHostTerminal,
+  IExtHostTreeView,
+  IExtHostUrls,
   IExtHostWindow,
-  IMainThreadWindow,
-  MainThreadAPIIdentifier,
+  IExtHostWindowState,
   IExtOpenDialogOptions,
   IExtSaveDialogOptions,
-  IExtHostUrls,
+  IMainThreadWindow,
+  IWebviewOptions,
+  IWebviewPanelOptions,
+  MainThreadAPIIdentifier,
+  ViewColumn,
+  WebviewPanel,
+  WebviewPanelSerializer,
   WebviewViewProvider,
 } from '../../../common/vscode';
 import { IExtHostDecorationsShape } from '../../../common/vscode/decoration';
 import * as types from '../../../common/vscode/ext-types';
 import { Uri } from '../../../common/vscode/ext-types';
-import { throwProposedApiError, IExtensionDescription } from '../../../common/vscode/extension';
+import { IExtensionDescription, throwProposedApiError } from '../../../common/vscode/extension';
 
 import { ExtensionHostEditorService } from './editor/editor.host';
 import { ExtHostWebviewService, ExtHostWebviewViews } from './ext.host.api.webview';
@@ -36,6 +34,8 @@ import { ExtHostCustomEditorImpl } from './ext.host.custom-editor';
 import { ExtHostEditorTabs } from './ext.host.editor-tabs';
 import { ExtHostProgress } from './ext.host.progress';
 import { ExtHostTheming } from './ext.host.theming';
+
+import type vscode from 'vscode';
 
 export function createWindowApiFactory(
   extension: IExtensionDescription,
@@ -62,6 +62,7 @@ export function createWindowApiFactory(
     extensionId: extension.extensionId,
     isBuiltin: extension.isBuiltin,
   };
+  const _onDidWriteTerminalData = new Emitter<vscode.TerminalDataWriteEvent>();
   return {
     // @deprecated
     withScmProgress<R>(task: (progress: vscode.Progress<number>) => Thenable<R>) {
@@ -104,8 +105,8 @@ export function createWindowApiFactory(
       }
       return extHostStatusBar.createStatusBarItem(extension, id, alignment, priority);
     },
-    createOutputChannel(name) {
-      return extHostOutput.createOutputChannel(name);
+    createOutputChannel(name: string, options: string | ICreateOutputChannelOptions | undefined): any {
+      return extHostOutput.createOutputChannel(name, options);
     },
     setStatusBarMessage(text: string, arg?: number | Thenable<any>): vscode.Disposable {
       // step2
@@ -168,6 +169,7 @@ export function createWindowApiFactory(
     onDidChangeTextEditorVisibleRanges: extHostEditors.onDidChangeTextEditorVisibleRanges,
     onDidChangeTextEditorOptions: extHostEditors.onDidChangeTextEditorOptions,
     onDidChangeTextEditorViewColumn: extHostEditors.onDidChangeTextEditorViewColumn,
+    onDidWriteTerminalData: _onDidWriteTerminalData.event,
     showTextDocument(
       documentOrUri: vscode.TextDocument | Uri,
       columnOrOptions?: vscode.ViewColumn | vscode.TextDocumentShowOptions,
@@ -200,7 +202,7 @@ export function createWindowApiFactory(
       options?: IWebviewPanelOptions & IWebviewOptions,
     ): WebviewPanel {
       return extHostWebviews.createWebview(
-        Uri.parse('not-implemented://'),
+        extension.extensionLocation,
         viewType,
         title,
         showOptions,
@@ -293,6 +295,15 @@ export function createWindowApiFactory(
     get onDidChangeOpenEditors() {
       return extHostEditorTabs.onDidChangeTabs;
     },
+    get tabGroups() {
+      return extHostEditorTabs.tabGroups;
+    },
+    /** @stubbed Terminal Shell Ingration */
+    onDidChangeTerminalShellIntegration: Event.None,
+    /** @stubbed Terminal Shell Ingration */
+    onDidEndTerminalShellExecution: Event.None,
+    /** @stubbed Terminal Shell Ingration */
+    onDidStartTerminalShellExecution: Event.None,
   };
 }
 

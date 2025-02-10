@@ -1,31 +1,36 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { INodeLogger, AppConfig, isDevelopment, isElectronNode } from '@opensumi/ide-core-node';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { AppConfig, INodeLogger, Sequencer, isDevelopment, isElectronNode, pSeries } from '@opensumi/ide-core-node';
+import { getChunks } from '@opensumi/ide-utils/lib/strings';
 
 import { ETerminalErrorType, ITerminalNodeService, ITerminalServiceClient, TERMINAL_ID_SEPARATOR } from '../common';
-import { IPtyProcess, IShellLaunchConfig } from '../common/pty';
+import { IPtyProcessProxy, IPtyService, IShellLaunchConfig } from '../common/pty';
 
 import { PtyService } from './pty';
 import { IPtyServiceManager, PtyServiceManagerToken } from './pty.manager';
 
 // ref: https://github.com/vercel/hyper/blob/4c90d7555c79fb6dc438fa9549f1d0ef7c7a5aa7/app/session.ts#L27-L32
-// 批处理字符最大长度
+// 批处理字符最大长度 (200KB)
 const BATCH_MAX_SIZE = 200 * 1024;
 // 批处理延时
 const BATCH_DURATION_MS = 16;
 
 /**
- * terminal service 的具体实现
- * @lengthmin: 其实这里应该换成每个实例持有一个 pty 实例，待讨论并推进实现
+ * 每个通知前端的数据包最大的大小 (20MB)
  */
+const BATCH_CHUNK_MAX_SIZE = 20 * 1024 * 1024;
+
 @Injectable()
 export class TerminalServiceImpl implements ITerminalNodeService {
   static TerminalPtyCloseThreshold = 10 * 1000;
 
-  private terminalProcessMap: Map<string, PtyService> = new Map();
+  private terminalProcessMap: Map<string, IPtyService> = new Map();
   private clientTerminalMap: Map<string, Map<string, PtyService>> = new Map();
 
   private serviceClientMap: Map<string, ITerminalServiceClient> = new Map();
   private closeTimeOutMap: Map<string, NodeJS.Timeout> = new Map();
+
+  private batchedPtyDataMap: Map<string, string> = new Map();
+  private batchedPtyDataTimer: Map<string, NodeJS.Timeout> = new Map();
 
   @Autowired(INJECTOR_TOKEN)
   private injector: Injector;
@@ -39,9 +44,6 @@ export class TerminalServiceImpl implements ITerminalNodeService {
   @Autowired(PtyServiceManagerToken)
   private readonly ptyServiceManager: IPtyServiceManager;
 
-  private batchedPtyDataMap: Map<string, string> = new Map();
-  private batchedPtyDataTimer: Map<string, NodeJS.Timeout> = new Map();
-
   public setClient(clientId: string, client: ITerminalServiceClient) {
     if (clientId.indexOf(TERMINAL_ID_SEPARATOR) >= 0) {
       clientId = clientId.split(TERMINAL_ID_SEPARATOR)[0];
@@ -50,7 +52,7 @@ export class TerminalServiceImpl implements ITerminalNodeService {
     // 如果有相同的setClient clientId被调用，则取消延时触发closeClient，否则会导致终端无响应
     const timeOutHandler = this.closeTimeOutMap.get(clientId);
     if (timeOutHandler) {
-      global.clearTimeout(timeOutHandler);
+      clearTimeout(timeOutHandler);
       this.closeTimeOutMap.delete(clientId);
     }
   }
@@ -62,7 +64,7 @@ export class TerminalServiceImpl implements ITerminalNodeService {
     const sessionCheckResArray = await Promise.all(
       sessionIdArray.map((sessionId) => this.ptyServiceManager.checkSession(sessionId)),
     );
-    this.logger.log(`ensureClientTerminal ${clientId} ${terminalIdArr} ${sessionCheckResArray}`);
+    this.logger.log(`Ensure terminal client ${clientId} ${terminalIdArr} ${sessionCheckResArray}`);
 
     // 有一个存活就true，所以为了准确使用，每次调用terminalIdArr只传入一个东西
     for (const sessionCheckRes of sessionCheckResArray) {
@@ -75,10 +77,10 @@ export class TerminalServiceImpl implements ITerminalNodeService {
 
   public closeClient(clientId: string) {
     // 延时触发，因为WS本身有重连逻辑，因此通过延时触发来避免断开后不就重连但是回调方法都被dispose的问题
-    const closeTimer = global.setTimeout(
+    const closeTimer = setTimeout(
       () => {
         this.disposeClient(clientId);
-        this.logger.debug(`删除 clientId ${clientId} 窗口的 pty 进程`);
+        this.logger.debug(`Remove pty process from ${clientId} client`);
       },
       isDevelopment() ? 0 : this.appConfig.terminalPtyCloseThreshold || TerminalServiceImpl.TerminalPtyCloseThreshold,
     );
@@ -117,40 +119,24 @@ export class TerminalServiceImpl implements ITerminalNodeService {
     this.batchedPtyDataMap.delete(sessionId);
 
     if (this.batchedPtyDataTimer.has(sessionId)) {
-      global.clearTimeout(this.batchedPtyDataTimer.get(sessionId)!);
+      clearTimeout(this.batchedPtyDataTimer.get(sessionId)!);
       this.batchedPtyDataTimer.delete(sessionId);
     }
 
     const serviceClient = this.serviceClientMap.get(clientId) as ITerminalServiceClient;
-    serviceClient.clientMessage(sessionId, ptyData);
+
+    const chunks = getChunks(ptyData, BATCH_CHUNK_MAX_SIZE);
+    pSeries(chunks.map((str) => () => serviceClient.clientMessage(sessionId, str)));
   }
 
-  public async create2(id: string, cols: IShellLaunchConfig): Promise<IPtyProcess | undefined>;
-  public async create2(
-    id: string,
-    cols: number,
-    rows: number,
-    options: IShellLaunchConfig,
-  ): Promise<IPtyProcess | undefined>;
   public async create2(
     sessionId: string,
-    _cols: unknown,
-    _rows?: unknown,
-    _launchConfig?: unknown,
-  ): Promise<IPtyProcess | undefined> {
+    cols: number,
+    rows: number,
+    launchConfig: IShellLaunchConfig,
+  ): Promise<IPtyProcessProxy | undefined> {
     const clientId = sessionId.split(TERMINAL_ID_SEPARATOR)[0];
     let ptyService: PtyService | undefined;
-    let cols = _cols as number;
-    let rows = _rows as number;
-    let launchConfig = _launchConfig as IShellLaunchConfig;
-    if (!(typeof cols === 'number')) {
-      launchConfig = cols as IShellLaunchConfig;
-      cols = (launchConfig as any).cols;
-      rows = (launchConfig as any).rows;
-      if ((launchConfig as any).shellPath) {
-        launchConfig.executable = (launchConfig as any).shellPath;
-      }
-    }
 
     try {
       ptyService = this.injector.get(PtyService, [sessionId, launchConfig, cols, rows]);
@@ -163,22 +149,18 @@ export class TerminalServiceImpl implements ITerminalNodeService {
       // 存的数据，避免因为输出较多时阻塞 RPC 通信
       ptyService.onData((chunk: string) => {
         if (this.serviceClientMap.has(clientId)) {
-          if (!this.batchedPtyDataMap.has(sessionId)) {
-            this.batchedPtyDataMap.set(sessionId, '');
-          }
-
-          this.batchedPtyDataMap.set(sessionId, this.batchedPtyDataMap.get(sessionId) + chunk);
-
           const ptyData = this.batchedPtyDataMap.get(sessionId) || '';
 
-          if (ptyData?.length + chunk.length >= BATCH_MAX_SIZE) {
+          this.batchedPtyDataMap.set(sessionId, ptyData + chunk);
+
+          if (ptyData.length + chunk.length >= BATCH_MAX_SIZE) {
             this.flushPtyData(clientId, sessionId);
           }
 
           if (!this.batchedPtyDataTimer.has(sessionId)) {
             this.batchedPtyDataTimer.set(
               sessionId,
-              global.setTimeout(() => this.flushPtyData(clientId, sessionId), BATCH_DURATION_MS),
+              setTimeout(() => this.flushPtyData(clientId, sessionId), BATCH_DURATION_MS),
             );
           }
         } else {
@@ -187,7 +169,7 @@ export class TerminalServiceImpl implements ITerminalNodeService {
       });
 
       ptyService.onExit(({ exitCode, signal }) => {
-        this.logger.debug(`Terminal process exit (instanceId: ${sessionId}) with code ${exitCode}`);
+        this.logger.debug(`Terminal process ${sessionId} exit with code ${exitCode}`);
         if (this.serviceClientMap.has(clientId)) {
           this.flushPtyData(clientId, sessionId);
           const serviceClient = this.serviceClientMap.get(clientId) as ITerminalServiceClient;
@@ -196,7 +178,7 @@ export class TerminalServiceImpl implements ITerminalNodeService {
             signal,
           });
         } else {
-          this.logger.warn(`terminal: pty ${clientId} on data not found`);
+          this.logger.warn(`The pty process ${clientId} not found`);
         }
       });
 
@@ -206,13 +188,13 @@ export class TerminalServiceImpl implements ITerminalNodeService {
           const serviceClient = this.serviceClientMap.get(clientId) as ITerminalServiceClient;
           serviceClient.processChange(sessionId, processName);
         } else {
-          this.logger.warn(`terminal: pty ${clientId} on data not found`);
+          this.logger.warn(`The pty process ${clientId} not found`);
         }
       });
 
       const error = await ptyService.start();
       if (error) {
-        this.logger.error(`Terminal process start error (instanceId: ${sessionId})`, error);
+        this.logger.error(`Terminal process ${sessionId} start error\n`, error);
         throw error;
       }
 
@@ -242,7 +224,7 @@ export class TerminalServiceImpl implements ITerminalNodeService {
   public onMessage(id: string, msg: string) {
     const terminal = this.getTerminal(id);
     if (!terminal) {
-      this.logger.warn(`terminal ${id} onMessage not found`, terminal);
+      this.logger.warn(`The terminal ${id} not found`);
       return;
     }
     terminal.onMessage(msg);
@@ -283,12 +265,22 @@ export class TerminalServiceImpl implements ITerminalNodeService {
   }
 
   dispose() {
-    this.serviceClientMap.forEach((client) => {
-      client.dispose();
-    });
+    // TODO 后续需要一个合理的 Dispose 逻辑，暂时不要 Dispose，避免重连时终端不可用
+    // this.serviceClientMap.forEach((client) => {
+    //   client.dispose();
+    // });
   }
 
   private getTerminal(id: string) {
     return this.terminalProcessMap.get(id);
+  }
+
+  async getCwd(id: string): Promise<string | undefined> {
+    const ptyService = this.getTerminal(id);
+    if (!ptyService) {
+      return undefined;
+    }
+
+    return await ptyService.getCwd();
   }
 }

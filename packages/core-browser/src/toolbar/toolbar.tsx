@@ -1,28 +1,28 @@
-import classnames from 'classnames';
+import cls from 'classnames';
 import throttle from 'lodash/throttle';
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { IEventBus, Disposable, Emitter } from '@opensumi/ide-core-common';
+import { Disposable, Emitter, IEventBus } from '@opensumi/ide-core-common';
 
-import { DomListener } from '../dom';
-import { AbstractMenuService, MenuId, generateCtxMenu, ICtxMenuRenderer } from '../menu/next';
+import { DomListener, addClassName, createClassNameTokens } from '../dom';
+import { AbstractMenuService, ICtxMenuRenderer, MenuId, generateCtxMenu } from '../menu/next';
 import { PreferenceService } from '../preferences';
 import { useInjectable } from '../react-hooks';
-import { ConfigContext, ConfigProvider, AppConfig } from '../react-providers/config-provider';
+import { AppConfig, ConfigContext, ConfigProvider } from '../react-providers/config-provider';
 import { getIcon } from '../style/icon/icon';
 
 import {
+  ISize,
+  IToolbarAction,
+  IToolbarActionElementProps,
+  IToolbarLocationPreference,
+  IToolbarLocationProps,
   IToolbarRegistry,
   ToolbarActionGroupsChangedEvent,
-  IToolbarAction,
-  ISize,
   ToolbarActionsChangedEvent,
-  IToolbarLocationProps,
-  IToolbarLocationPreference,
-  IToolbarActionElementProps,
-  ToolbarRegistryReadyEvent,
   ToolbarActionsWhenChangeEvent,
+  ToolbarRegistryReadyEvent,
 } from './types';
 
 export const DEFAULT_TOOLBAR_ACTION_MARGIN = 5;
@@ -148,12 +148,12 @@ export const ToolbarLocation = (props: IToolbarLocationProps & React.HTMLAttribu
       }
       return () => disposer.dispose();
     }
-  }, []);
+  }, [preferences.noDropDown]);
 
   return (
     <div
       {...props}
-      className={classnames('kt-toolbar-location', props.className)}
+      className={cls('kt-toolbar-location', props.className)}
       id={'toolbar-location-' + location}
       ref={container as any}
       onContextMenu={(event: React.MouseEvent<HTMLElement>) => {
@@ -417,7 +417,7 @@ function renderToolbarLocation(
     const moreElement = document.createElement('div');
     moreElement.classList.add('kt-toolbar-more');
     const moreLink = document.createElement('div');
-    moreLink.classList.add(...getIcon('more').split(' '));
+    addClassName(moreLink, getIcon('more'));
     moreElement.append(moreLink);
     locationContainer.append(moreElement);
     moreLink.addEventListener('mousedown', () => {
@@ -638,7 +638,7 @@ class ToolbarActionRenderer {
             element.classList.add(...this.resolvedToolbarAction.extraClassNames);
           }
           let setInDropDown: (inDropDown: boolean) => void | undefined;
-          ReactDOM.render(
+          ReactDOM.createRoot(element).render(
             <ToolbarActionRenderWrapper
               initialInDropDown={inDropDown}
               action={this.toolbarAction}
@@ -651,23 +651,20 @@ class ToolbarActionRenderer {
               }}
               location={location}
             />,
-            element,
-            () => {
-              if (canceled) {
-                reject('canceled render toolbar');
-              } else {
-                this.reactElement = {
-                  element,
-                  setInDropDown: (inDropdown: boolean) => {
-                    if (setInDropDown) {
-                      setInDropDown(inDropdown);
-                    }
-                  },
-                };
-                resolve(element);
-              }
-            },
           );
+          if (canceled) {
+            reject('canceled render toolbar');
+          } else {
+            this.reactElement = {
+              element,
+              setInDropDown: (inDropdown: boolean) => {
+                if (setInDropDown) {
+                  setInDropDown(inDropdown);
+                }
+              },
+            };
+            resolve(element);
+          }
         }
       }).then((resolved) => {
         this.renderPromise.resolved = resolved;

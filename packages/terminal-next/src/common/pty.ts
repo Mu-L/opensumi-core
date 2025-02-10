@@ -1,14 +1,15 @@
+import { Terminal as XTerm } from '@xterm/xterm';
 import { IPty as INodePty } from 'node-pty';
 import * as pty from 'node-pty';
-import type vscode from 'vscode';
-import { Terminal as XTerm } from 'xterm';
 
-import { MaybePromise, Uri, OperatingSystem, IThemeColor } from '@opensumi/ide-core-common';
+import { IThemeColor, MaybePromise, OperatingSystem, Uri } from '@opensumi/ide-core-common';
 
 import { ITerminalError } from './error';
 import { ITerminalEnvironment, ITerminalProcessExtHostProxy, TerminalLocation } from './extension';
 import { IDetectProfileOptions, ITerminalProfile } from './profile';
 import { WindowsShellType } from './shell';
+
+import type vscode from 'vscode';
 
 export interface IPtySpawnOptions {
   /**
@@ -27,17 +28,16 @@ export interface IPtySpawnOptions {
   ptyLineCacheSize?: number;
 }
 
-export interface IPtyProcess extends INodePty {
+export interface IPtyProcessProxy extends INodePty {
   /**
    * @deprecated 请使用 `IPty.launchConfig` 的 shellPath 字段
    */
   bin: string;
   launchConfig: IShellLaunchConfig;
   parsedName: string;
-}
 
-export interface IPtyProcessProxy extends IPtyProcess {
   getProcessDynamically(): MaybePromise<string>;
+  getCwd(): Promise<string | undefined>;
 }
 
 export const ITerminalServicePath = 'ITerminalServicePath';
@@ -79,13 +79,6 @@ export interface IPtyProxyRPCService {
   $onExit(callId: number, pid: number): void;
 
   /**
-   * pty数据on回调代理
-   * @param callId 指定callId的方法回调注册
-   * @param pid pty进程的pid，用于辨识pty进程
-   */
-  $on(callId: number, pid: number, event: any): void;
-
-  /**
    * resize方法RPC转发
    * @param pid pty进程的pid，用于辨识pty进程
    * @param columns 列数
@@ -122,10 +115,21 @@ export interface IPtyProxyRPCService {
   $resume(pid: number): void;
 
   /**
+   * 清理 pty
+   * @param pid pty进程的pid，用于辨识pty进程
+   */
+  $clear(pid: number): void;
+
+  /**
    * 实时性通过Pid获取ProcessName
    * @param pid pty进程的pid，用于辨识pty进程
    */
   $getProcess(pid: number): string;
+
+  /**
+   * Get the current working directory for the given process ID.
+   */
+  $getCwd(pid: number): Promise<string | undefined>;
 
   /**
    * 检查Session对应的进程是否存活
@@ -279,21 +283,22 @@ export interface TerminalOptions {
   beforeCreate?: (terminalId: string) => void;
 
   /**
-   * 终端是否保活
+   * Opt-out of the default terminal persistence on restart and reload.
    */
   isTransient?: boolean;
+  /**
+   * The {@link TerminalLocation} or {@link TerminalEditorLocationOptions} or {@link TerminalSplitLocationOptions} for the terminal.
+   */
+  location?: TerminalLocation | vscode.TerminalEditorLocationOptions | vscode.TerminalSplitLocationOptions;
 }
 
 export const ITerminalNodeService = Symbol('ITerminalNodeService');
 export interface ITerminalNodeService {
-  /**
-   * @deprecated this overload signature will be removed in 2.17.0
-   */
-  create2(id: string, launchConfig: IShellLaunchConfig): Promise<IPtyProcess | undefined>;
-  create2(id: string, cols: number, rows: number, options: IShellLaunchConfig): Promise<IPtyProcess | undefined>;
+  create2(id: string, cols: number, rows: number, options: IShellLaunchConfig): Promise<IPtyProcessProxy | undefined>;
   onMessage(id: string, msg: string): void;
   resize(id: string, rows: number, cols: number): void;
   getShellName(id: string): string;
+  getCwd(id: string): Promise<string | undefined>;
   getProcessId(id: string): number;
   disposeById(id: string): void;
   dispose(): void;
@@ -351,6 +356,7 @@ export interface ITerminalServiceClient {
   getDefaultSystemShell(os: OperatingSystem): Promise<string>;
   getOS(): OperatingSystem;
   getCodePlatformKey(): Promise<'osx' | 'windows' | 'linux'>;
+  getCwd(id: string): Promise<string | undefined>;
 }
 
 export interface ITerminalInfo {
@@ -533,7 +539,7 @@ export interface IShellLaunchConfig {
   /**
    * The color ID to use for this terminal. If not specified it will use the default fallback
    */
-  color?: vscode.ThemeColor;
+  color?: string | vscode.ThemeColor;
 
   /**
    * When a parent terminal is provided via API, the group needs
@@ -558,13 +564,15 @@ export interface IShellLaunchConfig {
    */
   disablePreserveHistory?: boolean;
 
+  location?: TerminalLocation;
+
   __fromTerminalOptions?: TerminalOptions;
 }
 
 export interface ICreateTerminalOptions {
   /**
    * unique long id
-   * longId = clientId + '|' + shortId(generate by uuid())
+   * longId = clientId + '|' + uuid()
    */
   id?: string;
   /**
@@ -624,4 +632,14 @@ export function asTerminalIcon(
     id: iconPath.id,
     color: iconPath.color as IThemeColor,
   };
+}
+
+export const IPtyService = Symbol('IPtyService');
+export interface IPtyService {
+  onMessage(data: string): void;
+  resize(rows: number, cols: number): boolean;
+  getCwd(): Promise<string | undefined>;
+  getPid(): number;
+  getShellName(): string;
+  kill(): Promise<void>;
 }

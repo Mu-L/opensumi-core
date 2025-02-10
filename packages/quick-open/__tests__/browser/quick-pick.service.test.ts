@@ -3,7 +3,7 @@ import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/cont
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { MockInjector, mockService } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { MonacoContextKeyService } from '@opensumi/ide-monaco/lib/browser/monaco.context-key.service';
-import { IThemeService, IIconService } from '@opensumi/ide-theme';
+import { IIconService, IThemeService } from '@opensumi/ide-theme';
 
 import { QuickOpenModule } from '../../src/browser';
 import { IQuickOpenWidget } from '../../src/browser/quick-open.type';
@@ -63,7 +63,7 @@ describe('quick-pick service test', () => {
       expect(item).toBe('sumi');
       done();
     });
-    const [item] = widget.items;
+    const [item] = widget.items.get();
     item.run(QuickOpenMode.OPEN);
   });
 
@@ -78,6 +78,6 @@ describe('quick-pick service test', () => {
         expect(items![1]).toBe('vscode');
         done();
       });
-    widget.callbacks.onConfirm(widget.items);
+    widget.callbacks.onConfirm(widget.items.get());
   });
 });

@@ -8,9 +8,9 @@
 // - https://github.com/microsoft/vscode/blob/ff383268424b1d4b6620e7ea197fb13ae513414f/src/vs/base/node/shell.ts
 
 import fs from 'fs';
-import { userInfo, release } from 'os';
+import { release, userInfo } from 'os';
 
-import { IProcessEnvironment, isLinux, isMacintosh, OperatingSystem, path } from '@opensumi/ide-core-common';
+import { IProcessEnvironment, OperatingSystem, isLinux, isMacintosh, path } from '@opensumi/ide-core-common';
 import { isWindows } from '@opensumi/ide-core-node';
 
 export const WINDOWS_GIT_BASH_PATHS = [
@@ -172,7 +172,10 @@ function getSystemShellUnixLike(os: OperatingSystem, env = process.env): string 
       try {
         // It's possible for $SHELL to be unset, this API reads /etc/passwd. See https://github.com/github/codespaces/issues/1639
         // Node docs: "Throws a SystemError if a user has no username or homedir."
-        unixLikeTerminal = userInfo().shell;
+        const info = userInfo();
+        if (info.shell) {
+          unixLikeTerminal = info.shell;
+        }
       } catch (err) {}
     }
 
@@ -198,7 +201,7 @@ let _TERMINAL_DEFAULT_SHELL_WINDOWS: string | null = null;
 async function getSystemShellWindows(env = process.env): Promise<string> {
   if (!_TERMINAL_DEFAULT_SHELL_WINDOWS) {
     const isAtLeastWindows10 = isWindows && parseFloat(release()) >= 10;
-    const is32ProcessOn64Windows = env.hasOwnProperty('PROCESSOR_ARCHITEW6432');
+    const is32ProcessOn64Windows = Object.prototype.hasOwnProperty.call(env, 'PROCESSOR_ARCHITEW6432');
     const powerShellPath = `${env['windir']}\\${
       is32ProcessOn64Windows ? 'Sysnative' : 'System32'
     }\\WindowsPowerShell\\v1.0\\powershell.exe`;

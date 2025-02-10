@@ -1,34 +1,31 @@
-import type vscode from 'vscode';
-
-import { Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
 import {
-  EDITOR_COMMANDS,
-  UriComponents,
+  CUSTOM_EDITOR_SCHEME,
   ClientAppContribution,
   CommandContribution,
   CommandRegistry,
   CommandService,
   Domain,
-  electronEnv,
+  EDITOR_COMMANDS,
   FILE_COMMANDS,
-  formatLocalize,
-  getIcon,
+  IApplicationService,
   IAsyncResult,
   IClientApp,
   IContextKeyService,
   IEventBus,
+  ILogger,
   IPreferenceSettingsService,
-  localize,
+  PreferenceService,
   QuickOpenItem,
   QuickOpenService,
-  replaceLocalizePlaceholder,
-  URI,
-  ILogger,
-  AppConfig,
-  CUSTOM_EDITOR_SCHEME,
-  runWhenIdle,
   QuickPickService,
+  URI,
+  UriComponents,
+  formatLocalize,
+  getIcon,
+  localize,
+  replaceLocalizePlaceholder,
+  runWhenIdle,
 } from '@opensumi/ide-core-browser';
 import {
   IStatusBarService,
@@ -36,18 +33,19 @@ import {
   StatusBarEntryAccessor,
 } from '@opensumi/ide-core-browser/lib/services/status-bar-service';
 import { IResourceOpenOptions, WorkbenchEditorService } from '@opensumi/ide-editor';
-import { IEditorOpenType } from '@opensumi/ide-editor/lib/common/editor';
+import { EditorOpenType, IEditorOpenType } from '@opensumi/ide-editor/lib/common/editor';
 import { IWindowDialogService } from '@opensumi/ide-overlay';
 import { IWebviewService } from '@opensumi/ide-webview';
 
 import {
-  ExtensionNodeServiceServerPath,
-  IExtensionNodeClientService,
   EMIT_EXT_HOST_EVENT,
+  ERestartPolicy,
   ExtensionHostProfilerServicePath,
+  ExtensionHostTypeUpperCase,
+  ExtensionNodeServiceServerPath,
   ExtensionService,
   IExtensionHostProfilerService,
-  ExtensionHostTypeUpperCase,
+  IExtensionNodeClientService,
 } from '../common';
 import { ActivatedExtension } from '../common/activator';
 import { TextDocumentShowOptions, ViewColumn } from '../common/vscode';
@@ -55,27 +53,19 @@ import { fromRange, isLikelyVscodeRange, viewColumnToResourceOpenOptions } from 
 
 import {
   AbstractExtInstanceManagementService,
-  ExtensionApiReadyEvent,
   ExtHostEvent,
+  ExtensionApiReadyEvent,
   IActivationEventService,
   Serializable,
 } from './types';
 import * as VSCodeBuiltinCommands from './vscode/builtin-commands';
 import { WalkthroughsService } from './walkthroughs.service';
 
-export const getClientId = (injector: Injector) => {
-  let clientId: string;
-  const appConfig: AppConfig = injector.get(AppConfig);
+import type vscode from 'vscode';
 
-  // Electron 环境下，未指定 isRemote 时默认使用本地连接
-  // 否则使用 WebSocket 连接
-  if (appConfig.isElectronRenderer && !appConfig.isRemote) {
-    clientId = electronEnv.metadata.windowClientId;
-  } else {
-    const channelHandler = injector.get(WSChannelHandler);
-    clientId = channelHandler.clientId;
-  }
-  return clientId;
+export const getClientId = (injector: Injector) => {
+  const service: IApplicationService = injector.get(IApplicationService);
+  return service.clientId;
 };
 
 @Domain(ClientAppContribution)
@@ -138,6 +128,11 @@ export class ExtensionClientAppContribution implements ClientAppContribution {
     this.extensionNodeClient.disposeClientExtProcess(this.clientId, false);
   }
 
+  // restart extProcess on reconnect
+  onReconnect() {
+    this.extensionService.restartExtProcess(ERestartPolicy.WhenExit);
+  }
+
   /**
    * 当前客户端 id
    */
@@ -196,6 +191,9 @@ export class ExtensionCommandContribution implements CommandContribution {
   @Autowired(WalkthroughsService)
   private readonly walkthroughsService: WalkthroughsService;
 
+  @Autowired(PreferenceService)
+  private readonly preferenceService: PreferenceService;
+
   @Autowired(ILogger)
   private readonly logger: ILogger;
 
@@ -209,9 +207,9 @@ export class ExtensionCommandContribution implements CommandContribution {
       },
       {
         execute: async () => {
-          this.logger.log('插件进程开始重启');
+          this.logger.log('start restart ext host process');
           await this.extensionService.restartExtProcess();
-          this.logger.log('插件进程重启结束');
+          this.logger.log('end restart ext host process');
         },
       },
     );
@@ -348,7 +346,7 @@ export class ExtensionCommandContribution implements CommandContribution {
           id === 'default'
             ? undefined
             : {
-                type: 'component',
+                type: EditorOpenType.component,
                 componentId: `${CUSTOM_EDITOR_SCHEME}-${id}`,
               };
         return this.doOpenWith(uri, columnAndOptions, undefined, openType);
@@ -357,6 +355,7 @@ export class ExtensionCommandContribution implements CommandContribution {
 
     registry.registerCommand(VSCodeBuiltinCommands.DIFF, {
       execute: (left: UriComponents, right: UriComponents, title: string, options?: any) => {
+        // const enableHideUnchanged = this.preferenceService.get('diffEditor.hideUnchangedRegions.enabled');
         const openOptions: IResourceOpenOptions = {
           ...viewColumnToResourceOpenOptions(options?.viewColumn),
           revealFirstDiff: true,
@@ -422,6 +421,7 @@ export class ExtensionCommandContribution implements CommandContribution {
       VSCodeBuiltinCommands.NEXT_EDITOR_IN_GROUP,
       VSCodeBuiltinCommands.EVEN_EDITOR_WIDTH,
       VSCodeBuiltinCommands.CLOSE_OTHER_GROUPS,
+      VSCodeBuiltinCommands.CLOSE_UNMODIFIED_EDITORS,
       VSCodeBuiltinCommands.LAST_EDITOR_IN_GROUP,
       VSCodeBuiltinCommands.OPEN_EDITOR_AT_INDEX,
       VSCodeBuiltinCommands.CLOSE_OTHER_EDITORS,
@@ -441,6 +441,8 @@ export class ExtensionCommandContribution implements CommandContribution {
       VSCodeBuiltinCommands.API_OPEN_DIFF_EDITOR_COMMAND_ID,
       VSCodeBuiltinCommands.API_OPEN_WITH_EDITOR_COMMAND_ID,
       // debug builtin commands
+      VSCodeBuiltinCommands.DEBUG_START,
+      VSCodeBuiltinCommands.DEBUG_ADD,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STEP_INTO,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STEP_OVER,
       VSCodeBuiltinCommands.DEBUG_COMMAND_STEP_OUT,
@@ -472,7 +474,10 @@ export class ExtensionCommandContribution implements CommandContribution {
       VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_SETTINGS,
       VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_GLOBAL_SETTINGS,
       VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_SETTINGS_JSON,
+      VSCodeBuiltinCommands.SETTINGS_COMMAND_OPEN_GLOBAL_OPEN_KEYMAPS,
       VSCodeBuiltinCommands.THEME_COMMAND_QUICK_SELECT,
+      // merge editor
+      VSCodeBuiltinCommands.OPEN_MERGEEDITOR,
     ].forEach((command) => {
       registry.registerCommand(command);
     });

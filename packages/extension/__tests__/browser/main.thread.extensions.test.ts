@@ -1,18 +1,17 @@
 import { Injectable, Injector } from '@opensumi/di';
-import { RPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
-import { IContextKeyService, AppConfig } from '@opensumi/ide-core-browser';
+import { AppConfig, IContextKeyService } from '@opensumi/ide-core-browser';
 import { MockedStorageProvider } from '@opensumi/ide-core-browser/__mocks__/storage';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 import * as ideCoreCommon from '@opensumi/ide-core-common';
-import { IReporter, DefaultReporter } from '@opensumi/ide-core-common';
+import { DefaultReporter, IReporter } from '@opensumi/ide-core-common';
 import { AppConfig as NodeAppConfig } from '@opensumi/ide-core-node';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IExtensionStorageService } from '@opensumi/ide-extension-storage';
 import { FileSearchServicePath } from '@opensumi/ide-file-search';
 import { MockFileServiceClient } from '@opensumi/ide-file-service/__mocks__/file-service-client';
 import { OutputPreferences } from '@opensumi/ide-output/lib/browser/output-preference';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
 import { IGlobalStorageServer } from '@opensumi/ide-storage';
-import { IThemeService, IIconService } from '@opensumi/ide-theme';
+import { IIconService, IThemeService } from '@opensumi/ide-theme';
 import { IconService } from '@opensumi/ide-theme/lib/browser';
 import { IWebviewService } from '@opensumi/ide-webview';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
@@ -25,12 +24,14 @@ import { MockWorkbenchEditorService } from '../../../editor/src/common/mocks/wor
 import { MockContextKeyService } from '../../../monaco/__mocks__/monaco.context-key.service';
 import { MainThreadExtensionService } from '../../__mocks__/api/mainthread.extension.service';
 import { MockExtNodeClientService } from '../../__mocks__/extension.service.client';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { MainThreadWebview } from '../../src/browser/vscode/api/main.thread.api.webview';
 import { MainThreadExtensionLog } from '../../src/browser/vscode/api/main.thread.log';
 import { MainThreadStorage } from '../../src/browser/vscode/api/main.thread.storage';
 import { ExtensionNodeServiceServerPath } from '../../src/common';
+import { ExtHostAppConfig } from '../../src/common/ext.process';
 import { MainThreadExtensionLogIdentifier } from '../../src/common/extension-log';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '../../src/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '../../src/common/vscode';
 import * as types from '../../src/common/vscode/ext-types';
 import { createExtensionsApiFactory } from '../../src/hosted/api/vscode/ext.host.extensions';
 import ExtensionHostServiceImpl from '../../src/hosted/ext.host';
@@ -56,22 +57,7 @@ class MockStaticResourceService {
   }
   resourceRoots: [] = [];
 }
-
-const emitterA = new ideCoreCommon.Emitter<any>();
-const emitterB = new ideCoreCommon.Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 describe('MainThreadExtensions Test Suites', () => {
   const extHostInjector = new Injector();
@@ -83,6 +69,10 @@ describe('MainThreadExtensions Test Suites', () => {
     {
       token: IReporter,
       useClass: DefaultReporter,
+    },
+    {
+      token: ExtHostAppConfig,
+      useValue: {},
     },
   );
   const injector = createBrowserInjector(

@@ -1,26 +1,31 @@
-import clx from 'classnames';
-import { observer } from 'mobx-react-lite';
+import cls from 'classnames';
 import React from 'react';
 
 import { ClickOutside } from '@opensumi/ide-components';
 import { Dropdown } from '@opensumi/ide-components/lib/dropdown';
 import { Deprecated } from '@opensumi/ide-components/lib/utils/deprecated';
-import { useInjectable, SlotRenderer, ComponentRegistry } from '@opensumi/ide-core-browser';
-import { MenuActionList } from '@opensumi/ide-core-browser/lib/components/actions';
-import { LAYOUT_VIEW_SIZE } from '@opensumi/ide-core-browser/lib/layout/constants';
-import { IMenubarItem } from '@opensumi/ide-core-browser/lib/menu/next';
+import { ComponentRegistry, SlotRenderer, useAutorun, useInjectable } from '@opensumi/ide-core-browser';
+import { InlineActionBar, MenuActionList } from '@opensumi/ide-core-browser/lib/components/actions';
+import { LayoutViewSizeConfig } from '@opensumi/ide-core-browser/lib/layout/constants';
+import { AbstractMenuService, IMenubarItem, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IIconService } from '@opensumi/ide-theme/lib/common/theme.service';
 
 import styles from './menu-bar.module.less';
 import { MenubarStore } from './menu-bar.store';
 
-const MenubarItem = observer<
-  IMenubarItem & {
-    focusMode: boolean;
-    afterMenuClick: () => void;
-    afterMenubarClick: () => void;
-  }
->(({ id, label, focusMode, afterMenubarClick, afterMenuClick }) => {
+const MenubarItem = ({
+  id,
+  label,
+  focusMode,
+  afterMenubarClick,
+  afterMenuClick,
+}: IMenubarItem & {
+  focusMode: boolean;
+  afterMenuClick: () => void;
+  afterMenubarClick: () => void;
+}) => {
   const menubarStore = useInjectable<MenubarStore>(MenubarStore);
+  const iconService = useInjectable<IIconService>(IIconService);
   const [menuOpen, setMenuOpen] = React.useState<boolean>(false);
 
   const handleMenubarItemClick = React.useCallback(() => {
@@ -60,11 +65,11 @@ const MenubarItem = observer<
       }}
       visible={menuOpen}
       onVisibleChange={triggerMenuVisibleChange}
-      overlay={<MenuActionList data={data} afterClick={handleMenuItemClick} />}
+      overlay={<MenuActionList data={data} afterClick={handleMenuItemClick} iconService={iconService} />}
       trigger={focusMode ? ['click', 'hover'] : ['click']}
     >
       <div
-        className={clx(styles.menubar, { [styles['menu-open']]: menuOpen })}
+        className={cls(styles.menubar, { [styles['menu-open']]: menuOpen })}
         onMouseOver={handleMouseOver}
         onClick={handleMenubarItemClick}
       >
@@ -72,16 +77,35 @@ const MenubarItem = observer<
       </div>
     </Dropdown>
   );
-});
+};
 
 // 点击一次后开启 focus mode, 此时 hover 也能出现子菜单
 // outside click/contextmenu 之后解除 focus mode
 // 点击 MenubarItem 也会解除 focus mode
 // 点击 MenuItem 也会解除 focus mode
-export const MenuBar = observer(() => {
+export const MenuBar = () => {
   const menubarStore = useInjectable<MenubarStore>(MenubarStore);
+  const menubarItems = useAutorun(menubarStore.menubarItems);
+
   const componentRegistry: ComponentRegistry = useInjectable(ComponentRegistry);
+  const layoutViewSize = useInjectable<LayoutViewSizeConfig>(LayoutViewSizeConfig);
+
   const [focusMode, setFocusMode] = React.useState(false);
+  const relatedTarget = React.useRef<HTMLElement>();
+
+  const handleMenubarFocusIn = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    if (!relatedTarget.current && e.relatedTarget) {
+      relatedTarget.current = e.relatedTarget as HTMLElement;
+    }
+  }, []);
+
+  const handleMenuItemClick = React.useCallback(() => {
+    if (relatedTarget.current) {
+      relatedTarget.current.focus();
+      relatedTarget.current = undefined;
+    }
+    setFocusMode(false);
+  }, [focusMode]);
 
   const handleMouseLeave = React.useCallback(() => {
     // 只有 focus 为 true 的时候, mouse leave 才会将其置为 false
@@ -93,36 +117,53 @@ export const MenuBar = observer(() => {
   return (
     <ClickOutside
       className={styles.menubars}
-      style={{ height: LAYOUT_VIEW_SIZE.MENUBAR_HEIGHT }}
+      style={{ height: layoutViewSize.menubarHeight }}
       mouseEvents={['click', 'contextmenu']}
+      tabIndex={-1} // make focus event implement
+      onFocus={handleMenubarFocusIn}
       onOutsideClick={handleMouseLeave}
     >
       {LogoIcon ? <LogoIcon /> : <div className={styles.logoIconEmpty}></div>}
-      {menubarStore.menubarItems.map(({ id, label }) => (
+      {menubarItems.map(({ id, label }) => (
         <MenubarItem
           key={id}
           id={id}
           label={label}
           focusMode={focusMode}
-          afterMenuClick={() => setFocusMode(false)}
+          afterMenuClick={handleMenuItemClick}
           afterMenubarClick={() => setFocusMode((r) => !r)}
         />
       ))}
     </ClickOutside>
   );
-});
+};
 
 MenuBar.displayName = 'MenuBar';
 
 type MenuBarMixToolbarActionProps = Pick<React.HTMLProps<HTMLElement>, 'className'>;
 
 export const MenuBarMixToolbarAction: React.FC<MenuBarMixToolbarActionProps> = (props) => (
-  <div className={clx(styles.menubarWrapper, props.className)}>
+  <div className={cls(styles.menubarWrapper, props.className)}>
     <MenuBar />
-    <SlotRenderer slot='action' flex={1} overflow={'initial'} />
+    <SlotRenderer slot='action' flex={1} />
   </div>
 );
 
 MenuBarMixToolbarAction.displayName = 'MenuBarMixToolbarAction';
 
 export const MenuBarActionWrapper = Deprecated(MenuBarMixToolbarAction, 'please use `MenuBarMixToolbarAction`');
+
+/**
+ * 可供集成方导入的组件
+ * 后续如果有一些改动需要考虑是否有 breakchange
+ */
+export const IconMenuBar = () => {
+  const menuService = useInjectable<AbstractMenuService>(AbstractMenuService);
+  const menus = menuService.createMenu(MenuId.IconMenubarContext);
+
+  return (
+    <div className={styles.icon_menubar_container}>
+      <InlineActionBar menus={menus} type='icon' className={styles.menubar_action} isFlattenMenu={true} />
+    </div>
+  );
+};

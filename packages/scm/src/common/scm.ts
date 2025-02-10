@@ -1,4 +1,7 @@
-import { Event, IDisposable, ISequence, Uri } from '@opensumi/ide-core-common';
+import { IInputBaseProps } from '@opensumi/ide-components';
+import { Command, Event, IDisposable, ISequence, Uri } from '@opensumi/ide-core-common';
+
+import type vscode from 'vscode';
 
 export interface VSCommand {
   id: string;
@@ -20,6 +23,12 @@ export interface IInputValidation {
 
 export type IInputValidator = (value: string, cursorPosition: number) => Promise<IInputValidation | undefined>;
 
+export interface ISCMInputActionButtonDescriptor {
+  command: Command;
+  icon?: Uri | { light: Uri; dark: Uri } | vscode.ThemeIcon;
+  enabled: boolean;
+}
+
 export interface ISCMInput {
   value: string;
   readonly onDidChange: Event<string>;
@@ -30,8 +39,21 @@ export interface ISCMInput {
   validateInput: IInputValidator;
   readonly onDidChangeValidateInput: Event<void>;
 
+  enabled: boolean;
+  readonly onDidChangeEnablement: Event<boolean>;
+
   visible: boolean;
   readonly onDidChangeVisibility: Event<boolean>;
+
+  props: IInputBaseProps;
+  readonly onDidChangeProps: Event<IInputBaseProps>;
+
+  actionButton: ISCMInputActionButtonDescriptor | undefined;
+  readonly onDidChangeActionButton: Event<void>;
+
+  appendProps(props: IInputBaseProps): void;
+
+  dispose(): void;
 }
 
 export interface ISCMRepository extends IDisposable {
@@ -79,6 +101,13 @@ export interface ISCMResourceGroup extends ISequence<ISCMResource> {
   toJSON(): { [key: string]: number };
 }
 
+export interface ISCMActionButtonDescriptor {
+  command: VSCommand;
+  secondaryCommands?: VSCommand[][];
+  description?: string;
+  enabled: boolean;
+}
+
 export interface ISCMProvider extends IDisposable {
   readonly label: string;
   readonly id: string;
@@ -95,12 +124,7 @@ export interface ISCMProvider extends IDisposable {
   readonly onDidChangeCommitTemplate?: Event<string>;
   readonly onDidChangeStatusBarCommands?: Event<VSCommand[]>;
   readonly acceptInputCommand?: VSCommand;
-  readonly actionButton?: {
-    command: VSCommand;
-    secondaryCommands?: VSCommand[][];
-    description?: string;
-    enabled: boolean;
-  } | null;
+  readonly actionButton?: ISCMActionButtonDescriptor | null;
   readonly statusBarCommands?: VSCommand[];
   readonly onDidChange: Event<void>;
 

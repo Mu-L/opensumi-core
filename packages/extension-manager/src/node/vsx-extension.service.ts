@@ -1,22 +1,22 @@
+import assert from 'assert';
 import os from 'os';
 import path from 'path';
 import { pipeline } from 'stream';
 
 import compressing from 'compressing';
 import fs from 'fs-extra';
-import requestretry from 'requestretry';
+import nodeFetch, { RequestInit } from 'node-fetch';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { uuid } from '@opensumi/ide-core-common';
-import { DEFAULT_TRS_REGISTRY } from '@opensumi/ide-core-common/lib/const';
-import { AppConfig } from '@opensumi/ide-core-node/lib/types';
+import { Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { sleep, uuid } from '@opensumi/ide-core-common';
+import { AppConfig, RemoteService } from '@opensumi/ide-core-node';
 
 import {
-  IVSXExtensionBackService,
   IExtensionInstallParam,
   IMarketplaceService,
-  IOpentrsMarketplaceService,
   IOpenvsxMarketplaceService,
+  IVSXExtensionBackService,
+  VSXExtensionServicePath,
 } from '../common';
 import { QueryParam, QueryResult, VSXSearchParam, VSXSearchResult } from '../common/vsx-registry-types';
 
@@ -24,8 +24,8 @@ function cleanup(paths: string[]) {
   return Promise.all(paths.map((path) => fs.remove(path)));
 }
 
-@Injectable()
-export class VSXExtensionService implements IVSXExtensionBackService {
+@RemoteService(VSXExtensionServicePath)
+export class VSXExtensionRemoteService implements IVSXExtensionBackService {
   @Autowired(AppConfig)
   private appConfig: AppConfig;
 
@@ -39,13 +39,7 @@ export class VSXExtensionService implements IVSXExtensionBackService {
       return this.marketplace;
     }
 
-    const { marketplace: marketplaceConfig } = this.appConfig;
-    const { endpoint } = marketplaceConfig;
-
-    this.marketplace =
-      endpoint === DEFAULT_TRS_REGISTRY.ENDPOINT
-        ? this.injector.get(IOpentrsMarketplaceService)
-        : this.injector.get(IOpenvsxMarketplaceService);
+    this.marketplace = this.injector.get(IOpenvsxMarketplaceService);
 
     return this.marketplace;
   }
@@ -138,29 +132,38 @@ export class VSXExtensionService implements IVSXExtensionBackService {
     const vsixFileName = id + '.vsix';
     const downloadPath = path.join(extensionDir, vsixFileName);
 
-    return new Promise((resolve, reject) => {
-      requestretry(
-        url,
-        {
-          method: 'GET',
-          maxAttempts: 5,
-          retryDelay: 2000,
-          headers: this.getMarketplace().downloadHeaders,
-          retryStrategy: requestretry.RetryStrategies.HTTPOrNetworkError,
-        },
-        (err, response) => {
-          if (err) {
-            reject(err);
-          } else if (response && response.statusCode === 404) {
-            reject();
-          } else if (response && response.statusCode !== 200) {
-            reject(new Error(response.statusMessage));
-          }
-        },
-      )
-        .pipe(fs.createWriteStream(downloadPath))
-        .on('error', reject)
-        .on('close', () => resolve({ downloadPath }));
+    const res = await nodeFetchRetry(
+      url,
+      {
+        method: 'GET',
+        headers: this.getMarketplace().downloadHeaders,
+      },
+      {
+        maxAttempts: 5,
+        retryDelay: 2000,
+      },
+    );
+
+    assert(res, `download extension ${id} from ${url} failed`);
+
+    if (res.status === 404) {
+      throw new Error(`extension ${id} not found`);
+    }
+
+    if (res.status !== 200) {
+      throw new Error(`download extension ${id} from ${url} failed, status: ${res?.status} ${res?.statusText}`);
+    }
+
+    return await new Promise((resolve, reject) => {
+      const fileStream = fs.createWriteStream(downloadPath);
+      res.body.pipe(fileStream);
+
+      res.body.on('error', (err) => {
+        reject(err);
+      });
+      fileStream.on('finish', function () {
+        resolve({ downloadPath });
+      });
     });
   }
 
@@ -168,3 +171,29 @@ export class VSXExtensionService implements IVSXExtensionBackService {
     return await this.getMarketplace().search(param);
   }
 }
+
+const nodeFetchRetry = async (
+  url: string,
+  fetchOptions: RequestInit,
+  opts: {
+    maxAttempts: number;
+    retryDelay: number;
+  },
+) => {
+  let retry = (opts && opts.maxAttempts) || 3;
+
+  while (retry > 0) {
+    try {
+      return nodeFetch(url, fetchOptions);
+    } catch (e) {
+      retry = retry - 1;
+      if (retry === 0) {
+        throw e;
+      }
+
+      if (opts && opts.retryDelay) {
+        await sleep(opts.retryDelay);
+      }
+    }
+  }
+};

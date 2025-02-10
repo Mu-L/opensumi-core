@@ -23,6 +23,11 @@ export interface ExtensionConnectOption {
   host?: string;
 }
 
+export interface ExtHostSpawnOptions {
+  env?: Record<string, string>;
+  execArgv?: string[];
+}
+
 /**
  * 插件 browser 层的样式表配置项
  */
@@ -92,5 +97,6 @@ export interface IExtensionActivateEventPayload {
 }
 
 export class ExtensionActivateEvent extends BasicEvent<IExtensionActivateEventPayload> {}
+export class ExtensionActivatedEvent extends BasicEvent<IExtensionActivateEventPayload> {}
 
 export class ExtensionDidContributes extends BasicEvent<void> {}

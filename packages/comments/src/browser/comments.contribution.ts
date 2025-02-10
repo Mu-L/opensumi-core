@@ -1,37 +1,37 @@
 import { Autowired } from '@opensumi/di';
 import {
-  Domain,
   ClientAppContribution,
-  Disposable,
-  localize,
-  ContributionProvider,
-  Event,
-  ToolbarRegistry,
   CommandContribution,
   CommandRegistry,
-  getIcon,
-  TabBarToolbarContribution,
+  ContributionProvider,
+  Disposable,
+  Domain,
+  Event,
   IEventBus,
+  TabBarToolbarContribution,
+  ToolbarRegistry,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { IMenuRegistry, MenuId, MenuContribution } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IEditor } from '@opensumi/ide-editor';
 import { BrowserEditorContribution, IEditorFeatureRegistry } from '@opensumi/ide-editor/lib/browser';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
 
 import {
-  ICommentsService,
-  CommentPanelId,
-  CommentsContribution,
-  ICommentsFeatureRegistry,
-  CollapseId,
-  CommentPanelCollapse,
   CloseThreadId,
-  ICommentThreadTitle,
-  SwitchCommandReaction,
-  ICommentsThread,
-  CommentReactionPayload,
+  CollapseId,
+  CommentPanelId,
   CommentReactionClick,
+  CommentReactionPayload,
+  CommentsContribution,
+  ICommentThreadTitle,
+  ICommentsFeatureRegistry,
+  ICommentsService,
+  SwitchCommandReaction,
 } from '../common';
+
+import { CommentModelService } from './tree/tree-model.service';
 
 @Domain(
   ClientAppContribution,
@@ -64,6 +64,9 @@ export class CommentsBrowserContribution
   @Autowired(IEventBus)
   private readonly eventBus: IEventBus;
 
+  @Autowired(CommentModelService)
+  private commentModelService: CommentModelService;
+
   onStart() {
     this.registerCommentsFeature();
     this.listenToCreateCommentsPanel();
@@ -84,7 +87,7 @@ export class CommentsBrowserContribution
       },
       {
         execute: () => {
-          this.eventBus.fire(new CommentPanelCollapse());
+          this.commentModelService.collapsedAll();
         },
       },
     );
@@ -98,7 +101,7 @@ export class CommentsBrowserContribution
       {
         execute: (threadTitle: ICommentThreadTitle) => {
           const { thread, widget } = threadTitle;
-          if (!thread.comments.length) {
+          if (!thread.comments.get().length) {
             thread.dispose();
           } else {
             if (widget.isShow) {

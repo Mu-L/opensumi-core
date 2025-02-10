@@ -1,7 +1,7 @@
 import debounce from 'lodash/debounce';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { StorageProvider, IStorage, STORAGE_NAMESPACE, DisposableCollection, ILogger } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { DisposableCollection, ILogger, IStorage, STORAGE_NAMESPACE, StorageProvider } from '@opensumi/ide-core-common';
 
 import { PreferenceService } from '../preferences';
 
@@ -27,10 +27,8 @@ export class LayoutState {
     await this.preferenceService.ready;
     this.saveLayoutWithWorkspace = this.preferenceService.get<boolean>('view.saveLayoutWithWorkspace') || false;
     this.disposableCollection.push(
-      this.preferenceService.onPreferenceChanged((e) => {
-        if (e.preferenceName === 'view.saveLayoutWithWorkspace') {
-          this.saveLayoutWithWorkspace = e.newValue;
-        }
+      this.preferenceService.onSpecificPreferenceChange('view.saveLayoutWithWorkspace', (e) => {
+        this.saveLayoutWithWorkspace = e.newValue;
       }),
     );
   }
@@ -66,7 +64,7 @@ export class LayoutState {
       LAYOUT_STATE.isScoped(key) ||
         (this.saveLayoutWithWorkspace && (LAYOUT_STATE.isLayout(key) || LAYOUT_STATE.isStatusBar(key))),
     );
-  }, 60);
+  }, 200);
 
   private setStorageValue(key: string, state: object, scope?: boolean) {
     if (scope) {

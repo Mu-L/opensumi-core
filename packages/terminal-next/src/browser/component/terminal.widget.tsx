@@ -1,13 +1,13 @@
 import React from 'react';
 
-import { useInjectable, localize } from '@opensumi/ide-core-browser';
+import { localize, useInjectable } from '@opensumi/ide-core-browser';
 
 import {
-  ITerminalGroupViewService,
-  IWidget,
+  ETerminalErrorType,
   ITerminalError,
   ITerminalErrorService,
-  ETerminalErrorType,
+  ITerminalGroupViewService,
+  IWidget,
 } from '../../common';
 
 import styles from './terminal.module.less';
@@ -63,7 +63,7 @@ function renderError(error: ITerminalError, eService: ITerminalErrorService, vie
 }
 
 export default ({ widget, error, show }: IProps) => {
-  const content = React.createRef<HTMLDivElement>();
+  const content = React.useRef<HTMLDivElement | null>(null);
   const errorService = useInjectable<ITerminalErrorService>(ITerminalErrorService);
   const view = useInjectable<ITerminalGroupViewService>(ITerminalGroupViewService);
 

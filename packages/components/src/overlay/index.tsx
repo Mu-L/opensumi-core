@@ -1,5 +1,5 @@
-import clsx from 'classnames';
-import React from 'react';
+import cls from 'classnames';
+import React, { PropsWithChildren } from 'react';
 
 import { Modal, ModalProps } from '../modal';
 
@@ -8,12 +8,13 @@ import './styles.less';
 declare type getContainerFunc = () => HTMLElement;
 
 export interface IOverlayProps {
+  visible: boolean;
+  afterClose?: ModalProps['afterClose'];
+  onClose?: ModalProps['onCancel'];
+  children?: React.ReactNode;
   className?: string;
   width?: number;
   maskClosable?: boolean;
-  visible: boolean;
-  afterClose: ModalProps['afterClose'];
-  onClose: ModalProps['onCancel'];
   closable?: ModalProps['closable'];
   title?: ModalProps['title'];
   footer?: JSX.Element[] | JSX.Element;
@@ -21,7 +22,7 @@ export interface IOverlayProps {
   keyboard?: boolean;
 }
 
-export const Overlay: React.FC<IOverlayProps> = ({
+export const Overlay: React.FC<PropsWithChildren<IOverlayProps>> = ({
   maskClosable = false,
   closable = true,
   className,
@@ -40,7 +41,7 @@ export const Overlay: React.FC<IOverlayProps> = ({
     onCancel={onClose}
     title={title}
     getContainer={getContainer}
-    className={clsx('kt-overlay', className)}
+    className={cls('kt-overlay', className)}
     keyboard={keyboard}
     {...restProps}
   >

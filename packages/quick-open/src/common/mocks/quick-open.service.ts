@@ -2,7 +2,7 @@ import { Injectable } from '@opensumi/di';
 import { VALIDATE_TYPE } from '@opensumi/ide-core-browser/lib/components';
 import { HideReason } from '@opensumi/ide-core-browser/lib/quick-open';
 
-import { QuickOpenOptions, QuickOpenService, QuickOpenModel } from '../';
+import { QuickOpenModel, QuickOpenOptions, QuickOpenService } from '../';
 
 @Injectable()
 export class MockQuickOpenService implements QuickOpenService {
@@ -20,6 +20,9 @@ export class MockQuickOpenService implements QuickOpenService {
     throw new Error('Method not implemented.');
   }
   hideDecoration(): void {
+    throw new Error('Method not implemented.');
+  }
+  updateOptions(options: QuickOpenOptions): void {
     throw new Error('Method not implemented.');
   }
 }

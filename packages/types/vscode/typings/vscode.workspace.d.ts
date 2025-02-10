@@ -1,7 +1,4 @@
-
-
 declare module 'vscode' {
-
   /**
    * An event describing a change to the set of [workspace folders](#workspace.workspaceFolders).
    */
@@ -60,22 +57,23 @@ declare module 'vscode' {
     export function getWorkspaceFolder(uri: Uri): WorkspaceFolder | undefined;
 
     /**
-     * Make changes to one or many resources or create, delete, and rename resources as defined by the given
-     * [workspace edit](#WorkspaceEdit).
-     *
-     * All changes of a workspace edit are applied in the same order in which they have been added. If
-     * multiple textual inserts are made at the same position, these strings appear in the resulting text
-     * in the order the 'inserts' were made. Invalid sequences like 'delete file a' -> 'insert text in file a'
-     * cause failure of the operation.
-     *
-     * When applying a workspace edit that consists only of text edits an 'all-or-nothing'-strategy is used.
-     * A workspace edit with resource creations or deletions aborts the operation, e.g. consecutive edits will
-     * not be attempted, when a single edit fails.
-     *
-     * @param edit A workspace edit.
-     * @return A thenable that resolves when the edit could be applied.
-     */
-    export function applyEdit(edit: WorkspaceEdit): Thenable<boolean>;
+		 * Make changes to one or many resources or create, delete, and rename resources as defined by the given
+		 * {@link WorkspaceEdit workspace edit}.
+		 *
+		 * All changes of a workspace edit are applied in the same order in which they have been added. If
+		 * multiple textual inserts are made at the same position, these strings appear in the resulting text
+		 * in the order the 'inserts' were made, unless that are interleaved with resource edits. Invalid sequences
+		 * like 'delete file a' -> 'insert text in file a' cause failure of the operation.
+		 *
+		 * When applying a workspace edit that consists only of text edits an 'all-or-nothing'-strategy is used.
+		 * A workspace edit with resource creations or deletions aborts the operation, e.g. consecutive edits will
+		 * not be attempted, when a single edit fails.
+		 *
+		 * @param edit A workspace edit.
+		 * @param metadata Optional {@link WorkspaceEditMetadata metadata} for the edit.
+		 * @returns A thenable that resolves when the edit could be applied.
+		 */
+		export function applyEdit(edit: WorkspaceEdit, metadata?: WorkspaceEditMetadata): Thenable<boolean>;
 
     /**
      * Get a workspace configuration object.
@@ -346,7 +344,6 @@ declare module 'vscode' {
     /**
      * The name of the workspace. `undefined` when no folder
      * has been opened.
-     * @魁梧
      */
     export const name: string | undefined;
 
@@ -361,7 +358,6 @@ declare module 'vscode' {
      * workspace folder the name of the workspace is prepended. Defaults to `true` when there are
      * multiple workspace folders and `false` otherwise.
      * @return A path relative to the root or the input.
-     * @魁梧
      */
     export function asRelativePath(pathOrUri: string | Uri, includeWorkspaceFolder?: boolean): string;
 
@@ -405,9 +401,31 @@ declare module 'vscode' {
      * Each workspace is identified with a mandatory URI and an optional name.
      * @return true if the operation was successfully started and false otherwise if arguments were used that would result
      * in invalid workspace folder state (e.g. 2 folders with the same URI).
-     * @魁梧
      */
     export function updateWorkspaceFolders(start: number, deleteCount: number | undefined | null, ...workspaceFoldersToAdd: { uri: Uri, name?: string }[]): boolean;
+
+		/**
+		 * Saves the editor identified by the given resource and returns the resulting resource or `undefined`
+		 * if save was not successful or no editor with the given resource was found.
+		 *
+		 * **Note** that an editor with the provided resource must be opened in order to be saved.
+		 *
+		 * @param uri the associated uri for the opened editor to save.
+		 * @returns A thenable that resolves when the save operation has finished.
+		 */
+		export function save(uri: Uri): Thenable<Uri | undefined>;
+
+		/**
+		 * Saves the editor identified by the given resource to a new file name as provided by the user and
+		 * returns the resulting resource or `undefined` if save was not successful or cancelled or no editor
+		 * with the given resource was found.
+		 *
+		 * **Note** that an editor with the provided resource must be opened in order to be saved as.
+		 *
+		 * @param uri the associated uri for the opened editor to save as.
+		 * @returns A thenable that resolves when the save-as operation has finished.
+		 */
+		export function saveAs(uri: Uri): Thenable<Uri | undefined>;
 
     /**
      * Save all dirty files.
@@ -666,5 +684,4 @@ declare module 'vscode' {
      */
     readonly files: ReadonlyArray<{ oldUri: Uri, newUri: Uri }>;
   }
-
 }

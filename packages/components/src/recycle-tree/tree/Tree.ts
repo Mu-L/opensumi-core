@@ -1,25 +1,21 @@
-import { Emitter, DisposableCollection } from '@opensumi/ide-utils';
+import { DisposableCollection, Emitter } from '@opensumi/ide-utils';
 
-import { ITreeNodeOrCompositeTreeNode, ITree, ICompositeTreeNode } from '../types';
+import { ICompositeTreeNode, ITree, ITreeNodeOrCompositeTreeNode } from '../types';
 
-import { TreeNode, CompositeTreeNode } from './TreeNode';
+import { CompositeTreeNode, TreeNode } from './TreeNode';
 
 export abstract class Tree implements ITree {
   protected _root: CompositeTreeNode | undefined;
   protected readonly onChangedEmitter = new Emitter<void>();
-  protected readonly onNodeRefreshedEmitter = new Emitter<void>();
   protected readonly toDispose = new DisposableCollection();
 
   protected nodes: {
     [id: string]: TreeNode | undefined;
   } = {};
 
-  get onNodeRefreshed() {
-    return this.onNodeRefreshedEmitter.event;
-  }
-
   dispose(): void {
     this.toDispose.dispose();
+    this._root?.dispose();
   }
 
   get root(): CompositeTreeNode | undefined {
@@ -27,6 +23,11 @@ export abstract class Tree implements ITree {
   }
 
   set root(root: CompositeTreeNode | undefined) {
+    if (root === this._root) {
+      return;
+    }
+
+    this._root?.dispose();
     this._root = root;
   }
 

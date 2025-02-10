@@ -8,15 +8,17 @@
 
 import { timeout } from '../src/async';
 import { CancellationToken } from '../src/cancellation';
-import { IDisposable, Disposable } from '../src/disposable';
+import { Disposable, IDisposable } from '../src/disposable';
 import { errorHandler, setUnexpectedErrorHandler } from '../src/errors';
 import {
-  Event,
+  AsyncEmitter,
+  Dispatcher,
   Emitter,
+  Event,
   EventBufferer,
   EventMultiplexer,
+  EventQueue,
   PauseableEmitter,
-  AsyncEmitter,
   WaitUntilEvent,
 } from '../src/event';
 
@@ -912,5 +914,54 @@ describe('Event utils', () => {
     deepStrictEqual(result, [1, 2, 1, 3]);
 
     listener.dispose();
+  });
+});
+
+describe('Dispatcher', () => {
+  it('should dispatch events to listeners', () => {
+    const dispatcher = new Dispatcher<string>();
+
+    const listener1 = jest.fn();
+    const listener2 = jest.fn();
+    dispatcher.on('type1')(listener1);
+    dispatcher.on('type2')(listener2);
+
+    dispatcher.dispatch('type1', 'foo');
+    expect(listener1).toHaveBeenCalledWith('foo');
+    dispatcher.dispatch('type2', 'bar');
+    expect(listener2).toHaveBeenCalledWith('bar');
+
+    dispatcher.dispose();
+  });
+});
+
+describe('EventQueue', () => {
+  it('should queue events', async () => {
+    const queue = new EventQueue<string>();
+    const emitter = new Emitter<string>();
+
+    emitter.event(queue.push);
+
+    const listener = jest.fn();
+    const listener2 = jest.fn();
+
+    emitter.fire('foo');
+    emitter.fire('bar');
+
+    const dispose1 = queue.on(listener);
+    const dispose2 = queue.on(listener2);
+
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    dispose1.dispose();
+
+    emitter.fire('baz');
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener2).toHaveBeenCalledTimes(1);
+
+    dispose2.dispose();
+    emitter.fire('qux');
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener2).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { ProxyIdentifier } from '@opensumi/ide-connection/lib/common/rpcProtocol';
+import { ProxyIdentifier } from '@opensumi/ide-connection/lib/common/rpc/multiplexer';
 import { IDisposable, Uri, path } from '@opensumi/ide-core-common';
 import { EditorComponentRenderMode } from '@opensumi/ide-editor/lib/browser';
 import { ToolBarPosition } from '@opensumi/ide-toolbar/lib/browser';
@@ -34,6 +34,9 @@ export interface ISumiBrowserContributions {
   toolBar?: {
     position?: ToolBarPosition; // @deprecated
     view: IToolBarViewContribution[];
+  };
+  chat?: {
+    view: IChatViewContribution[];
   };
 }
 
@@ -196,6 +199,18 @@ export interface IEditorSideViewContribution {
    */
   when?: string | ContextKeyExpr;
 }
+
+export interface IChatViewContribution {
+  /**
+   * id
+   */
+  id: string;
+  /**
+   * Chat 组件主体
+   */
+  component: React.FC;
+}
+
 export interface IRunTimeParams {
   getExtensionExtendService: (
     extension: IExtension,

@@ -1,12 +1,15 @@
+import { IInputBaseProps } from '@opensumi/ide-components';
 import { IMenubarItem, ISubmenuItem } from '@opensumi/ide-core-browser/lib/menu/next';
 import { ISumiMenuExtendInfo } from '@opensumi/ide-core-common';
 import { ThemeType } from '@opensumi/ide-theme';
 
 // eslint-disable-next-line import/no-restricted-paths
-import type { ITabBarViewContribution } from '../../browser/sumi-browser/types';
+import { IExtensionContributions } from '../vscode/extension';
+
 // eslint-disable-next-line import/no-restricted-paths
 import type { IToolbarButtonContribution, IToolbarSelectContribution } from '../../browser/sumi/types';
-import { IExtensionContributions } from '../vscode/extension';
+// eslint-disable-next-line import/no-restricted-paths
+import type { ITabBarViewContribution } from '../../browser/sumi-browser/types';
 
 export interface IContributeMenubarItem extends Omit<IMenubarItem, 'label'> {
   title: IMenubarItem['label'];
@@ -46,5 +49,10 @@ export interface ISumiExtensionContributions extends IExtensionContributions {
   // 针对 vscode contributes 中的 menus 的一些扩展
   menuExtend?: {
     [menuId: string]: Array<ISumiMenuExtendInfo>;
+  };
+  scm?: {
+    additional?: {
+      input?: Omit<IInputBaseProps, 'addonBefore' | 'addonAfter'> & { addonBefore?: string[]; addonAfter?: string[] };
+    };
   };
 }

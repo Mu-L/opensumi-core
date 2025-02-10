@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { ElementHandle, Page } from '@playwright/test';
 
 import { Disposable } from '@opensumi/ide-utils';
 
@@ -65,7 +65,7 @@ export class OpenSumiApp extends Disposable {
   protected async load(workspace: OpenSumiWorkspace): Promise<void> {
     this.disposables.push(workspace);
     const now = Date.now();
-    await this.loadOrReload(this.page, `/#${workspace.workspace.codeUri.fsPath}`);
+    await this.loadOrReload(this.page, `/?workspaceDir=${workspace.workspace.codeUri.fsPath}`);
     await this.page.waitForSelector(this.appData.loadingSelector, { state: 'detached' });
     const time = Date.now() - now;
     // eslint-disable-next-line no-console
@@ -107,6 +107,7 @@ export class OpenSumiApp extends Disposable {
     filePath: string,
     preview = true,
   ) {
+    await explorer.open();
     const node = await explorer.getFileStatTreeNodeByPath(filePath);
     if (!node || (await node?.isFolder())) {
       throw Error(`File ${filePath} could not be opened on the editor`);
@@ -126,6 +127,19 @@ export class OpenSumiApp extends Disposable {
     const editor = new EditorConstruction(this, { path, name, containerSelector });
     await editor.open();
     return editor;
+  }
+
+  async getDialogButton(value: string): Promise<ElementHandle<SVGElement | HTMLElement> | void> {
+    const buttonWrapper = await this.page.$('.kt-dialog-buttonWrap');
+    const buttons = await buttonWrapper?.$$('.kt-button');
+    if (buttons) {
+      for (const button of buttons) {
+        const text = await button.textContent();
+        if (text === value) {
+          return button;
+        }
+      }
+    }
   }
 
   async waitForInitialized(): Promise<void> {

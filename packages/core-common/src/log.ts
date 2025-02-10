@@ -22,6 +22,8 @@ export enum SupportLogNamespace {
   Browser = 'browser',
   // 插件进程
   ExtensionHost = 'extHost',
+  // Watcher 进程
+  WatcherHost = 'watcherHost',
   // 应用层
   App = 'app',
   // 其他未分类
@@ -169,11 +171,13 @@ export interface ILogServiceClient extends ICoreLogger {
 }
 
 export type IExtensionLogger = ICoreLogger;
+export type IWatcherProcessLogger = ICoreLogger;
 
 export const ILoggerManagerClient = Symbol('ILoggerManagerClient');
 export interface ILoggerManagerClient {
   onDidChangeLogLevel: Event<LogLevel>;
   getLogger(namespace: SupportLogNamespace, pid?: number): ILogServiceClient;
+  getBrowserLogger(namespace: SupportLogNamespace): ILogServiceClient;
 
   setGlobalLogLevel(level: LogLevel): Promise<void>;
   getGlobalLogLevel(): Promise<LogLevel>;
@@ -215,7 +219,8 @@ export class DebugLog implements IDebugLog {
   }
 
   private getPre(level: string, color: string) {
-    const text = this.namespace ? `[${this.namespace}:${level}]` : `[${level}]`;
+    let text = this.getColor('green', `[${new Date().toLocaleString('zh-CN')}] `);
+    text += this.namespace ? `[${this.namespace}:${level}]` : `[${level}]`;
     return this.getColor(color, text);
   }
 
@@ -231,7 +236,7 @@ export class DebugLog implements IDebugLog {
       black: '\x1b[30m',
       red: '\x1b[31m',
       green: '\x1b[32m',
-      yellow: '\x1b3[33m',
+      yellow: '\x1b[33m',
       blue: '\x1b[34m',
       magenta: '\x1b[35m',
       cyan: '\x1b[36m',
@@ -291,7 +296,7 @@ export class DebugLog implements IDebugLog {
     return console.info(this.getPre('log', 'green'), ...args);
   };
 
-  destroy() {}
+  destroy() { }
 }
 
 /**
@@ -333,6 +338,6 @@ export function getDebugLogger(namespace?: string): IDebugLog {
       showWarn();
       return debugLog.warn;
     },
-    destroy() {},
+    destroy() { },
   };
 }

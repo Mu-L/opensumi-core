@@ -1,37 +1,32 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  DecorationsManager,
+  CompositeTreeNode,
   Decoration,
+  DecorationsManager,
   IRecycleTreeHandle,
+  IWatcherEvent,
+  TreeNodeEvent,
   TreeNodeType,
   WatchEvent,
-  TreeNodeEvent,
-  IWatcherEvent,
-  CompositeTreeNode,
 } from '@opensumi/ide-components';
 import {
-  Emitter,
-  IContextKeyService,
   Deferred,
-  Event,
   DisposableCollection,
+  Emitter,
+  Event,
   IClipboardService,
-  path,
+  IContextKeyService,
   pSeries,
+  path,
 } from '@opensumi/ide-core-browser';
-import { AbstractContextMenuService, MenuId, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
+import { AbstractContextMenuService, ICtxMenuRenderer, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 
-import { IDebugSessionManager } from '../../../common';
+import { IDebugConsoleModelService, IDebugSession, IDebugSessionManager } from '../../../common';
 import { LinkDetector } from '../../debug-link-detector';
 import { DebugSession } from '../../debug-session';
 import { DidChangeActiveDebugSession } from '../../debug-session-manager';
 import { AnsiConsoleNode } from '../../tree';
-import {
-  ExpressionContainer,
-  ExpressionNode,
-  DebugConsoleNode,
-  DebugConsoleRoot,
-} from '../../tree/debug-tree-node.define';
+import { DebugConsoleNode, DebugConsoleRoot, ExpressionContainer } from '../../tree/debug-tree-node.define';
 import { DebugViewModel } from '../debug-view-model';
 
 import { DebugContextKey } from './../../contextkeys/debug-contextkey.service';
@@ -50,7 +45,7 @@ export interface IDebugConsoleModel {
 }
 
 @Injectable()
-export class DebugConsoleModelService {
+export class DebugConsoleModelService implements IDebugConsoleModelService {
   private static DEFAULT_REFRESH_DELAY = 200;
 
   @Autowired(INJECTOR_TOKEN)
@@ -164,16 +159,16 @@ export class DebugConsoleModelService {
     return this.onDidRefreshedEmitter.event;
   }
 
-  clear = () => {
+  clear() {
     // 重新初始化Console中渲染的TreeModel
     this.initTreeModel(this.manager.currentSession, true);
-  };
+  }
 
-  collapseAll = () => {
+  collapseAll() {
     this.treeModel?.root.collapsedAll();
-  };
+  }
 
-  copyAll = () => {
+  copyAll() {
     let text = '';
     if (!this.treeModel?.root || !this.treeModel.root.children) {
       return;
@@ -182,15 +177,18 @@ export class DebugConsoleModelService {
       text += this.getValidText(child as DebugConsoleNode) + '\n';
     }
     this.clipboardService.writeText(text.slice(0, -'\n'.length));
-  };
+  }
 
-  copy = (node: DebugConsoleNode) => {
+  copy(node: DebugConsoleNode) {
     if (node) {
       this.clipboardService.writeText(this.getValidText(node));
     }
-  };
+  }
 
   private getValidText(node: DebugConsoleNode) {
+    if (node.description.endsWith('\n')) {
+      return node.description.slice(0, -'\n'.length);
+    }
     return node.description;
   }
 
@@ -235,29 +233,22 @@ export class DebugConsoleModelService {
 
   listenTreeViewChange() {
     this.disposeTreeModel();
+    if (!this.treeModel) {
+      return;
+    }
     this.treeModelDisposableCollection.push(
-      this.treeModel?.root.watcher.on(TreeNodeEvent.WillResolveChildren, (target) => {
+      this.treeModel.root.watcher.on(TreeNodeEvent.WillResolveChildren, (target) => {
         this.loadingDecoration.addTarget(target);
       }),
     );
     this.treeModelDisposableCollection.push(
-      this.treeModel?.root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
+      this.treeModel.root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
         this.loadingDecoration.removeTarget(target);
-      }),
-    );
-    this.treeModelDisposableCollection.push(
-      this.treeModel!.onWillUpdate(() => {
-        // 更新树前更新下选中节点
-        if (this.selectedNodes.length !== 0) {
-          // 仅处理一下单选情况
-          const node = this.treeModel?.root.getTreeNodeByPath(this.selectedNodes[0].path);
-          this.selectedDecoration.addTarget(node as ExpressionNode);
-        }
       }),
     );
   }
 
-  async initTreeModel(session?: DebugSession, force?: boolean) {
+  async initTreeModel(session?: IDebugSession, force?: boolean) {
     if (!session) {
       this._activeDebugSessionModel = undefined;
       this.onDidUpdateTreeModelEmitter.fire(this._activeDebugSessionModel);
@@ -268,6 +259,7 @@ export class DebugConsoleModelService {
 
     if (this.debugSessionModelMap.has(sessionId) && !force) {
       const model = this.debugSessionModelMap.get(sessionId);
+      model?.debugConsoleSession.addChildSession(session);
       this._activeDebugSessionModel = model;
     } else {
       // 根据是否为多工作区创建不同根节点
@@ -542,7 +534,11 @@ export class DebugConsoleModelService {
     const parent: DebugConsoleRoot = this.treeModel.root as DebugConsoleRoot;
     const textNode = new AnsiConsoleNode(value, parent, this.linkDetector);
     this.dispatchWatchEvent(parent, parent.path, { type: WatchEvent.Added, node: textNode, id: parent.id });
-    const expressionNode = new DebugConsoleNode(this.manager.currentSession, value, parent as ExpressionContainer);
+    const expressionNode = new DebugConsoleNode(
+      { session: this.manager.currentSession as DebugSession },
+      value,
+      parent as ExpressionContainer,
+    );
     await expressionNode.evaluate();
     this.dispatchWatchEvent(parent, parent.path, { type: WatchEvent.Added, node: expressionNode, id: parent.id });
     this.treeHandle.ensureVisible(expressionNode, 'end', true);

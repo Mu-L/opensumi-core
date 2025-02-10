@@ -2,18 +2,25 @@ import cls from 'classnames';
 import React from 'react';
 
 import {
-  TreeNode,
+  Button,
+  ClasslistComposite,
   CompositeTreeNode,
   INodeRendererProps,
-  ClasslistComposite,
+  TreeNode,
   TreeNodeType,
-  Button,
 } from '@opensumi/ide-components';
-import { URI, OPEN_EDITORS_COMMANDS, localize, getIcon, CommandService } from '@opensumi/ide-core-browser';
+import {
+  CommandService,
+  OPEN_EDITORS_COMMANDS,
+  URI,
+  getIcon,
+  localize,
+  useDesignStyles,
+} from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import { EDITOR_WEBVIEW_SCHEME } from '@opensumi/ide-webview';
 
-import { EditorFileGroup, EditorFile } from './opened-editor-node.define';
+import { EditorFile, EditorFileGroup } from './opened-editor-node.define';
 import styles from './opened-editor-node.module.less';
 import { OpenedEditorDecorationService } from './services/opened-editor-decoration.service';
 
@@ -49,6 +56,11 @@ export const EditorTreeNode: React.FC<EditorNodeRenderedProps> = ({
   decorations,
 }: EditorNodeRenderedProps) => {
   const decoration = EditorFileGroup.is(item) ? null : decorationService.getDecoration(item.uri, false);
+  const styles_opened_editor_node = useDesignStyles(styles.opened_editor_node, 'opened_editor_node');
+  const styles_opened_editor_node_overflow_wrap = useDesignStyles(
+    styles.opened_editor_node_overflow_wrap,
+    'opened_editor_node_overflow_wrap',
+  );
 
   const handleClick = (ev: React.MouseEvent) => {
     if (itemType === TreeNodeType.TreeNode || itemType === TreeNodeType.CompositeTreeNode) {
@@ -66,7 +78,9 @@ export const EditorTreeNode: React.FC<EditorNodeRenderedProps> = ({
   };
 
   const paddingLeft = `${
-    defaultLeftPadding + (item.depth || 0) * (leftPadding || 0) + (!EditorFileGroup.is(item) ? 16 : 0)
+    defaultLeftPadding +
+    (item.depth || 0) * (leftPadding || 0) +
+    (!EditorFileGroup.is(item) && !EditorFileGroup.isRoot(item.parent) ? 18 : 0)
   }px`;
 
   const editorNodeStyle = {
@@ -108,7 +122,7 @@ export const EditorTreeNode: React.FC<EditorNodeRenderedProps> = ({
   );
 
   const renderDescription = (node: EditorFileGroup | EditorFile) => {
-    if (EditorFileGroup.is(node)) {
+    if (EditorFileGroup.is(node) || (EditorFile.is(node) && node.tooltip === getNodeName(node))) {
       return null;
     }
     return (
@@ -175,7 +189,7 @@ export const EditorTreeNode: React.FC<EditorNodeRenderedProps> = ({
     } else {
       actions = [
         {
-          icon: getIcon('close'),
+          icon: getIcon('window-close'),
           title: localize('file.close'),
           command: OPEN_EDITORS_COMMANDS.CLOSE.id,
         },
@@ -204,21 +218,24 @@ export const EditorTreeNode: React.FC<EditorNodeRenderedProps> = ({
   };
 
   const renderActionBar = () => <div className={styles.opened_editor_action_bar}>{renderAction()}</div>;
-
   return (
     <div
       key={item.id}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
       title={getItemTooltip()}
-      className={cls(styles.opened_editor_node, decorations ? decorations.classlist : null)}
+      className={cls(
+        styles_opened_editor_node,
+        decorations ? decorations.classlist : null,
+        EditorFile.is(item) && item.dirty && styles.dirty,
+      )}
       style={editorNodeStyle}
       data-id={item.id}
     >
       {renderActionBar()}
       <div className={cls(styles.opened_editor_node_content)}>
         {renderIcon(item)}
-        <div className={styles.opened_editor_node_overflow_wrap}>
+        <div className={styles_opened_editor_node_overflow_wrap}>
           {renderDisplayName(item)}
           {renderDescription(item)}
         </div>

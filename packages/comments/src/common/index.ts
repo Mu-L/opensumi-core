@@ -1,26 +1,22 @@
+import React from 'react';
+
 import {
-  IRange,
-  URI,
-  IDisposable,
-  MaybePromise,
-  TreeNode,
-  Event,
   BasicEvent,
-  positionToRange,
+  Event,
   IContextKeyService,
+  IDisposable,
   IMarkdownString,
+  IRange,
+  MaybePromise,
+  URI,
 } from '@opensumi/ide-core-browser';
-import { RecycleTreeProps } from '@opensumi/ide-core-browser/lib/components';
 import { IEditor } from '@opensumi/ide-editor';
-// eslint-disable-next-line import/no-restricted-paths
-import type { IEditorDocumentModel } from '@opensumi/ide-editor/lib/browser';
+import { IObservable, ISettableObservable } from '@opensumi/ide-monaco/lib/common/observable';
 
-type Writeable<T> = { -readonly [P in keyof T]: T[P] };
+import type { ITree, ITreeNode } from '@opensumi/ide-components';
+import type { IEditorDocumentModel } from '@opensumi/ide-editor/lib/common/editor';
 
-/**
- * @deprecated please use `positionToRange` from '@opensumi/ide-core-common`
- */
-export const toRange = positionToRange;
+export type Writable<T> = { -readonly [P in keyof T]: T[P] };
 
 /**
  * 点击评论菜单贡献点默认加入当前 menuId 作为标识
@@ -32,27 +28,30 @@ interface ICommentsMenuContext {
   menuId: string;
 }
 
-/**
- * 评论树的节点
- */
-export interface ICommentsTreeNode extends Writeable<TreeNode<ICommentsTreeNode>> {
-  /**
-   * 子节点
-   */
-  children?: ICommentsTreeNode[];
-  /**
-   * 是否折叠
-   */
-  expanded?: boolean;
+export interface ICommentsTreeNode extends ITreeNode {
   /**
    * 子节点对应的 thread
    */
-  thread: ICommentsThread;
+  readonly thread: ICommentsThread;
   /**
-   * 子节点对应的 comment
-   * 如果是根节点则为 undefined
+   * 子节点 `CommentContentNode` 及 `CommentReplyNode` 对应的 comment
+   * 如果是 CommentFileNode 则为 undefined
    */
   comment?: IComment;
+}
+
+/**
+ * 评论树的节点
+ */
+export interface IWriteableCommentsTreeNode extends Writable<ICommentsTreeNode> {
+  /**
+   * 修改节点 name 区域展示内容
+   */
+  label: string | React.ReactNode;
+  /**
+   * 修改节点 description 区域展示内容
+   */
+  description: string | React.ReactNode;
   /**
    * 点击事件
    */
@@ -311,13 +310,9 @@ export interface CommentsPanelOptions {
    * 是否默认显示 底部 panel
    */
   defaultShow?: boolean;
-  /**
-   * 评论列表默认设置
-   */
-  recycleTreeProps?: Partial<RecycleTreeProps>;
 }
 
-export type PanelTreeNodeHandler = (nodes: ICommentsTreeNode[]) => ICommentsTreeNode[];
+export type PanelTreeNodeHandler = (nodes: IWriteableCommentsTreeNode[]) => ICommentsTreeNode[];
 
 export type FileUploadHandler = (text: string | IMarkdownString, files: FileList) => MaybePromise<string>;
 
@@ -415,7 +410,6 @@ export interface ICommentsFeatureRegistry {
    * @param feature
    */
   registerProviderFeature(providerId: string, feature: ICommentProviderFeature): void;
-
   /**
    * 获取底部面板参数
    */
@@ -477,7 +471,7 @@ export interface ICommentsThread extends IDisposable {
   /**
    * 评论
    */
-  comments: IThreadComment[];
+  comments: IObservable<IThreadComment[]>;
   /**
    * 当前 thread 的 uri
    */
@@ -489,7 +483,7 @@ export interface ICommentsThread extends IDisposable {
   /**
    * 是否折叠，默认为 false
    */
-  isCollapsed: boolean;
+  isCollapsed: ISettableObservable<boolean>;
   /**
    * 附属数据
    */
@@ -501,7 +495,7 @@ export interface ICommentsThread extends IDisposable {
   /**
    * 在 header 组件显示的文案
    */
-  label?: string;
+  label?: ISettableObservable<string | undefined>;
   /**
    * thread 参数
    */
@@ -509,15 +503,24 @@ export interface ICommentsThread extends IDisposable {
   /**
    * thread 头部文案
    */
-  threadHeaderTitle: string;
+  threadHeaderTitle: IObservable<string>;
   /**
    * 是否是只读
    */
-  readOnly: boolean;
+  readOnly: IObservable<boolean>;
   /**
    * 评论面板的 context key service
    */
   contextKeyService: IContextKeyService;
+  /**
+   * 评论面板的折叠状态变化事件
+   */
+  onDidChangeCollapsibleState: Event<CommentThreadCollapsibleState>;
+  /**
+   * 更新当前 thread 的评论列表
+   * @param comments
+   */
+  updateComments(comments: IComment[]): void;
   /**
    * 添加评论
    * @param comment
@@ -580,6 +583,10 @@ export interface ICommentsThread extends IDisposable {
    * dispise 时会执行
    */
   onDispose: Event<void>;
+  /**
+   * 设置只读状态
+   */
+  setReadOnly(readOnly: boolean): void;
 }
 
 export interface ICommentsThreadOptions {
@@ -615,19 +622,20 @@ export interface ICommentsThreadOptions {
 }
 
 export const ICommentsService = Symbol('ICommentsService');
-export interface ICommentsService {
+export interface ICommentsService extends ITree {
   /**
    * 评论节点
    */
   commentsThreads: ICommentsThread[];
   /**
-   * 评论树节点
-   */
-  commentsTreeNodes: ICommentsTreeNode[];
-  /**
    * 初始化函数
    */
   init(): void;
+  /**
+   * 设置当前用户激活的 thread
+   * @param thread
+   */
+  setCurrentCommentThread(thread?: ICommentsThread): void;
   /**
    * 编辑器创建后的处理函数
    * @param editor 当前编辑器
@@ -655,17 +663,21 @@ export interface ICommentsService {
    */
   onThreadsCreated: Event<ICommentsThread>;
   /**
-   * 强制更新 tree node，再走一次 TreeNodeHandler 逻辑
+   * thread 下评论更新
    */
-  forceUpdateTreeNodes(): void;
-  /**
-   * 触发 左侧 decoration 的渲染
-   */
-  forceUpdateDecoration(): void;
+  onThreadsCommentChange: Event<ICommentsThread>;
   /**
    * 注册插件底部面板
    */
   registerCommentPanel(): void;
+  /**
+   * 通知对应 thread 下评论内容更新
+   */
+  fireThreadCommentChange(thread: ICommentsThread): void;
+  /**
+   * 触发左侧 decoration 的渲染
+   */
+  forceUpdateDecoration(): void;
   /**
    * 外部注册可评论的行号提供者
    */

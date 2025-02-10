@@ -1,9 +1,9 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { Disposable, DomListener, getDebugLogger, IDisposable, AppConfig } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { AppConfig, Disposable, DomListener, IDisposable, URI, getDebugLogger } from '@opensumi/ide-core-browser';
 
 import { AbstractWebviewPanel } from './abstract-webview';
+import { createHTML } from './iframe/prebuilt';
 import { IWebview, IWebviewContentOptions } from './types';
-
 
 @Injectable({ multiple: true })
 export class IFrameWebviewPanel extends AbstractWebviewPanel implements IWebview {
@@ -22,6 +22,9 @@ export class IFrameWebviewPanel extends AbstractWebviewPanel implements IWebview
     super(id, options);
 
     this.iframe = document.createElement('iframe');
+    this.iframe.name = `webview-${this.id}`;
+    this.iframe.id = `webview-${this.id}`;
+
     this.iframe.setAttribute('allow', 'autoplay');
 
     const sandboxRules = new Set(['allow-same-origin', 'allow-scripts']);
@@ -30,7 +33,13 @@ export class IFrameWebviewPanel extends AbstractWebviewPanel implements IWebview
       sandboxRules.add('allow-forms');
     }
     this.iframe.setAttribute('sandbox', Array.from(sandboxRules).join(' '));
-    this.iframe.setAttribute('src', `${this.config.webviewEndpoint}/index.html?id=${this.id}`);
+
+    if (this.config.useBuiltinWebview || !this.config.webviewEndpoint) {
+      this.iframe.setAttribute('srcdoc', createHTML(this.id));
+    } else {
+      this.iframe.setAttribute('src', `${this.config.webviewEndpoint}/index.html?id=${this.id}`);
+    }
+
     this.iframe.style.border = 'none';
     this.iframe.style.width = '100%';
     this.iframe.style.position = 'absolute';
@@ -44,8 +53,7 @@ export class IFrameWebviewPanel extends AbstractWebviewPanel implements IWebview
     this.clear();
     this._iframeDisposer = new Disposable();
     this._ready = new Promise<void>((resolve) => {
-      // tslint:disable-next-line: no-unused-variable
-      const disposer = this._onWebviewMessage('webview-ready', () => {
+      this._onWebviewMessage('webview-ready', () => {
         if (this._isReady) {
           // 这种情况一般是由于iframe在dom中的位置变动导致了重载。
           // 此时我们需要重新初始化
@@ -110,6 +118,14 @@ export class IFrameWebviewPanel extends AbstractWebviewPanel implements IWebview
         this.doUpdateContent();
       }
     }
+  }
+
+  protected preprocessHtml(html: string): string {
+    return html.replace(
+      /(["'])vscode-resource:([^\s'"]+?)(["'])/gi,
+      (_, startQuote, path, endQuote) =>
+        `${startQuote}${this.staticResourceService.resolveStaticResource(URI.file(path))}${endQuote}`,
+    );
   }
 
   remove() {

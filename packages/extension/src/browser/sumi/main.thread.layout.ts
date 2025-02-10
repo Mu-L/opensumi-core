@@ -1,12 +1,14 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { IEventBus, Disposable, ILogger } from '@opensumi/ide-core-browser';
+import { Disposable, IEventBus, ILogger } from '@opensumi/ide-core-browser';
 import { IMainLayoutService, TabBarRegistrationEvent } from '@opensumi/ide-main-layout';
 import { TabBarHandler } from '@opensumi/ide-main-layout/lib/browser/tabbar-handler';
-import { IconType, IconShape, IIconService } from '@opensumi/ide-theme';
+import { IIconService, IconShape, IconType } from '@opensumi/ide-theme';
 
 import { ExtHostSumiAPIIdentifier } from '../../common/sumi';
-import { IMainThreadLayout, IExtHostLayout } from '../../common/sumi/layout';
+import { IExtHostLayout, IMainThreadLayout } from '../../common/sumi/layout';
+
+import type { ViewBadge } from 'vscode';
 
 @Injectable({ multiple: true })
 export class MainThreadLayout extends Disposable implements IMainThreadLayout {
@@ -32,38 +34,38 @@ export class MainThreadLayout extends Disposable implements IMainThreadLayout {
   }
 
   $setTitle(id: string, title: string): void {
-    this.getHandler(id).updateTitle(title);
+    this.getHandler(id)?.updateTitle(title);
   }
 
   $setIcon(id: string, iconPath: string): void {
     const iconClass = this.iconService.fromIcon('', iconPath, IconType.Background, IconShape.Square);
-    this.getHandler(id).setIconClass(iconClass!);
+    this.getHandler(id)?.setIconClass(iconClass!);
   }
 
   $setSize(id: string, size: number): void {
-    this.getHandler(id).setSize(size);
+    this.getHandler(id)?.setSize(size);
   }
 
   $activate(id: string): void {
-    this.getHandler(id).activate();
+    this.getHandler(id)?.activate();
   }
 
   $deactivate(id: string): void {
-    this.getHandler(id).deactivate();
+    this.getHandler(id)?.deactivate();
   }
 
-  $setBadge(id: string, badge: string): void {
-    this.getHandler(id).setBadge(badge);
+  $setBadge(id: string, badge?: string | ViewBadge): void {
+    this.getHandler(id)?.setBadge(badge);
   }
 
   async $setVisible(id: string, visible: boolean) {
     if (visible) {
-      this.getHandler(id).show();
+      this.getHandler(id)?.show();
     } else {
-      if (this.getHandler(id).isActivated()) {
-        this.getHandler(id).deactivate();
+      if (this.getHandler(id)?.isActivated()) {
+        this.getHandler(id)?.deactivate();
       }
-      this.getHandler(id).hide();
+      this.getHandler(id)?.hide();
     }
   }
 
@@ -75,8 +77,10 @@ export class MainThreadLayout extends Disposable implements IMainThreadLayout {
       } else {
         const disposer = this.eventBus.on(TabBarRegistrationEvent, (e) => {
           if (e.payload.tabBarId === id) {
-            const handle = this.layoutService.getTabbarHandler(id);
-            this.bindHandleEvents(handle!);
+            const handler = this.layoutService.getTabbarHandler(id);
+            if (handler) {
+              this.bindHandleEvents(handler);
+            }
             disposer.dispose();
           }
         });
@@ -103,8 +107,8 @@ export class MainThreadLayout extends Disposable implements IMainThreadLayout {
   protected getHandler(id: string) {
     const handler = this.layoutService.getTabbarHandler(id);
     if (!handler) {
-      this.logger.warn(`MainThreaLayout:没有找到${id}对应的handler`);
+      this.logger.warn(`Could not find a handler with \`${id}\``);
     }
-    return handler!;
+    return handler;
   }
 }

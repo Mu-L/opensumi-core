@@ -1,5 +1,5 @@
-import { IDataOption, IDataOptionGroup } from '@opensumi/ide-components';
-import { IDisposable, BasicEvent, Event } from '@opensumi/ide-core-common';
+import { DropDownProps, IDataOption, IDataOptionGroup } from '@opensumi/ide-components';
+import { BasicEvent, Event, IDisposable } from '@opensumi/ide-core-common';
 
 export const IToolbarRegistry = Symbol('IToolbarRegistry');
 
@@ -168,7 +168,7 @@ export interface IToolbarAction {
   strictPosition?: IToolbarActionPosition;
 
   /**
-   * 是否永远不被收起
+   * 是否永远不被收起
    */
   neverCollapse?: boolean;
   when?: string;
@@ -225,6 +225,7 @@ export interface IToolbarActionBtnDelegate {
   onDidChangePopoverVisibility: Event<boolean>;
 
   setState(state: string, title?: string): void;
+  getState(): string;
 
   setContext(context: any): void;
 
@@ -255,7 +256,7 @@ export interface IToolbarActionBtnStyle {
   height?: number;
 
   // 是否显示 Title
-  // 20200629改动 - 默认为 true
+  // 默认为 false
   showTitle?: boolean;
 
   // icon 前景色
@@ -280,10 +281,9 @@ export interface IToolbarActionBtnStyle {
   background?: string;
 
   // 样式类型，
-  // inline则不会有外边框
-  // button则为按钮样式
-  // 20200629改动 - 默认为 button
-  // inline 模式showTitle会失效, 只显示icon
+  // inline 不会有外边框
+  // button 为按钮样式
+  // inline 模式 showTitle 会失效, 只显示icon
   btnStyle?: 'inline' | 'button';
 
   // button 的文本位置样式
@@ -306,6 +306,18 @@ export interface IToolbarActionSelectProps<T> {
   equals?: (v1: T | undefined, v2: T | undefined) => boolean;
   onSelect?: (value: T) => void;
   delegate?: (delegate: IToolbarActionSelectDelegate<T> | undefined) => void;
+}
+
+export interface IToolbarActionDropdownButtonDelegate<T> {
+  onSelect: Event<T>;
+}
+
+// DropdownButton
+export interface IToolbarActionDropdownButtonProps<T> {
+  options: IDataOption<T>[];
+  trigger?: DropDownProps['trigger'];
+  onSelect?: (value: T) => void;
+  delegate?: (delegate: IToolbarActionDropdownButtonDelegate<T> | undefined) => void;
 }
 
 export interface IToolbarActionSelectDelegate<T> {

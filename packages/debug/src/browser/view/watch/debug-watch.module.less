@@ -1,4 +1,4 @@
-@import '~@opensumi/ide-core-browser/lib/style/variable.less';
+@import '@opensumi/ide-core-browser/lib/style/variable.less';
 
 .debug_watch_node {
   height: 22px;
@@ -39,27 +39,16 @@
   &.mod_selected {
     color: var(--kt-tree-inactiveSelectionForeground) !important;
     background: var(--kt-tree-inactiveSelectionBackground);
-    .expansion_toggle {
-      color: var(--kt-tree-inactiveSelectionForeground) !important;
-    }
   }
 
   &.mod_focused {
     outline: 1px solid var(--list-focusOutline);
     outline-offset: -1px;
-    color: var(--kt-tree-activeSelectionForeground) !important;
-    background: var(--kt-tree-activeSelectionBackground);
-    .expansion_toggle {
-      color: var(--kt-tree-activeSelectionForeground) !important;
-    }
   }
 
   &.mod_actived {
     outline: 1px solid var(--list-focusOutline);
     outline-offset: -1px;
-    .expansion_toggle {
-      color: var(--kt-tree-activeSelectionForeground) !important;
-    }
   }
 
   &.mod_loading {
@@ -134,6 +123,9 @@
   color: var(--foreground);
   position: absolute;
   left: -20px;
+  &:before {
+    font-size: 13px;
+  }
   &.mod_collapsed {
     &:before {
       display: block;

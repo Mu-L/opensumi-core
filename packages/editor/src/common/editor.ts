@@ -1,27 +1,188 @@
 import { Injectable } from '@opensumi/di';
 import { IScopedContextKeyService } from '@opensumi/ide-core-browser';
+import { IMergeEditorEditor } from '@opensumi/ide-core-browser/lib/monaco/merge-editor-widget';
 import {
-  URI,
-  Event,
   BasicEvent,
+  Event,
   IDisposable,
-  MaybeNull,
-  IRange,
-  ISelection,
   ILineChange,
-  IPosition,
-  IThemeColor,
   IMarkdownString,
+  IPosition,
+  IRange,
+  IRef,
+  ISelection,
+  IThemeColor,
+  MaybeNull,
+  URI,
 } from '@opensumi/ide-core-common';
-// eslint-disable-next-line import/no-restricted-paths
-import type { ICodeEditor as IMonacoCodeEditor } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import type { IEditorOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
-import type { ITextModelUpdateOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-
-// eslint-disable-next-line import/no-restricted-paths
-import type { IEditorDocumentModel, IEditorDocumentModelRef } from '../browser';
 
 import { IResource } from './resource';
+import { IDocModelUpdateOptions } from './types';
+
+import type {
+  EOL,
+  ICodeEditorViewState,
+  IDiffEditorViewState,
+  IDimension,
+  IEditorOptions,
+  ICodeEditor as IMonacoCodeEditor,
+  ITextModel,
+  ITextModelUpdateOptions,
+} from '@opensumi/ide-monaco';
+
+export { ShowLightbulbIconMode } from '@opensumi/ide-monaco';
+
+export interface IEditorDocumentDescription {
+  /**
+   * 文档URI
+   */
+  readonly uri: URI;
+
+  /**
+   * A unique identifier associated with this model.
+   */
+  readonly id: string;
+
+  /**
+   * 编码
+   */
+  readonly encoding: string;
+
+  /**
+   * 行末结束
+   */
+  readonly eol: EOL;
+
+  /**
+   * 语言Id
+   */
+  readonly languageId: string;
+
+  /**
+   * 是否被修改过
+   */
+  readonly dirty: boolean;
+
+  /**
+   * 能否修改
+   */
+  readonly readonly: boolean;
+
+  /**
+   * 能否保存
+   */
+  readonly savable: boolean;
+
+  /**
+   * 是否永远都显示 dirty
+   */
+  readonly alwaysDirty: boolean;
+
+  /**
+   * 即便是 dirty 也要被 dispose
+   */
+  readonly disposeEvenDirty: boolean;
+
+  /**
+   * 是否关闭自动保存功能
+   */
+  readonly closeAutoSave: boolean;
+}
+
+/**
+ * editorDocumentModel is a wrapped concept for monaco's textModel
+ */
+export interface IEditorDocumentModel extends IDisposable {
+  /**
+   * 文档URI
+   */
+  readonly uri: URI;
+
+  /**
+   * A unique identifier associated with this model.
+   */
+  id: string;
+
+  /**
+   * 编码
+   */
+  encoding: string;
+
+  /**
+   * An event emitted when the model's encoding have changed.
+   * @event
+   */
+  onDidChangeEncoding: Event<void>;
+
+  /**
+   * 行末结束
+   */
+  eol: EOL;
+
+  /**
+   * 语言Id
+   */
+  languageId: string;
+
+  /**
+   * 是否被修改过
+   */
+  readonly dirty: boolean;
+
+  /**
+   * 能否修改
+   */
+  readonly readonly: boolean;
+
+  /**
+   * 能否保存
+   */
+  readonly savable: boolean;
+
+  /**
+   * 是否永远都显示 dirty
+   */
+  readonly alwaysDirty: boolean;
+
+  /**
+   * 即便是 dirty 也要被 dispose
+   */
+  readonly disposeEvenDirty: boolean;
+
+  /**
+   * 是否关闭自动保存功能
+   */
+  readonly closeAutoSave: boolean;
+
+  /**
+   * 获得monaco的TextModel
+   */
+  getMonacoModel(): ITextModel;
+
+  /**
+   *  保存文档, 如果文档不可保存，则不会有任何反应
+   *  @param force 强制保存, 不管diff
+   */
+  save(force?: boolean, reason?: SaveReason): Promise<boolean>;
+
+  /**
+   * 恢复文件内容
+   * @param notOnDisk 文档已经不存在磁盘
+   */
+  revert(notOnDisk?: boolean): Promise<void>;
+
+  getText(range?: IRange): string;
+
+  updateContent(content: string, eol?: EOL): void;
+
+  updateEncoding(encoding: string): Promise<void>;
+
+  // setEncoding(encoding: string, preferredEncoding, mode: EncodingMode): Promise<void>;
+
+  updateOptions(options: IDocModelUpdateOptions): void;
+}
+
+export type IEditorDocumentModelRef = IRef<IEditorDocumentModel>;
 
 export interface CursorStatus {
   position: MaybeNull<IPosition>;
@@ -41,10 +202,14 @@ export enum EditorType {
    * 修改对比编辑器(右侧)
    */
   MODIFIED_DIFF,
+  /**
+   * 3-way 编辑器
+   */
+  MERGE_EDITOR_DIFF = 'MERGE_EDITOR_DIFF',
 }
 
 /**
- * 一个IEditor代表了一个最小的编辑器单元，可以是CodeEditor中的一个，也可以是DiffEditor中的两个
+ * 一个 IEditor 代表了一个最小的编辑器单元，可以是 CodeEditor 中的一个，也可以是 DiffEditor 中的两个
  */
 export interface IEditor {
   /**
@@ -117,13 +282,13 @@ export interface IUndoStopOptions {
 }
 
 export interface ICodeEditor extends IEditor, IDisposable {
-  layout(): void;
+  layout(dimension?: IDimension, postponeRendering?: boolean): void;
 
   /**
    * 打开一个 document
    * @param uri
    */
-  open(documentModelRef: IEditorDocumentModelRef, range?: IRange): Promise<void>;
+  open(documentModelRef: IEditorDocumentModelRef, range?: IRange): void;
 
   focus(): void;
 
@@ -152,6 +317,8 @@ export interface IDiffEditor extends IDisposable {
   focus(): void;
 
   getLineChanges(): ILineChange[] | null;
+
+  onRefOpen: Event<IEditorDocumentModelRef>;
 }
 
 @Injectable()
@@ -177,7 +344,15 @@ export abstract class EditorCollectionService {
    */
   public abstract createDiffEditor(dom: HTMLElement, options?: any, overrides?: { [key: string]: any }): IDiffEditor;
 
+  public abstract createMergeEditor(
+    dom: HTMLElement,
+    options?: any,
+    overrides?: { [key: string]: any },
+  ): IMergeEditorEditor;
+
   public abstract listEditors(): IEditor[];
+  public abstract getEditorByUri(uri: URI): IEditor | undefined;
+
   public abstract listDiffEditors(): IDiffEditor[];
 
   public abstract onCodeEditorCreate: Event<ICodeEditor>;
@@ -233,7 +408,7 @@ export interface IEditorGroup {
   currentEditor: IEditor | null;
 
   /**
-   * 和currentEditor不同，对于diffEditor来说会取确实在focus的Editor
+   * 和 currentEditor 不同，对于 DiffEditor 来说会取到上一次 focus 的 Editor
    */
   currentOrPreviousFocusedEditor: IEditor | null;
 
@@ -275,8 +450,9 @@ export interface IEditorGroup {
   /**
    * 关闭指定的 uri 的 tab， 如果存在的话
    * @param uri
+   * @return 是否成功关闭，不存在的话返回 true
    */
-  close(uri: URI): Promise<void>;
+  close(uri: URI): Promise<boolean>;
 
   getState(): IEditorGroupState;
 
@@ -284,7 +460,11 @@ export interface IEditorGroup {
 
   saveAll(): Promise<void>;
 
-  closeAll(): Promise<void>;
+  /**
+   * 关闭指定所有的 tab
+   * @return 是否成功关闭
+   */
+  closeAll(): Promise<boolean>;
 
   /**
    * 保存当前的 tab 的文件 (如果它能被保存的话)
@@ -325,7 +505,7 @@ export abstract class WorkbenchEditorService {
   editorGroups: IEditorGroup[];
 
   /**
-   *
+   * 排序后的编辑器组
    */
   sortedEditorGroups: IEditorGroup[];
 
@@ -333,6 +513,11 @@ export abstract class WorkbenchEditorService {
    * 当前的编辑器对象
    */
   currentEditor: IEditor | null;
+
+  /**
+   * 和 currentEditor 不同，对于 DiffEditor 来说会取到上一次 focus 的 Editor
+   */
+  currentOrPreviousFocusedEditor: IEditor | null;
 
   /**
    * 当前焦点的编辑器资源
@@ -364,6 +549,10 @@ export abstract class WorkbenchEditorService {
    */
   abstract openUris(uri: URI[]): Promise<void>;
 
+  abstract save(uri: URI): Promise<URI | undefined>;
+
+  abstract saveAs(uri: URI): Promise<URI | undefined>;
+
   /**
    * 保存全部
    * @param includeUntitled 是否对新文件进行保存询问, 默认false
@@ -381,6 +570,11 @@ export abstract class WorkbenchEditorService {
    * 获得当前打开的 uri
    */
   abstract getAllOpenedUris(): URI[];
+
+  /**
+   * 获得当前打开的文档资源
+   */
+  abstract getAllOpenedDocuments(): Promise<IEditorDocumentModel[]>;
 
   /**
    * 创建一个带待存的资源
@@ -446,6 +640,8 @@ export interface IResourceOpenOptions {
 
   /**
    * @deprecated use focus instead
+   *
+   * An optional flag that when `true` will stop the editor from taking focus.
    */
   preserveFocus?: boolean;
 
@@ -453,6 +649,11 @@ export interface IResourceOpenOptions {
    * 获取焦点
    */
   focus?: boolean;
+
+  /**
+   * If set `focus`, the editor's dom will be focused, This option prevents the element from being scrolled after getting the focus.
+   */
+  preventScroll?: boolean;
 
   /**
    * 强制使用指定的打开方式
@@ -463,6 +664,11 @@ export interface IResourceOpenOptions {
    * 不尝试在文件树上对打开的 uri 进行定位
    */
   disableNavigate?: boolean;
+
+  /**
+   * 不尝试在已打开的编辑器中的 uri 进行定位
+   */
+  disableNavigateOnOpendEditor?: boolean;
 
   /**
    * 是否使用preview模式
@@ -494,6 +700,8 @@ export interface IResourceOpenOptions {
    * 当关闭时指定 force 参数，用来跳过 shouldClose 等逻辑
    */
   forceClose?: boolean;
+
+  supportsRevive?: boolean;
 }
 
 export interface IResourceOpenResult {
@@ -656,9 +864,16 @@ export enum IEditorPriority {
   default = 'default',
 }
 
+export enum EditorOpenType {
+  code = 'code',
+  diff = 'diff',
+  mergeEditor = 'mergeEditor',
+  component = 'component',
+}
+
 // 定义一个resource如何被打开
 export interface IEditorOpenType {
-  type: 'code' | 'diff' | 'component';
+  type: EditorOpenType | `${EditorOpenType}`;
 
   componentId?: string;
 
@@ -778,3 +993,23 @@ export function getSimpleEditorOptions(): IEditorOptions {
  * in case the column does not exist yet.
  */
 export type EditorGroupColumn = number;
+
+export function isTextEditorViewState(candidate: unknown): candidate is ICodeEditorViewState | IDiffEditorViewState {
+  const viewState = candidate as (ICodeEditorViewState | IDiffEditorViewState) | undefined;
+  if (!viewState) {
+    return false;
+  }
+
+  const diffEditorViewState = viewState as IDiffEditorViewState;
+  if (diffEditorViewState.modified) {
+    return isTextEditorViewState(diffEditorViewState.modified);
+  }
+
+  const codeEditorViewState = viewState as ICodeEditorViewState;
+
+  return !!(
+    codeEditorViewState.contributionsState &&
+    codeEditorViewState.viewState &&
+    Array.isArray(codeEditorViewState.cursorState)
+  );
+}

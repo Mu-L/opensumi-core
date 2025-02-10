@@ -1,14 +1,14 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { CommandRegistry, AppConfig } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { AppConfig, CommandRegistry } from '@opensumi/ide-core-browser';
 import { LifeCyclePhase } from '@opensumi/ide-core-common';
-import { ThemeType, IIconService, IconType } from '@opensumi/ide-theme';
+import { IIconService, IconType, ThemeType } from '@opensumi/ide-theme';
 
 import {
-  VSCodeContributePoint,
   Contributes,
   ExtensionService,
   IExtCommandManagement,
   LifeCycle,
+  VSCodeContributePoint,
 } from '../../../common';
 import { AbstractExtInstanceManagementService } from '../../types';
 
@@ -78,13 +78,16 @@ export class CommandsContributionPoint extends VSCodeContributePoint<CommandsSch
               category: this.getLocalizeFromNlsJSON(command.category, extensionId),
               label: this.getLocalizeFromNlsJSON(command.title, extensionId),
               shortLabel: command.shortTitle ? this.getLocalizeFromNlsJSON(command.shortTitle, extensionId) : undefined,
+              categoryLocalized: this.createLocalizedStr(command.category, extensionId),
+              labelLocalized: this.createLocalizedStr(command.title, extensionId),
+              shortLabelLocalized: command.shortTitle
+                ? this.createLocalizedStr(command.shortTitle, extensionId)
+                : undefined,
               id: command.command,
               iconClass:
                 (typeof command.icon === 'string' && this.iconService.fromString(command.icon)) ||
                 this.iconService.fromIcon(extension.path, command.icon, IconType.Background),
               enablement: command.enablement,
-              alias: this.getLocalizeFromNlsJSON(command.title, extensionId, 'default'),
-              aliasCategory: this.getLocalizeFromNlsJSON(command.category, extensionId, 'default'),
             },
             {
               execute: (...args: any[]) => this.extensionService.executeExtensionCommand(command.command, args),

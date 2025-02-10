@@ -1,18 +1,18 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  DecorationsManager,
   Decoration,
+  DecorationsManager,
   IRecycleTreeHandle,
-  WatchEvent,
   TreeNodeEvent,
+  WatchEvent,
 } from '@opensumi/ide-components';
-import { Emitter, Deferred, Event, DisposableCollection, path, pSeries } from '@opensumi/ide-core-browser';
+import { Deferred, DisposableCollection, Emitter, Event, pSeries, path } from '@opensumi/ide-core-browser';
 
 import { DebugVariable, ExpressionContainer, ExpressionNode } from '../tree/debug-tree-node.define';
 import styles from '../view/variables/debug-variables.module.less';
 
 import { DebugHoverModel } from './debug-hover-model';
-import { ExpressionVariable, DebugHoverSource } from './debug-hover-source';
+import { DebugHoverSource, ExpressionVariable } from './debug-hover-source';
 
 const { Path } = path;
 
@@ -132,16 +132,6 @@ export class DebugHoverTreeModelService {
     this.disposableCollection.push(
       this.treeModel?.root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
         this.loadingDecoration.removeTarget(target);
-      }),
-    );
-    this.disposableCollection.push(
-      this.treeModel!.onWillUpdate(() => {
-        // 更新树前更新下选中节点
-        if (this.selectedNodes.length !== 0) {
-          // 仅处理一下单选情况
-          const node = this.treeModel?.root.getTreeNodeByPath(this.selectedNodes[0].path);
-          this.selectedDecoration.addTarget(node as ExpressionNode);
-        }
       }),
     );
   }

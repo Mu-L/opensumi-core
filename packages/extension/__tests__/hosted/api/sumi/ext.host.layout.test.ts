@@ -1,11 +1,11 @@
-import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
+import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpc/multiplexer';
 
 import { mockService } from '../../../../../../tools/dev-tool/src/mock-injector';
 import { mockExtensions } from '../../../../__mocks__/extensions';
 import { MainThreadLayout } from '../../../../src/browser/sumi/main.thread.layout';
 import { MainThreadSumiAPIIdentifier } from '../../../../src/common/sumi';
 import { MainThreadAPIIdentifier } from '../../../../src/common/vscode';
-import { createLayoutAPIFactory, ExtHostLayout } from '../../../../src/hosted/api/sumi/ext.host.layout';
+import { ExtHostLayout, createLayoutAPIFactory } from '../../../../src/hosted/api/sumi/ext.host.layout';
 import { ExtHostCommands } from '../../../../src/hosted/api/vscode/ext.host.command';
 
 const extension = mockExtensions[0];

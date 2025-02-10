@@ -1,5 +1,5 @@
 import React from 'react';
-import { MentionsInput, Mention } from 'react-mentions';
+import { Mention, MentionsInput } from 'react-mentions';
 
 import { Tabs } from '@opensumi/ide-components';
 import { localize, useInjectable } from '@opensumi/ide-core-browser';
@@ -10,14 +10,13 @@ import { CommentsBody } from './comments-body';
 import styles from './comments.module.less';
 import { getMentionBoxStyle } from './mentions.style';
 
-
 export interface ICommentTextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   focusDelay?: number;
   minRows?: number;
   maxRows?: number;
   initialHeight?: string;
   value: string;
-  dragFiles?: (files: FileList) => void;
+  dragFiles?: (files: FileList) => void | Promise<void>;
 }
 
 const defaultTrigger = '@';
@@ -47,7 +46,7 @@ export const CommentsTextArea = React.forwardRef<HTMLTextAreaElement, ICommentTe
   React.useImperativeHandle(ref, () => inputRef.current!);
 
   const handleFileSelect = React.useCallback(
-    async (event: DragEvent) => {
+    async (event: React.DragEvent<HTMLTextAreaElement>) => {
       event.stopPropagation();
       event.preventDefault();
 
@@ -166,7 +165,9 @@ export const CommentsTextArea = React.forwardRef<HTMLTextAreaElement, ICommentTe
               onDragOver={handleDragOver}
               onDrop={handleFileSelect}
               inputRef={inputRef}
-              ref={itemRef}
+              // in react 18, the type of ref is changed to LegacyRef<ClassComponent>
+              // but actually it is working pass a dom element ref
+              ref={itemRef as any}
               value={value}
               placeholder={placeholder}
               onChange={onChange}

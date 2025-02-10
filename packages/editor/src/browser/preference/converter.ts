@@ -1,89 +1,9 @@
-import { objects, Uri } from '@opensumi/ide-core-browser';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { Uri, objects } from '@opensumi/ide-core-browser';
 import { IConfigurationService } from '@opensumi/monaco-editor-core/esm/vs/platform/configuration/common/configuration';
 
 import { IConvertedMonacoOptions } from '../types';
 
 const { removeUndefined } = objects;
-
-/**
- * 计算由ConfigurationService设置值带来的monaco编辑器的属性
- * @param configurationService IConfigurationService
- * @param updatingKey 需要处理的Preference key。如果没有这个值，默认处理全部。
- */
-export function getConvertedMonacoOptions(
-  configurationService: IConfigurationService,
-  resourceUri?: string,
-  language?: string,
-  updatingKey?: string[],
-): IConvertedMonacoOptions {
-  const editorOptions: Partial<monaco.editor.IEditorOptions> = {};
-  const diffOptions: Partial<monaco.editor.IDiffEditorOptions> = {};
-  const modelOptions: Partial<monaco.editor.ITextModelUpdateOptions> = {};
-  const editorOptionsKeys = updatingKey
-    ? updatingKey.filter((key) => editorOptionsConverters.has(key))
-    : Array.from(editorOptionsConverters.keys());
-  const textModelUpdateOptionsKeys = updatingKey
-    ? updatingKey.filter((key) => textModelUpdateOptionsConverters.has(key))
-    : Array.from(textModelUpdateOptionsConverters.keys());
-  const diffEditorOptionsKeys = updatingKey
-    ? updatingKey.filter((key) => diffEditorOptionsConverters.has(key))
-    : Array.from(diffEditorOptionsConverters.keys());
-
-  editorOptionsKeys.forEach((key) => {
-    const value = configurationService.getValue(key, {
-      resource: resourceUri ? Uri.parse(resourceUri) : undefined,
-      overrideIdentifier: language,
-    });
-    if (value === undefined) {
-      return;
-    }
-    if (!editorOptionsConverters.get(key)) {
-      editorOptions[key] = value;
-    } else {
-      const converter: IMonacoOptionsConverter = editorOptionsConverters.get(key)! as IMonacoOptionsConverter;
-      editorOptions[converter.monaco] = converter.convert ? converter.convert(value) : value;
-    }
-  });
-
-  textModelUpdateOptionsKeys.forEach((key) => {
-    const value = configurationService.getValue(key, {
-      resource: resourceUri ? Uri.parse(resourceUri) : undefined,
-      overrideIdentifier: language,
-    });
-    if (value === undefined) {
-      return;
-    }
-    if (!textModelUpdateOptionsConverters.get(key)) {
-      modelOptions[key] = value;
-    } else {
-      const converter: IMonacoOptionsConverter = textModelUpdateOptionsConverters.get(key)! as IMonacoOptionsConverter;
-      modelOptions[converter.monaco] = converter.convert ? converter.convert(value) : value;
-    }
-  });
-
-  diffEditorOptionsKeys.forEach((key) => {
-    const value = configurationService.getValue(key, {
-      resource: resourceUri ? Uri.parse(resourceUri) : undefined,
-      overrideIdentifier: language,
-    });
-    if (value === undefined) {
-      return;
-    }
-    if (!diffEditorOptionsConverters.get(key)) {
-      editorOptions[key] = value;
-    } else {
-      const converter: IMonacoOptionsConverter = diffEditorOptionsConverters.get(key)! as IMonacoOptionsConverter;
-      diffOptions[converter.monaco] = converter.convert ? converter.convert(value) : value;
-    }
-  });
-
-  return {
-    editorOptions: removeUndefined(editorOptions),
-    modelOptions: removeUndefined(modelOptions),
-    diffOptions: removeUndefined(diffOptions),
-  };
-}
 
 type NoConverter = false;
 type KaitianPreferenceKey = string;
@@ -101,6 +21,7 @@ interface IMonacoOptionsConverter {
    */
   convert?: (value: any) => any;
 }
+
 /**
  * Configuration options for the editor.
  */
@@ -272,6 +193,12 @@ export const editorOptionsConverters: Map<KaitianPreferenceKey, NoConverter | IM
    * Defaults to false.
    */
   ['editor.fontLigatures', { monaco: 'fontLigatures' }],
+
+  /**
+   * Enable that the selection with the mouse and keys is doing column selection.
+   * Defaults to false.
+   */
+  ['editor.columnSelection', { monaco: 'columnSelection' }],
 
   /**
    * Disable the use of `will-change` for the editor margin and lines layers.
@@ -723,6 +650,30 @@ export const editorOptionsConverters: Map<KaitianPreferenceKey, NoConverter | IM
       },
     },
   ],
+
+  /**
+   * Controls whether characters are highlighted that can be confused with basic ASCII characters
+   */
+  ['editor.unicodeHighlight', { monaco: 'unicodeHighlight' }],
+
+  /**
+   * Suggest options.
+   */
+  [
+    'editor.inlineSuggest.showToolbar',
+    {
+      monaco: 'inlineSuggest',
+      convert: (value) => {
+        if (value) {
+          return {
+            showToolbar: value,
+          };
+        } else {
+          return undefined;
+        }
+      },
+    },
+  ],
 ]);
 
 export const textModelUpdateOptionsConverters: Map<KaitianPreferenceKey, NoConverter | IMonacoOptionsConverter> =
@@ -762,6 +713,66 @@ export const diffEditorOptionsConverters: Map<KaitianPreferenceKey, NoConverter 
    * Defaults to false.
    */
   ['diffEditor.originalEditable', { monaco: 'originalEditable' }],
+  [
+    'diffEditor.minimap',
+    {
+      monaco: 'minimap',
+      convert: (value: any) => ({
+        enabled: value,
+      }),
+    },
+  ],
+  [
+    'diffEditor.experimental.stickyScroll.enabled',
+    {
+      monaco: 'experimental',
+      convert: (value) => ({
+        stickyScroll: {
+          enabled: value,
+        },
+      }),
+    },
+  ],
+
+  /**
+   * Controls whether the diff editor shows unchanged regions.
+   */
+  [
+    'diffEditor.hideUnchangedRegions.enabled',
+    { monaco: 'hideUnchangedRegions', convert: (value) => ({ enabled: value }) },
+  ],
+  /**
+   * Controls how many lines are used for unchanged regions.
+   */
+  [
+    'diffEditor.hideUnchangedRegions.revealLineCount',
+    { monaco: 'hideUnchangedRegions', convert: (value) => ({ revealLineCount: value }) },
+  ],
+  /**
+   * Controls how many lines are used as a minimum for unchanged regions.
+   */
+  [
+    'diffEditor.hideUnchangedRegions.minimumLineCount',
+    { monaco: 'hideUnchangedRegions', convert: (value) => ({ minimumLineCount: value }) },
+  ],
+  /**
+   * Controls how many lines are used as context when comparing unchanged regions.
+   */
+  [
+    'diffEditor.hideUnchangedRegions.contextLineCount',
+    { monaco: 'hideUnchangedRegions', convert: (value) => ({ contextLineCount: value }) },
+  ],
+  /**
+   * Controls whether the diff editor should show detected code moves.
+   */
+  ['diffEditor.experimental.showMoves', { monaco: 'experimental', convert: (value) => ({ showMoves: value }) }],
+  /**
+   * Controls whether the diff editor shows empty decorations to see where characters got inserted or deleted.
+   */
+  [
+    'diffEditor.experimental.showEmptyDecorations',
+    { monaco: 'experimental', convert: (value) => ({ showEmptyDecorations: value }) },
+  ],
 ]);
 
 function isContainOptionKey(key: string, optionMap: Map<KaitianPreferenceKey, NoConverter | IMonacoOptionsConverter>) {
@@ -790,4 +801,66 @@ export function isEditorOption(key: string) {
 
 export function isDiffEditorOption(key: string): boolean {
   return isContainOptionKey(key, diffEditorOptionsConverters);
+}
+
+const editorOptionsConvertersKey = [...editorOptionsConverters.keys()];
+const textModelUpdateOptionsConvertersKey = [...textModelUpdateOptionsConverters.keys()];
+const diffEditorOptionsConvertersKey = [...diffEditorOptionsConverters.keys()];
+
+/**
+ * 计算由ConfigurationService设置值带来的monaco编辑器的属性
+ * @param configurationService IConfigurationService
+ * @param updatingKey 需要处理的Preference key。如果没有这个值，默认处理全部。
+ */
+export function getConvertedMonacoOptions(
+  configurationService: IConfigurationService,
+  resourceUri?: string,
+  language?: string,
+  updatingKey?: string[],
+): IConvertedMonacoOptions {
+  const resource = resourceUri ? Uri.parse(resourceUri) : undefined;
+
+  const getOptions = (keys: string[], converters: Map<string, NoConverter | IMonacoOptionsConverter>): Partial<any> =>
+    keys.reduce((options, key) => {
+      const value = configurationService.getValue(key, { resource, overrideIdentifier: language });
+      if (value !== undefined) {
+        const converter = converters.get(key);
+        if (!converter) {
+          options[key] = value;
+          return options;
+        }
+
+        const targetKey = converter ? converter.monaco : key;
+        const convertedValue = converter?.convert ? converter.convert(value) : value;
+
+        if (!options[targetKey]) {
+          options[targetKey] = convertedValue;
+        } else {
+          Object.assign(options[targetKey], convertedValue);
+        }
+      }
+      return options;
+    }, {});
+
+  const editorOptionsKeys = updatingKey
+    ? updatingKey.filter((key) => editorOptionsConverters.has(key))
+    : [...editorOptionsConvertersKey];
+
+  const textModelUpdateOptionsKeys = updatingKey
+    ? updatingKey.filter((key) => textModelUpdateOptionsConverters.has(key))
+    : [...textModelUpdateOptionsConvertersKey];
+
+  const diffEditorOptionsKeys = updatingKey
+    ? updatingKey.filter((key) => diffEditorOptionsConverters.has(key))
+    : [...diffEditorOptionsConvertersKey];
+
+  const editorOptions = removeUndefined(getOptions(editorOptionsKeys, editorOptionsConverters));
+  const modelOptions = removeUndefined(getOptions(textModelUpdateOptionsKeys, textModelUpdateOptionsConverters));
+  const diffOptions = removeUndefined(getOptions(diffEditorOptionsKeys, diffEditorOptionsConverters));
+
+  return {
+    editorOptions,
+    modelOptions,
+    diffOptions,
+  };
 }

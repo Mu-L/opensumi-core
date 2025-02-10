@@ -1,30 +1,33 @@
 import cls from 'classnames';
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
-import { IRecycleTreeHandle, RecycleTree, INodeRendererWrapProps, TreeNodeEvent } from '@opensumi/ide-components';
+import { INodeRendererWrapProps, IRecycleTreeHandle, RecycleTree, TreeNodeEvent } from '@opensumi/ide-components';
 import { useInjectable } from '@opensumi/ide-core-browser';
+import { LayoutViewSizeConfig } from '@opensumi/ide-core-browser/lib/layout/constants';
 import { IDisposable } from '@opensumi/ide-core-common';
 
 import {
-  ExpressionNode,
-  ExpressionContainer,
   DebugHoverVariableRoot,
   DebugVariable,
+  ExpressionContainer,
+  ExpressionNode,
 } from '../tree/debug-tree-node.define';
-import { DebugVariableRenderedNode, DEBUG_VARIABLE_TREE_NODE_HEIGHT } from '../view/variables/debug-variables.view';
+import { DEBUG_VARIABLE_TREE_NODE_HEIGHT, DebugVariableRenderedNode } from '../view/variables/debug-variables.view';
 
 import { DebugHoverModel } from './debug-hover-model';
 import { DebugHoverTreeModelService, IDebugHoverUpdateData } from './debug-hover-tree.model.service';
 import styles from './debug-hover.module.less';
 
-export const DebugHoverView = observer(() => {
+export const DebugHoverView = () => {
   const debugHoverTreeModelService: DebugHoverTreeModelService = useInjectable(DebugHoverTreeModelService);
-  const DEFAULT_LAYOUT_HEIGHT = 250;
+  const layoutViewSize = useInjectable<LayoutViewSizeConfig>(LayoutViewSizeConfig);
 
+  const DEFAULT_LAYOUT_HEIGHT = 250;
+  const DEFAULT_MAX_HEIGHT = 420;
+  const DEFAULT_HOVER_WEIGET_MARGIN_BOTTOM = 4;
   const [model, setModel] = React.useState<{ treeModel?: DebugHoverModel; variable?: DebugVariable }>({});
   const [treeLayoutHeight, setTreeLayoutHeight] = React.useState<number>(DEFAULT_LAYOUT_HEIGHT);
-  const wrapperRef: React.RefObject<HTMLDivElement> = React.createRef();
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     debugHoverTreeModelService.onDidUpdateTreeModelOrVariable(async (data: IDebugHoverUpdateData) => {
@@ -45,9 +48,17 @@ export const DebugHoverView = observer(() => {
     setTreeLayoutHeight(DEFAULT_LAYOUT_HEIGHT);
 
     if (model.treeModel) {
-      disposable = model.treeModel.root.watcher.on(TreeNodeEvent.DidChangeExpansionState, (data) => {
-        const treeHeight = Math.max(DEFAULT_LAYOUT_HEIGHT, ~~model.treeModel?.root.branchSize! * 22);
-        setTreeLayoutHeight(Math.min(500, treeHeight));
+      disposable = model.treeModel.root.watcher.on(TreeNodeEvent.DidChangeExpansionState, () => {
+        const treeHeight = Math.max(DEFAULT_LAYOUT_HEIGHT, (model.treeModel?.root.branchSize || 0) * 22);
+        const rect = wrapperRef.current?.getBoundingClientRect();
+        if (rect) {
+          const top = rect.top;
+          const maxHeight =
+            window.innerHeight - top - layoutViewSize.statusBarHeight - DEFAULT_HOVER_WEIGET_MARGIN_BOTTOM;
+          setTreeLayoutHeight(Math.min(maxHeight, treeHeight, DEFAULT_MAX_HEIGHT));
+        } else {
+          setTreeLayoutHeight(Math.min(DEFAULT_MAX_HEIGHT, treeHeight));
+        }
       });
     }
     return () => {
@@ -144,4 +155,4 @@ export const DebugHoverView = observer(() => {
       {renderVariableTree()}
     </div>
   );
-});
+};

@@ -1,24 +1,24 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  ILogger,
-  registerLocalizationBundle,
-  URI,
-  PreferenceService,
-  parseWithComments,
-  getLanguageId,
-  path,
   GeneralSettingsId,
+  ILogger,
+  PreferenceService,
+  URI,
+  getLanguageId,
+  parseWithComments,
+  path,
+  registerLocalizationBundle,
 } from '@opensumi/ide-core-browser';
-import { LifeCyclePhase } from '@opensumi/ide-core-common';
+import { Deferred, LifeCyclePhase } from '@opensumi/ide-core-common';
 import { IExtensionStoragePathServer } from '@opensumi/ide-extension-storage';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 
 import {
-  VSCodeContributePoint,
   Contributes,
-  IExtensionNodeClientService,
   ExtensionNodeServiceServerPath,
+  IExtensionNodeClientService,
   LifeCycle,
+  VSCodeContributePoint,
 } from '../../../common';
 import { AbstractExtInstanceManagementService } from '../../types';
 
@@ -63,37 +63,45 @@ export class LocalizationsContributionPoint extends VSCodeContributePoint<Locali
   @Autowired(AbstractExtInstanceManagementService)
   private readonly extensionManageService: AbstractExtInstanceManagementService;
 
+  private _whenContributed = new Deferred<void>();
+
+  get whenContributed(): Promise<void> {
+    return this._whenContributed.promise;
+  }
+
+  private storagePath: string;
+
   private safeParseJSON(content) {
     let json;
     try {
       json = parseWithComments(content);
       return json;
     } catch (error) {
-      return this.logger.error('语言配置文件解析出错！', content);
+      return this.logger.error(`Language configuration file parsing error, ${error.stack}`);
     }
   }
 
   async contribute() {
-    const promises: Promise<void>[] = [];
-    const currentLanguage: string = this.preferenceService.get(GeneralSettingsId.Language) || getLanguageId();
-    const currentExtensions = this.extensionManageService.getExtensionInstances();
+    try {
+      const promises: Promise<void>[] = [];
+      const currentLanguage: string = this.preferenceService.get(GeneralSettingsId.Language) || getLanguageId();
+      const currentExtensions = this.extensionManageService.getExtensionInstances();
 
-    for (const contrib of this.contributesMap) {
-      const { extensionId, contributes } = contrib;
-      const extension = this.extensionManageService.getExtensionInstanceByExtId(extensionId);
-      const storagePath = (await this.extensionStoragePathServer.getLastStoragePath()) || '';
-      contributes.forEach((localization) => {
-        if (localization.translations) {
-          const languageId = normalizeLanguageId(localization.languageId);
-          if (languageId !== getLanguageId()) {
-            return;
-          }
-          localization.translations.map((translate) => {
-            if (currentExtensions.findIndex((e) => e.id === translate.id) === -1) {
-              return;
+      for (const contrib of this.contributesMap) {
+        const { extensionId, contributes } = contrib;
+        const extension = this.extensionManageService.getExtensionInstanceByExtId(extensionId);
+        for await (const localization of contributes) {
+          if (localization.translations) {
+            const languageId = normalizeLanguageId(localization.languageId);
+            if (languageId !== getLanguageId()) {
+              continue;
             }
+
             promises.push(
-              (async () => {
+              ...localization.translations.map(async (translate) => {
+                if (currentExtensions.findIndex((e) => e.id === translate.id) === -1) {
+                  return;
+                }
                 const contents = await this.registerLanguage(translate, extension!.path);
                 registerLocalizationBundle(
                   {
@@ -104,20 +112,32 @@ export class LocalizationsContributionPoint extends VSCodeContributePoint<Locali
                   },
                   translate.id,
                 );
-              })(),
+              }),
             );
-          });
-          promises.push(this.extensionNodeService.updateLanguagePack(currentLanguage, extension!.path, storagePath));
+
+            if (!this.storagePath) {
+              this.storagePath = (await this.extensionStoragePathServer.getLastStoragePath()) || '';
+            }
+
+            promises.push(
+              this.extensionNodeService.updateLanguagePack(currentLanguage, extension!.path, this.storagePath),
+            );
+          }
         }
-      });
+      }
+
+      await Promise.all(promises);
+      this._whenContributed.resolve();
+    } catch (error) {
+      this.logger.error('Failed to contribute localizations:', error);
+      this._whenContributed.reject(error);
     }
-    await Promise.all(promises);
   }
 
   async registerLanguage(translate: TranslationFormat, extensionPath: string) {
     const bundlePath = new Path(extensionPath).join(translate.path.replace(/^\.\//, '')).toString();
-    const { content } = await this.fileServiceClient.resolveContent(URI.file(bundlePath).toString());
-    const json = this.safeParseJSON(content);
+    const { content } = await this.fileServiceClient.readFile(URI.file(bundlePath).toString());
+    const json = this.safeParseJSON(content.toString());
 
     const contents = {};
     if (json.contents) {

@@ -1,25 +1,26 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  Event,
-  formatLocalize,
-  Disposable,
   Deferred,
-  strings,
-  Emitter,
+  Disposable,
   DisposableCollection,
+  Emitter,
+  Event,
   ProblemMatch,
   ProblemMatchData,
+  formatLocalize,
+  rangeAreEqual,
+  strings,
 } from '@opensumi/ide-core-common';
 import {
+  IShellLaunchConfig,
+  ITerminalClient,
   ITerminalController,
   ITerminalGroupViewService,
-  ITerminalClient,
   ITerminalService,
-  IShellLaunchConfig,
 } from '@opensumi/ide-terminal-next/lib/common';
 
 import { ITaskExecutor } from '../common';
-import { Task } from '../common/task';
+import { ContributedTask, CustomTask, PresentationOptions, Task } from '../common/task';
 
 import { ProblemCollector } from './problem-collector';
 
@@ -31,14 +32,6 @@ export enum TaskStatus {
   PROCESS_RUNNING,
   PROCESS_EXITED,
 }
-function rangeAreEqual(a, b) {
-  return (
-    a.start.line === b.start.line &&
-    a.start.character === b.start.character &&
-    a.end.line === b.end.line &&
-    a.end.character === b.end.character
-  );
-}
 
 function problemAreEquals(a: ProblemMatchData | ProblemMatch, b: ProblemMatchData | ProblemMatch) {
   return (
@@ -46,10 +39,10 @@ function problemAreEquals(a: ProblemMatchData | ProblemMatch, b: ProblemMatchDat
     a.description.owner === b.description.owner &&
     a.description.severity === b.description.severity &&
     a.description.source === b.description.source &&
-    (a as ProblemMatchData)?.marker.code === (b as ProblemMatchData)?.marker.code &&
-    (a as ProblemMatchData)?.marker.message === (b as ProblemMatchData)?.marker.message &&
-    (a as ProblemMatchData)?.marker.source === (b as ProblemMatchData)?.marker.source &&
-    rangeAreEqual((a as ProblemMatchData).marker.range, (b as ProblemMatchData).marker.range)
+    (a as ProblemMatchData)?.marker?.code === (b as ProblemMatchData)?.marker?.code &&
+    (a as ProblemMatchData)?.marker?.message === (b as ProblemMatchData)?.marker?.message &&
+    (a as ProblemMatchData)?.marker?.source === (b as ProblemMatchData)?.marker?.source &&
+    rangeAreEqual((a as ProblemMatchData)?.marker?.range, (b as ProblemMatchData)?.marker?.range)
   );
 }
 
@@ -109,6 +102,8 @@ export class TerminalTaskExecutor extends Disposable implements ITaskExecutor {
 
   public taskStatus: TaskStatus = TaskStatus.PROCESS_INIT;
 
+  private presentation?: PresentationOptions;
+
   constructor(
     private task: Task,
     private shellLaunchConfig: IShellLaunchConfig,
@@ -116,6 +111,10 @@ export class TerminalTaskExecutor extends Disposable implements ITaskExecutor {
     public executorId: number,
   ) {
     super();
+
+    if (task instanceof CustomTask || task instanceof ContributedTask) {
+      this.presentation = task.command.presentation;
+    }
 
     this.addDispose(
       this.terminalView.onWidgetDisposed((e) => {
@@ -154,16 +153,28 @@ export class TerminalTaskExecutor extends Disposable implements ITaskExecutor {
     }
     const { id, term } = this.terminalClient;
     term.options.disableStdin = true;
+
     term.writeln(`\r\n${formatLocalize('terminal.integrated.exitedWithCode', code)}`);
-    term.writeln(`\r\n\x1b[1m${formatLocalize('reuseTerminal')}\x1b[0m\r\n`);
+
+    if (this.presentation?.showReuseMessage) {
+      term.writeln(`\r\n\x1b[1m${formatLocalize('terminal.reuseTerminal')}\x1b[0m\r\n`);
+    }
     this._onDidTaskProcessExit.fire(code);
 
-    // 按任意键退出
-    this.eventToDispose.push(
-      Event.once(term.onKey)(() => {
-        id && this.terminalView.removeWidget(id);
-      }),
-    );
+    if (this.presentation?.close) {
+      this.removeTerminal(id);
+    } else {
+      // 按任意键退出
+      this.eventToDispose.push(
+        Event.once(term.onKey)(() => {
+          id && this.removeTerminal(id);
+        }),
+      );
+    }
+  }
+
+  private removeTerminal(id: string) {
+    this.terminalView.removeWidget(id);
   }
 
   /**

@@ -1,7 +1,14 @@
-import { IJSONSchema, Event, IDisposable, BasicEvent } from '@opensumi/ide-core-common';
-import type { IEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/config/editorConfiguration';
-import type { ICodeEditor, IDiffEditor } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
-import type { IDiffEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
+import { BasicEvent, Event, IDisposable, IJSONSchema } from '@opensumi/ide-core-common';
+import { EditorContributionInstantiation } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorExtensions';
+import { SyncDescriptor } from '@opensumi/monaco-editor-core/esm/vs/platform/instantiation/common/descriptors';
+
+import { IMergeEditorEditor } from './merge-editor-widget';
+
+import type {
+  ICodeEditor,
+  IDiffEditor,
+  IDiffEditorConstructionOptions,
+} from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
 import type { IEditorContribution } from '@opensumi/monaco-editor-core/esm/vs/editor/common/editorCommon';
 import type {
   DocumentFormattingEditProvider,
@@ -13,7 +20,10 @@ import type {
   ISelectedSuggestion,
   SuggestWidget,
 } from '@opensumi/monaco-editor-core/esm/vs/editor/contrib/suggest/browser/suggestWidget';
+import type { IStandaloneEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneCodeEditor';
 import type { BrandedService } from '@opensumi/monaco-editor-core/esm/vs/platform/instantiation/common/instantiation';
+
+export * from './event';
 
 export enum ServiceNames {
   CODE_EDITOR_SERVICE = 'codeEditorService',
@@ -23,12 +33,13 @@ export enum ServiceNames {
   CONTEXT_KEY_SERVICE = 'contextKeyService',
   BULK_EDIT_SERVICE = 'IWorkspaceEditService',
   OPENER_SERVICE = 'openerService',
+  TELEMETRY_SERVICE = 'telemetryService',
 }
 
 export abstract class MonacoService {
   public abstract createCodeEditor(
     monacoContainer: HTMLElement,
-    options?: IEditorConstructionOptions,
+    options?: IStandaloneEditorConstructionOptions,
     overrides?: { [key: string]: any },
   ): ICodeEditor;
 
@@ -37,6 +48,12 @@ export abstract class MonacoService {
     options?: IDiffEditorConstructionOptions,
     overrides?: { [key: string]: any },
   ): IDiffEditor;
+
+  public abstract createMergeEditor(
+    monacoContainer: HTMLElement,
+    options?: IDiffEditorConstructionOptions,
+    overrides?: { [key: string]: any },
+  ): IMergeEditorEditor;
 
   public abstract registerOverride(serviceName: ServiceNames, service: any): void;
 
@@ -60,16 +77,19 @@ export type FormattingSelectorType = (
   document: ITextModel,
 ) => DocumentFormattingEditProvider | DocumentRangeFormattingEditProvider;
 
+export type IEditorExtensionContribution<T extends BrandedService[]> = (
+  id: string,
+  contribCtor: (new (editor: ICodeEditor, ...services: T) => IEditorContribution) | SyncDescriptor<IEditorContribution>,
+  instantiation?: EditorContributionInstantiation,
+) => void;
+
 export interface MonacoContribution {
   registerOverrideService?(registry: MonacoOverrideServiceRegistry): void;
 
-  registerMonacoDefaultFormattingSelector?(registry: (selector: IFormattingEditProviderSelector) => void): void;
+  registerMonacoDefaultFormattingSelector?(registry: (selector: IFormattingEditProviderSelector) => IDisposable): void;
 
   registerEditorExtensionContribution?<Services extends BrandedService[]>(
-    register: (
-      id: string,
-      contribCtor: new (editor: ICodeEditor, ...services: Services) => IEditorContribution,
-    ) => void,
+    register: IEditorExtensionContribution<Services>,
   ): void;
 
   /**

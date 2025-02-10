@@ -1,11 +1,11 @@
+import assert from 'assert';
 import http from 'http';
-import url from 'url';
 
 import ws from 'ws';
 
 export abstract class WebSocketHandler {
   abstract handlerId: string;
-  abstract handleUpgrade(wsPathname: string, request: any, socket: any, head: any): boolean;
+  abstract handleUpgrade(pathname: string, request: any, socket: any, head: any): boolean;
   init?(): void;
 }
 
@@ -88,7 +88,11 @@ export class WebSocketServerRoute {
     const wsServerHandlerArr = this.wsServerHandlerArr;
 
     server.on('upgrade', (request, socket, head) => {
-      const wsPathname: string = url.parse(request.url).pathname as string;
+      assert(request.url, 'cannot parse url from http request');
+
+      // request.url: `/path?query=a#hash`
+      const url = new URL(request.url, 'wss://base');
+      const wsPathname: string = url.pathname;
 
       let wsHandlerIndex = 0;
       const wsHandlerLength = wsServerHandlerArr.length;
@@ -103,6 +107,7 @@ export class WebSocketServerRoute {
 
       if (wsHandlerIndex === wsHandlerLength) {
         this.logger.error(`request.url ${request.url} mismatch!`);
+        socket.destroy();
       }
     });
   }

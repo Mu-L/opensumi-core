@@ -1,24 +1,24 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   CommandRegistry,
   CommandService,
-  ILogger,
-  formatLocalize,
   IContextKeyService,
-  isUndefined,
+  ILogger,
   URI,
+  formatLocalize,
+  isUndefined,
   localize,
 } from '@opensumi/ide-core-browser';
 import { menus } from '@opensumi/ide-core-browser/lib/extensions/schema/menu';
 import { ToolbarRegistry } from '@opensumi/ide-core-browser/lib/layout';
-import { IMenuRegistry, MenuId, IMenuItem, ISubmenuItem } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuItem, IMenuRegistry, ISubmenuItem, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { LifeCyclePhase } from '@opensumi/ide-core-common';
-import { IEditorGroup } from '@opensumi/ide-editor';
+import { EditorOpenType, IEditorGroup } from '@opensumi/ide-editor';
 import { IEditorActionRegistry } from '@opensumi/ide-editor/lib/browser';
-import { ThemeType, IconType } from '@opensumi/ide-theme';
+import { IconType, ThemeType } from '@opensumi/ide-theme';
 import { IIconService } from '@opensumi/ide-theme/lib/common/theme.service';
 
-import { VSCodeContributePoint, Contributes, LifeCycle } from '../../../common';
+import { Contributes, LifeCycle, VSCodeContributePoint } from '../../../common';
 import { AbstractExtInstanceManagementService } from '../../types';
 
 // 对插件侧 contributes 的 menu interface
@@ -200,6 +200,11 @@ export class MenusContributionPoint extends VSCodeContributePoint<MenusSchema> {
     return id;
   }
 
+  private getDataFromQuery(query: string, data: string) {
+    const q = new URLSearchParams(query);
+    return q.get(data);
+  }
+
   contribute() {
     const collector = console;
 
@@ -241,9 +246,18 @@ export class MenusContributionPoint extends VSCodeContributePoint<MenusSchema> {
             const [group, order] = parseMenuGroup(item.group);
             let argsTransformer: ((...args: any[]) => any[]) | undefined;
             if ((menuId as MenuId) === MenuId.EditorTitleContext) {
-              argsTransformer = ({ uri, group }: { uri: URI; group: IEditorGroup }) => [uri.codeUri];
+              argsTransformer = ({ uri }: { uri: URI; group: IEditorGroup }) => [uri.codeUri];
             } else if ((menuId as MenuId) === MenuId.EditorTitle) {
-              argsTransformer = (uri: URI, group: IEditorGroup, editorUri?: URI) => [editorUri?.codeUri || uri.codeUri];
+              argsTransformer = (uri: URI, _group: IEditorGroup, editorUri?: URI) => {
+                if (uri.scheme === EditorOpenType.diff) {
+                  // 对于 DiffEditor 情况时，尝试通过 query 获取 modified URI 作为首个参数
+                  const modified = this.getDataFromQuery(decodeURIComponent(uri.query), 'modified');
+                  if (modified) {
+                    return [new URI(modified).codeUri];
+                  }
+                }
+                return [editorUri?.codeUri || uri.codeUri];
+              };
             }
 
             this.addDispose(
@@ -280,7 +294,6 @@ export class MenusContributionPoint extends VSCodeContributePoint<MenusSchema> {
             }
 
             const [group, order] = parseMenuGroup(item.group);
-
             this.addDispose(
               this.menuRegistry.registerMenuItem(menuId, {
                 submenu: item.submenu,

@@ -1,9 +1,9 @@
-import { TreeNode, CompositeTreeNode, ITree } from '@opensumi/ide-components';
+import { CompositeTreeNode, ITree, TreeNode } from '@opensumi/ide-components';
 import { MenuNode } from '@opensumi/ide-core-browser/lib/menu/next';
-import { IAccessibilityInformation, isObject, isString, Uri, UriComponents } from '@opensumi/ide-core-common';
+import { IAccessibilityInformation, Uri, UriComponents, isObject, isString } from '@opensumi/ide-core-common';
 
-import { ITreeItemLabel } from '../../../../common/vscode';
-import { ICommand } from '../../../../common/vscode/models';
+import { ITreeItemLabel, TreeViewItemCheckboxInfo } from '../../../../common/vscode';
+import { Command } from '../../../../common/vscode/models';
 import { TreeViewDataProvider } from '../main.thread.treeview';
 
 export class ExtensionTreeRoot extends CompositeTreeNode {
@@ -42,7 +42,7 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
   private _displayName: string;
   private _hightlights?: [number, number][];
   private _strikethrough?: boolean;
-  private _command?: ICommand;
+  private _command?: Command;
   private _tooltip?: string;
   private _resolved = false;
   private sourceUri?: UriComponents;
@@ -54,15 +54,16 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
     public description: string = '',
     public icon: string = '',
     tooltip = '',
-    command: ICommand | undefined,
+    command: Command | undefined,
     public contextValue: string = '',
     public treeItemId: string = '',
     public actions: MenuNode[],
+    private _checkboxInfo?: TreeViewItemCheckboxInfo,
     private _accessibilityInformation?: IAccessibilityInformation,
     expanded?: boolean,
     sourceUri?: UriComponents,
   ) {
-    super(tree, parent, undefined, { name: treeItemId });
+    super(tree, parent, undefined, { name: encodeURIComponent(treeItemId) });
     this.isExpanded = expanded || false;
     this.sourceUri = sourceUri;
     this._command = command;
@@ -90,6 +91,10 @@ export class ExtensionCompositeTreeNode extends CompositeTreeNode {
 
   get displayName() {
     return this._displayName;
+  }
+
+  get checkboxInfo() {
+    return this._checkboxInfo;
   }
 
   get accessibilityInformation() {
@@ -143,14 +148,15 @@ export class ExtensionTreeNode extends TreeNode {
     public description: string = '',
     public icon: string = '',
     private _tooltip: string | undefined,
-    private _command: ICommand | undefined,
+    private _command: Command | undefined,
     public contextValue: string = '',
     public treeItemId: string = '',
     public actions: MenuNode[],
+    private _checkboxInfo?: TreeViewItemCheckboxInfo,
     private _accessibilityInformation?: IAccessibilityInformation,
     private sourceUri?: UriComponents,
   ) {
-    super(tree as ITree, parent, undefined, { name: treeItemId });
+    super(tree as ITree, parent, undefined, { name: encodeURIComponent(treeItemId) });
     if (isString(label)) {
       this._displayName = label;
     } else if (isObject(label)) {
@@ -178,6 +184,10 @@ export class ExtensionTreeNode extends TreeNode {
 
   get displayName() {
     return this._displayName;
+  }
+
+  get checkboxInfo() {
+    return this._checkboxInfo;
   }
 
   get accessibilityInformation() {

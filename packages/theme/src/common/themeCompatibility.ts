@@ -5,7 +5,7 @@
 
 import { Color } from './color';
 import * as colorRegistry from './color-registry';
-import { ITokenColorizationRule, IColorMap } from './theme.service';
+import { IColorMap, ITokenColorizationRule } from './theme.service';
 
 const settingToColorIdMapping: { [settingId: string]: string[] } = {};
 function addSettingMapping(settingId: string, colorId: string) {
@@ -17,7 +17,6 @@ function addSettingMapping(settingId: string, colorId: string) {
 }
 
 // 旧的settings和新的ITokenColorizationRule的转换（主要是一些key的映射）
-// tslint:disable
 export function convertSettings(
   oldSettings: ITokenColorizationRule[],
   resultRules: ITokenColorizationRule[],

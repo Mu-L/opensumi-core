@@ -3,15 +3,26 @@ import { ITree } from '../types';
 
 import { IBasicTreeData } from './types';
 
+interface IBasicTreeRootOptions {
+  treeName?: string;
+}
+
 export class BasicTreeRoot extends CompositeTreeNode {
   private _raw: IBasicTreeData;
-  constructor(tree: ITree, parent: BasicCompositeTreeNode | undefined, data: IBasicTreeData) {
-    super(tree, parent);
+  constructor(
+    tree: ITree,
+    parent: BasicCompositeTreeNode | undefined,
+    data: IBasicTreeData,
+    basicTreeRootOptions = {} as IBasicTreeRootOptions,
+  ) {
+    super(tree, parent, undefined, {
+      treeName: basicTreeRootOptions.treeName,
+    });
     this._raw = data;
   }
 
   get name() {
-    return `BasicTreeRoot_${this.id}`;
+    return this.getMetadata('treeName') ?? `BasicTreeRoot_${this.id}`;
   }
 
   get raw() {
@@ -28,11 +39,11 @@ export class BasicCompositeTreeNode extends CompositeTreeNode {
   private _raw: IBasicTreeData;
 
   constructor(tree: ITree, parent: BasicCompositeTreeNode | undefined, data: IBasicTreeData, id?: number) {
-    super(tree, parent, undefined, {});
+    super(tree, parent, undefined, {
+      name: data.label,
+    });
     this.isExpanded = data.expanded || false;
     this.id = id || this.id;
-    // 每个节点应该拥有自己独立的路径，不存在重复性
-    this.name = String(this.id);
     this._displayName = data.label;
     this._raw = data;
   }
@@ -41,12 +52,32 @@ export class BasicCompositeTreeNode extends CompositeTreeNode {
     return this._displayName;
   }
 
+  get renderLabel() {
+    return this.raw.renderLabel;
+  }
+
   get icon() {
     return this.raw.icon;
   }
 
   get iconClassName() {
     return this.raw.iconClassName;
+  }
+
+  get className() {
+    return this.raw.className;
+  }
+
+  get twisterClassName() {
+    return this.raw.twisterClassName;
+  }
+
+  get twisterPlaceholderClassName() {
+    return this.raw.twisterPlaceholderClassName;
+  }
+
+  get indentOffset() {
+    return this.raw.indentOffset;
   }
 
   get description() {
@@ -67,16 +98,20 @@ export class BasicTreeNode extends TreeNode {
   private _raw: IBasicTreeData;
 
   constructor(tree: ITree, parent: BasicCompositeTreeNode | undefined, data: IBasicTreeData, id?: number) {
-    super(tree, parent, undefined, {});
+    super(tree, parent, undefined, {
+      name: data.label,
+    });
     this.id = id || this.id;
-    // 每个节点应该拥有自己独立的路径，不存在重复性
-    this.name = String(this.id);
     this._displayName = data.label;
     this._raw = data;
   }
 
   get displayName() {
     return this._displayName;
+  }
+
+  get renderLabel() {
+    return this.raw.renderLabel;
   }
 
   get description() {
@@ -89,6 +124,22 @@ export class BasicTreeNode extends TreeNode {
 
   get iconClassName() {
     return this.raw.iconClassName;
+  }
+
+  get className() {
+    return this.raw.className;
+  }
+
+  get twisterClassName() {
+    return this.raw.twisterClassName;
+  }
+
+  get indentOffset() {
+    return this.raw.indentOffset;
+  }
+
+  get twisterPlaceholderClassName() {
+    return this.raw.twisterPlaceholderClassName;
   }
 
   get raw() {

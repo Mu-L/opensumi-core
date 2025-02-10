@@ -1,19 +1,32 @@
-import { URI, Disposable, IContextKeyService, StorageProvider, ILogger } from '@opensumi/ide-core-browser';
+import { Disposable, IContextKeyService, StorageProvider, URI } from '@opensumi/ide-core-browser';
 import { ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import { IDecorationsService } from '@opensumi/ide-decoration';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
+import { createMockedMonaco } from '@opensumi/ide-monaco/__mocks__/monaco';
+import { MockContextKeyService } from '@opensumi/ide-monaco/__mocks__/monaco.context-key.service';
 import { IThemeService } from '@opensumi/ide-theme';
 
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
-import { createMockedMonaco } from '../../../monaco/__mocks__/monaco';
-import { MockContextKeyService } from '../../../monaco/__mocks__/monaco.context-key.service';
 import styles from '../../src/browser/file-tree-node.modules.less';
-import { EditorFile } from '../../src/browser/opened-editor-node.define';
+import { EditorFile, EditorFileGroup } from '../../src/browser/opened-editor-node.define';
 import { OpenedEditorDecorationService } from '../../src/browser/services/opened-editor-decoration.service';
 import { OpenedEditorModelService } from '../../src/browser/services/opened-editor-model.service';
 import { OpenedEditorService } from '../../src/browser/services/opened-editor-tree.service';
+
+const createEditorFile = (uri: URI, parent: EditorFileGroup, service: OpenedEditorService) =>
+  new EditorFile(
+    service,
+    {
+      uri,
+      name: uri.displayName,
+      icon: '',
+    },
+    uri.toString(),
+    false,
+    parent,
+  );
 
 describe('OpenedEditorModelService should be work', () => {
   (global as any).monaco = createMockedMonaco() as any;
@@ -35,6 +48,7 @@ describe('OpenedEditorModelService should be work', () => {
     path: 'testRoot',
     uri: rootUri,
     ensureLoaded: jest.fn(),
+    getTreeNodeByPath: jest.fn(),
   } as any;
   const mockCtxMenuRenderer = {
     show: jest.fn(),
@@ -131,24 +145,15 @@ describe('OpenedEditorModelService should be work', () => {
   });
 
   it('should init success', () => {
-    expect(mockLabelService.onDidChange).toBeCalledTimes(1);
-    expect(mockThemeService.onThemeChange).toBeCalledTimes(1);
-    expect(mockDecorationsService.onDidChangeDecorations).toBeCalledTimes(1);
+    expect(mockLabelService.onDidChange).toHaveBeenCalledTimes(1);
+    expect(mockThemeService.onThemeChange).toHaveBeenCalledTimes(1);
+    expect(mockDecorationsService.onDidChangeDecorations).toHaveBeenCalledTimes(1);
     expect(openedEditorModelService.treeModel).toBeDefined();
   });
 
   it('activeFileDecoration method should be work', () => {
     openedEditorModelService.initDecorations(mockRoot);
-    const node = new EditorFile(
-      openedEditorService,
-      {
-        uri: mockRoot.uri.resolve('test.js'),
-        name: 'test',
-        icon: '',
-      },
-      'tooltip',
-      mockRoot,
-    );
+    const node = createEditorFile(mockRoot.uri.resolve('test.js'), mockRoot, openedEditorService);
     openedEditorModelService.activeFileDecoration(node);
     const decoration = openedEditorModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -157,16 +162,7 @@ describe('OpenedEditorModelService should be work', () => {
 
   it('activeFileActivedDecoration method should be work', () => {
     openedEditorModelService.initDecorations(mockRoot);
-    const node = new EditorFile(
-      openedEditorService,
-      {
-        uri: mockRoot.uri.resolve('test.js'),
-        name: 'test',
-        icon: '',
-      },
-      'tooltip',
-      mockRoot,
-    );
+    const node = createEditorFile(mockRoot.uri.resolve('test.js'), mockRoot, openedEditorService);
     openedEditorModelService.activeFileActivedDecoration(node);
     const decoration = openedEditorModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -175,16 +171,7 @@ describe('OpenedEditorModelService should be work', () => {
 
   it('selectFileDecoration method should be work', () => {
     openedEditorModelService.initDecorations(mockRoot);
-    const node = new EditorFile(
-      openedEditorService,
-      {
-        uri: mockRoot.uri.resolve('test.js'),
-        name: 'test',
-        icon: '',
-      },
-      'tooltip',
-      mockRoot,
-    );
+    const node = createEditorFile(mockRoot.uri.resolve('test.js'), mockRoot, openedEditorService);
     openedEditorModelService.selectFileDecoration(node);
     const decoration = openedEditorModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -193,16 +180,7 @@ describe('OpenedEditorModelService should be work', () => {
 
   it('enactiveFileDecoration method should be work', () => {
     openedEditorModelService.initDecorations(mockRoot);
-    const node = new EditorFile(
-      openedEditorService,
-      {
-        uri: mockRoot.uri.resolve('test.js'),
-        name: 'test',
-        icon: '',
-      },
-      'tooltip',
-      mockRoot,
-    );
+    const node = createEditorFile(mockRoot.uri.resolve('test.js'), mockRoot, openedEditorService);
     openedEditorModelService.activeFileDecoration(node);
     let decoration = openedEditorModelService.decorations.getDecorations(node);
     expect(decoration).toBeDefined();
@@ -215,16 +193,7 @@ describe('OpenedEditorModelService should be work', () => {
 
   it('handleTreeBlur method should be work', () => {
     openedEditorModelService.initDecorations(mockRoot);
-    const node = new EditorFile(
-      openedEditorService,
-      {
-        uri: mockRoot.uri.resolve('test.js'),
-        name: 'test',
-        icon: '',
-      },
-      'tooltip',
-      mockRoot,
-    );
+    const node = createEditorFile(mockRoot.uri.resolve('test.js'), mockRoot, openedEditorService);
     openedEditorModelService.initDecorations(mockRoot);
     openedEditorModelService.activeFileDecoration(node);
     let decoration = openedEditorModelService.decorations.getDecorations(node);
@@ -237,16 +206,7 @@ describe('OpenedEditorModelService should be work', () => {
   });
 
   it('handleContextMenu method should be work', () => {
-    const node = new EditorFile(
-      openedEditorService,
-      {
-        uri: mockRoot.uri.resolve('test.js'),
-        name: 'test',
-        icon: '',
-      },
-      'tooltip',
-      mockRoot,
-    );
+    const node = createEditorFile(mockRoot.uri.resolve('test.js'), mockRoot, openedEditorService);
     const mockEvent = {
       stopPropagation: jest.fn(),
       preventDefault: jest.fn(),
@@ -256,8 +216,8 @@ describe('OpenedEditorModelService should be work', () => {
       },
     } as any;
     openedEditorModelService.handleContextMenu(mockEvent, node);
-    expect(mockCtxMenuRenderer.show).toBeCalledTimes(1);
-    expect(mockEvent.stopPropagation).toBeCalledTimes(1);
-    expect(mockEvent.preventDefault).toBeCalledTimes(1);
+    expect(mockCtxMenuRenderer.show).toHaveBeenCalledTimes(1);
+    expect(mockEvent.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(mockEvent.preventDefault).toHaveBeenCalledTimes(1);
   });
 });

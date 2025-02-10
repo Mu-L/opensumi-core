@@ -1,10 +1,6 @@
-export * from './scrollbar';
-export * from './recycle-tree';
-export * from './tree';
 export * from './portal';
 export * from './resize/resize';
 export * from './layout';
-export * from './scroll';
 export { Select as NativeSelect } from './select';
 
 /**
@@ -24,3 +20,6 @@ export * from '@opensumi/ide-components/lib/popover';
 export * from '@opensumi/ide-components/lib/message';
 export * from '@opensumi/ide-components/lib/tooltip';
 export * from '@opensumi/ide-components/lib/recycle-list';
+
+// re export `Scroll` for backward compatibility
+export { Scrollbars, Scrollbars as Scroll } from '@opensumi/ide-components/lib/scrollbars';

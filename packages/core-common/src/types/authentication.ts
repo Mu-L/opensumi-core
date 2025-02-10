@@ -1,14 +1,9 @@
-import { IDisposable, Event } from '@opensumi/ide-utils';
+import { Event, IDisposable } from '@opensumi/ide-utils';
 
 export const noAccountsId = 'authentication.noAccounts';
 
 export const ACCOUNTS_MENU = ['accounts_menu'];
 export const ACCOUNTS_SUBMENU = [...ACCOUNTS_MENU, '1_accounts_submenu'];
-
-export interface AllowedExtension {
-  id: string;
-  name: string;
-}
 
 export interface AuthenticationSessionsChangeEvent {
   added: ReadonlyArray<AuthenticationSession>;
@@ -37,15 +32,27 @@ export interface AllowedExtension {
   allowed?: boolean;
 }
 
+export interface AuthenticationSessionAccountInformation {
+  id: string;
+  label: string;
+}
+
+export interface AuthenticationProviderSessionOptions {
+  account?: AuthenticationSessionAccountInformation;
+}
+
 export interface IAuthenticationProvider {
   id: string;
   label: string;
   supportsMultipleAccounts: boolean;
   manageTrustedExtensions(accountName: string): Promise<void>;
   updateSessionItems(event: AuthenticationSessionsChangeEvent): Promise<void>;
-  getSessions(): Promise<ReadonlyArray<AuthenticationSession>>;
+  getSessions(
+    scopes?: string[] | undefined,
+    account?: AuthenticationSessionAccountInformation,
+  ): Promise<ReadonlyArray<AuthenticationSession>>;
   hasSessions(): boolean;
-  login(scopes: string[]): Promise<AuthenticationSession>;
+  login(scopes: string[], options: AuthenticationProviderSessionOptions): Promise<AuthenticationSession>;
   logout(sessionId: string): Promise<void>;
   signOut(accountName: string): Promise<void>;
   dispose(): void;
@@ -61,17 +68,28 @@ export interface IAuthenticationService {
   getProviderIds(): string[];
   registerAuthenticationProvider(id: string, provider: IAuthenticationProvider): void;
   unregisterAuthenticationProvider(id: string): void;
-  requestNewSession(providerId: string, scopes: string[], extensionId: string, extensionName: string): Promise<void>;
+  requestNewSession(
+    providerId: string,
+    scopes: string[],
+    options: AuthenticationProviderSessionOptions,
+    extensionId: string,
+    extensionName: string,
+  ): Promise<void>;
   sessionsUpdate(providerId: string, event: AuthenticationSessionsChangeEvent): void;
 
   getSessions(
     id: string,
     scopes?: string[],
     activateImmediate?: boolean,
+    user?: AuthenticationSessionAccountInformation,
   ): Promise<ReadonlyArray<AuthenticationSession>>;
   getLabel(providerId: string): string;
   supportsMultipleAccounts(providerId: string): boolean;
-  login(providerId: string, scopes: string[]): Promise<AuthenticationSession>;
+  login(
+    providerId: string,
+    scopes: string[],
+    options: AuthenticationProviderSessionOptions,
+  ): Promise<AuthenticationSession>;
   logout(providerId: string, sessionId: string): Promise<void>;
 
   manageTrustedExtensionsForAccount(providerId: string, accountName: string): Promise<void>;
@@ -110,11 +128,4 @@ export interface SessionRequest {
 
 export interface SessionRequestInfo {
   [scopes: string]: SessionRequest;
-}
-
-export interface AuthenticationGetSessionOptions {
-  createIfNone: boolean;
-  clearSessionPreference: boolean;
-  forceNewSession?: boolean | { detail: string };
-  silent?: boolean;
 }

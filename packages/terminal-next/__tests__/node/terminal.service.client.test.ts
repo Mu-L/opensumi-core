@@ -1,9 +1,9 @@
 import os from 'os';
 
 import { Injector } from '@opensumi/di';
-import { createNodeInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { createNodeInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
 
-import { ITerminalServiceClient, ITerminalNodeService } from '../../src/common';
+import { ITerminalNodeService, ITerminalServiceClient } from '../../src/common';
 import { TerminalNodePtyModule } from '../../src/node';
 import { PtyService } from '../../src/node/pty';
 
@@ -73,6 +73,7 @@ describe('TerminalServiceClientImpl', () => {
 
     expect(typeof terminalServiceClient.getProcessId(mockId)).toEqual('number');
     expect(typeof terminalServiceClient.getShellName(mockId)).toEqual('string');
+    expect(await terminalServiceClient.getCwd(mockId)).toBeTruthy();
     expect(receiveData.indexOf('message test') > -1).toEqual(true);
   });
 

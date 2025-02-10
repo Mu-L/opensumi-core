@@ -5,9 +5,9 @@ import { IOpenerService, useInjectable } from '@opensumi/ide-core-browser';
 import { Disposable, IMarkdownString, Schemes, URI } from '@opensumi/ide-core-common';
 import {
   EditorCollectionService,
-  getSimpleEditorOptions,
   IDiffEditor,
   IEditorDocumentModelService,
+  getSimpleEditorOptions,
 } from '@opensumi/ide-editor/lib/browser';
 import { Markdown } from '@opensumi/ide-markdown';
 import { IDiffEditorOptions, IEditorOptions } from '@opensumi/ide-monaco/lib/browser/monaco-api/editor';
@@ -71,7 +71,10 @@ const MarkdownContentProvider = (props: { dto: TestDto | undefined }) => {
   React.useEffect(() => {
     if (shadowRootRef.current) {
       const { dto } = props;
-      const shadowRootElement = shadowRootRef.current.attachShadow({ mode: 'open' });
+      let shadowRootElement = shadowRootRef.current.shadowRoot;
+      if (!shadowRootElement) {
+        shadowRootElement = shadowRootRef.current.attachShadow({ mode: 'open' });
+      }
       if (!shadowRoot) {
         setShadowRoot(shadowRootElement);
       }
@@ -81,7 +84,7 @@ const MarkdownContentProvider = (props: { dto: TestDto | undefined }) => {
       const message = mdStr ? (mdStr as IMarkdownString).value.replace(/\t/g, '') : '';
       useMessage(message);
     }
-  }, []);
+  }, [props.dto]);
 
   return (
     <div ref={shadowRootRef} className={styles.preview_markdown}>
@@ -169,15 +172,23 @@ export const TestMessageContainer = () => {
     };
   }, []);
 
+  const renderTestMessage = React.useCallback(() => {
+    if (!dto) {
+      return null;
+    }
+    if (type === EContainerType.DIFF) {
+      return <DiffContentProvider dto={dto} />;
+    } else if (type === EContainerType.MARKDOWN) {
+      return <MarkdownContentProvider dto={dto} />;
+    } else {
+      const msg = getMessage(dto).message;
+      return <div className={styles.preview_text}>{typeof msg === 'string' ? msg : msg.value}</div>;
+    }
+  }, [dto]);
+
   return (
     <div className={styles.test_output_peek_message_container} style={{ height: '100%' }}>
-      {type === EContainerType.DIFF ? (
-        <DiffContentProvider dto={dto} />
-      ) : type === EContainerType.MARKDOWN ? (
-        <MarkdownContentProvider dto={dto} />
-      ) : type === EContainerType.PLANTTEXT ? (
-        getMessage(dto).message
-      ) : null}
+      {renderTestMessage()}
     </div>
   );
 };

@@ -7,11 +7,7 @@
 
 .tabs {
   flex-grow: 1;
-  width: 10px;
-
-  :global(.thumb-vertical) {
-    opacity: 0 !important;
-  }
+  height: 35px;
 
   :first-child {
     &.item_container {
@@ -23,6 +19,7 @@
     overflow-y: hidden;
     display: inline-flex;
     position: relative;
+    height: 100%;
   }
 }
 
@@ -51,7 +48,7 @@
   align-items: center;
   position: relative;
   max-width: 200px;
-  .close_icon {
+  .tab_close_icon {
     transition: opacity 0.2s ease-in-out;
     opacity: 0;
     border-right: 0;
@@ -69,7 +66,7 @@
 }
 
 .item_container:hover {
-  .close_icon {
+  .tab_close_icon {
     opacity: 1;
     color: var(--tab-activeForeground);
   }
@@ -105,7 +102,7 @@
   background-color: inherit;
 }
 
-.item_selected {
+.tab_item_selected {
   color: var(--kt-panelTab-activeForeground);
   background-color: var(--kt-panelTab-activeBackground);
   position: relative;
@@ -131,7 +128,7 @@
   }
 }
 
-.item_wrapper {
+.tab_item_wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -139,6 +136,28 @@
   height: 24px;
   margin-left: 5px;
   text-align: center;
+  .item_more {
+    height: 24px;
+    width: 20px;
+    padding: 0 2px;
+    line-height: 24px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    &:hover {
+      border-radius: 4px;
+      background-color: var(--kt-icon-hoverBackground);
+    }
+  }
+  .item_add {
+    height: 24px;
+    width: 24px;
+    padding-right: 2px;
+    line-height: 24px;
+    cursor: pointer;
+    user-select: none;
+    text-align: right;
+  }
   &:hover {
     color: var(--kt-icon-hoverForeground);
     border-radius: 4px;
@@ -146,31 +165,7 @@
   }
 }
 
-.item_add {
-  height: 24px;
-  width: 24px;
-  padding-right: 2px;
-  line-height: 24px;
-  cursor: pointer;
-  user-select: none;
-  text-align: right;
-}
-
-.item_more {
-  height: 24px;
-  width: 20px;
-  padding: 0 2px;
-  line-height: 24px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px !important;
-  &:hover {
-    border-radius: 4px;
-    background-color: var(--kt-icon-hoverBackground);
-  }
-}
-
-.close_icon {
+.tab_close_icon {
   &::before {
     font-size: 14px;
   }

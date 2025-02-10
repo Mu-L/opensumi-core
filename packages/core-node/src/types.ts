@@ -1,16 +1,15 @@
-import type cp from 'child_process';
-import type http from 'http';
-import type https from 'https';
-
-import type Koa from 'koa';
-import type ws from 'ws';
+import { NodeModule } from './node-module';
 
 import type { Injector } from '@opensumi/di';
 import type { WebSocketHandler } from '@opensumi/ide-connection/lib/node';
 import type { ConstructorOf, ILogService, LogLevel, MaybePromise } from '@opensumi/ide-core-common';
-import { BasicModule } from '@opensumi/ide-core-common';
+import type cp from 'child_process';
+import type http from 'http';
+import type https from 'https';
+import type Koa from 'koa';
+import type ws from 'ws';
 
-export abstract class NodeModule extends BasicModule {}
+export { NodeModule };
 
 export type ModuleConstructor = ConstructorOf<NodeModule>;
 export type ContributionConstructor = ConstructorOf<ServerAppContribution>;
@@ -92,6 +91,10 @@ interface Config {
    */
   onDidCreateExtensionHostProcess?: (cp: cp.ChildProcess) => void;
   /**
+   * Watcher Node 进程入口文件
+   */
+  watcherHost?: string;
+  /**
    * 插件 Node 进程入口文件
    */
   extHost?: string;
@@ -108,10 +111,20 @@ interface Config {
    * 配置关闭 keytar 校验能力，默认开启
    */
   disableKeytar?: boolean;
+  /**
+   * control rpcProtocol message timeout
+   * default -1，it means disable
+   */
+  rpcMessageTimeout?: number;
+  collaborationOptions?: ICollaborationServerOpts;
 }
 
 export interface AppConfig extends Partial<Config> {
   marketplace: MarketplaceConfig;
+}
+
+export interface ICollaborationServerOpts {
+  port?: number;
 }
 
 export interface IServerAppOpts extends Partial<Config> {

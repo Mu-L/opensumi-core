@@ -1,19 +1,20 @@
-import { Injectable, Autowired, Optional } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { Decoration, TargetMatchMode } from '@opensumi/ide-components';
 import {
-  DisposableCollection,
-  Disposable,
-  ILogger,
-  WithEventBus,
-  URI,
-  ThrottledDelayer,
-  FileStat,
-  encodeBase64,
   BinaryBuffer,
+  Disposable,
+  DisposableCollection,
+  FileStat,
+  ILogger,
+  ThrottledDelayer,
+  URI,
+  WithEventBus,
+  encodeBase64,
 } from '@opensumi/ide-core-browser';
 import { FileTreeDropEvent } from '@opensumi/ide-core-common/lib/types/dnd';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { IMessageService } from '@opensumi/ide-overlay';
+import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import { IFileTreeAPI, IFileTreeService } from '../../common';
 import { Directory, File } from '../../common/file-tree-node.define';
@@ -41,6 +42,9 @@ export class DragAndDropService extends WithEventBus {
 
   @Autowired(IFileServiceClient)
   protected readonly filesystem: IFileServiceClient;
+
+  @Autowired(IWorkspaceService)
+  protected readonly workspaceService: IWorkspaceService;
 
   private toCancelNodeExpansion: DisposableCollection = new DisposableCollection();
 
@@ -220,7 +224,9 @@ export class DragAndDropService extends WithEventBus {
           ? activeUri.codeUri.path
           : node && node instanceof File
           ? (node.parent as Directory)?.uri.codeUri.path
-          : node?.uri.codeUri.path,
+          : node
+          ? node.uri.codeUri.path
+          : new URI(this.workspaceService.workspace?.uri).codeUri.path,
       }),
     );
     try {
@@ -307,7 +313,7 @@ export class DragAndDropService extends WithEventBus {
       }
       if (resources.length > 0) {
         const targetContainerUri = activeUri ? activeUri : (containing && containing.uri)!;
-        const resourcesCanBeMoved = resources.filter(
+        const resourcesCanBeMoved: (File | Directory)[] = resources.filter(
           (resource: File | Directory) =>
             resource &&
             resource.parent &&
@@ -316,7 +322,7 @@ export class DragAndDropService extends WithEventBus {
         if (resourcesCanBeMoved.length > 0) {
           // 最小化移动文件
           const errors = await this.fileTreeAPI.mvFiles(
-            resourcesCanBeMoved.map((res) => res.uri),
+            resourcesCanBeMoved.map((res) => ({ url: res.uri, isDirectory: res.filestat.isDirectory })),
             targetContainerUri,
           );
           if (errors && errors.length > 0) {
@@ -347,12 +353,15 @@ export class DragAndDropService extends WithEventBus {
                   );
                   // 由于节点移动时默认仅更新节点路径
                   // 我们需要自己更新额外的参数，如uri, filestat等
-                  target.updateURI(to);
-                  target.updateFileStat({
-                    ...target.filestat,
-                    uri: to.toString(),
+                  target.updateMetaData({
+                    name: to.displayName,
+                    fileStat: {
+                      ...target.filestat,
+                      uri: to.toString(),
+                    },
+                    uri: to,
+                    tooltip: this.fileTreeAPI.getReadableTooltip(to),
                   });
-                  target.updateToolTip(this.fileTreeAPI.getReadableTooltip(to));
                   // 当重命名文件为文件夹时，刷新文件夹更新子文件路径
                   if (Directory.is(target)) {
                     this.fileTreeService.refresh(target as Directory);

@@ -2,13 +2,13 @@ import cls from 'classnames';
 import React from 'react';
 
 import {
-  TreeNode,
+  ClasslistComposite,
   CompositeTreeNode,
   INodeRendererProps,
-  ClasslistComposite,
+  TreeNode,
   TreeNodeType,
 } from '@opensumi/ide-components';
-import { URI, getIcon, CommandService } from '@opensumi/ide-core-browser';
+import { CommandService, URI, getIcon, useDesignStyles } from '@opensumi/ide-core-browser';
 import { SymbolTag } from '@opensumi/ide-editor/lib/browser/breadcrumb/document-symbol';
 
 import { IOutlineDecorationService } from '../common';
@@ -45,6 +45,8 @@ export const OutlineNode: React.FC<OutlineNodeRenderedProps> = ({
   decorations,
 }: OutlineNodeRenderedProps) => {
   const decoration = OutlineTreeNode.is(item) ? decorationService.getDecoration(item) : null;
+  const styles_expansion_toggle = useDesignStyles(styles.expansion_toggle, 'expansion_toggle');
+  const styles_outline_node = useDesignStyles(styles.outline_node, 'outline_node');
 
   const handleClick = (ev: React.MouseEvent) => {
     if (itemType === TreeNodeType.TreeNode || itemType === TreeNodeType.CompositeTreeNode) {
@@ -63,7 +65,7 @@ export const OutlineNode: React.FC<OutlineNodeRenderedProps> = ({
   };
 
   const paddingLeft = `${
-    defaultLeftPadding + (item.depth || 0) * (leftPadding || 0) + (!OutlineCompositeTreeNode.is(item) ? 16 : 0)
+    defaultLeftPadding + (item.depth || 0) * (leftPadding || 0) + (!OutlineCompositeTreeNode.is(item) ? 12 : 0)
   }px`;
 
   const editorNodeStyle = {
@@ -106,7 +108,7 @@ export const OutlineNode: React.FC<OutlineNodeRenderedProps> = ({
   const renderFolderToggle = (node: OutlineCompositeTreeNode, clickHandler: any) => (
     <div
       onClick={clickHandler}
-      className={cls(styles.file_tree_node_segment, styles.expansion_toggle, getIcon('arrow-right'), {
+      className={cls(styles.file_tree_node_segment, styles_expansion_toggle, getIcon('arrow-right'), {
         [`${styles.mod_collapsed}`]: !(node as OutlineCompositeTreeNode).expanded,
       })}
     />
@@ -140,11 +142,11 @@ export const OutlineNode: React.FC<OutlineNodeRenderedProps> = ({
       key={item.id}
       onClick={handleClick}
       title={getItemTooltip()}
-      className={cls(styles.outline_node, decorations ? decorations.classlist : null)}
+      className={cls(styles_outline_node, decorations ? decorations.classlist : null)}
       style={editorNodeStyle}
       data-id={item.id}
     >
-      <div className={cls(styles.outline_node_content)}>
+      <div className={styles.outline_node_content}>
         {renderTwice(item)}
         {renderIcon(item)}
         <div className={styles.outline_node_overflow_wrap}>

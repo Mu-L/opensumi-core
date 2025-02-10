@@ -1,4 +1,5 @@
-import React from 'react';
+import cls from 'classnames';
+import React, { PropsWithChildren } from 'react';
 
 import { Button } from '@opensumi/ide-components';
 import { getDebugLogger, localize } from '@opensumi/ide-core-common';
@@ -34,12 +35,15 @@ export const SlotLocation = {
 };
 
 export function getSlotLocation(moduleName: string, layoutConfig: LayoutConfig) {
+  if (!layoutConfig) {
+    return '';
+  }
   for (const location of Object.keys(layoutConfig)) {
     if (layoutConfig[location].modules && layoutConfig[location].modules.indexOf(moduleName) > -1) {
       return location;
     }
   }
-  getDebugLogger().warn(`没有找到${moduleName}所对应的位置！`);
+  logger.warn(`Cannot find the location with ${moduleName}`);
   return '';
 }
 
@@ -59,7 +63,7 @@ export function getTabbarCtxKey(location: string): TabbarContextKeys {
   return standardTabbarCtxKeys[location] || 'activeExtendViewlet';
 }
 
-export class ErrorBoundary extends React.Component {
+export class ErrorBoundary extends React.Component<PropsWithChildren<any>> {
   state = { error: null, errorInfo: null };
 
   componentDidCatch(error, errorInfo) {
@@ -96,16 +100,22 @@ export class ErrorBoundary extends React.Component {
 
 export const allSlot: { slot: string; dom: HTMLElement }[] = [];
 
-export const SlotDecorator: React.FC<{ slot: string; backgroundColor?: string }> = ({ slot, ...props }) => {
-  const ref = React.useRef<HTMLElement>();
+export const SlotDecorator: React.FC<{
+  slot: string;
+  color?: string;
+  id?: string;
+  children: React.ReactChild;
+  className?: string;
+}> = ({ slot, id, children, className }) => {
+  const ref = React.useRef<HTMLElement | null>();
   React.useEffect(() => {
     if (ref.current) {
       allSlot.push({ slot, dom: ref.current });
     }
   }, [ref]);
   return (
-    <div ref={(ele) => (ref.current = ele!)} className='resize-wrapper'>
-      {props.children}
+    <div id={id} ref={(ele) => (ref.current = ele)} className={cls('resize-wrapper', className)}>
+      {children}
     </div>
   );
 };
@@ -122,13 +132,15 @@ export class SlotRendererRegistry {
         <ErrorBoundary>
           {components.map((componentInfo, index: number) => {
             // 默认的只渲染一个
-            const Component = componentInfo.views[0].component!;
-            return (
-              <Component
-                {...(componentInfo.options && componentInfo.options.initialProps)}
-                key={`${Component.name}-${index}`}
-              />
-            );
+            const Component = componentInfo.views[0].component;
+            if (Component) {
+              return (
+                <Component
+                  {...(componentInfo.options && componentInfo.options.initialProps)}
+                  key={`${Component.name || Component.displayName}-${index}`}
+                />
+              );
+            }
           })}
         </ErrorBoundary>
       )
@@ -161,48 +173,67 @@ export class SlotRendererRegistry {
 export const slotRendererRegistry = new SlotRendererRegistry();
 
 export interface SlotProps {
+  // Slot ID
+  id?: string;
+  // Slot Name
   slot: string;
-  /**
-   * slot 默认的背景色
-   */
-  backgroundColor?: string;
+  // Is Tabbar or not
   isTabbar?: boolean;
+  // Default Size
+  defaultSize?: number;
+  // Min Size
+  minSize?: number;
+  // Min Resize
+  minResize?: number;
+  // Max Resize
+  maxResize?: number;
+  // Z-Index
+  zIndex?: number;
+  // Flex
+  flex?: number;
+  // Flex Grow
+  flexGrow?: number;
+  // Others
   [key: string]: any;
 }
 
-export function SlotRenderer({ slot, isTabbar, ...props }: SlotProps) {
+export function SlotRenderer({ slot, isTabbar, id, ...props }: SlotProps) {
   const componentRegistry = useInjectable<ComponentRegistry>(ComponentRegistry);
   const appConfig = React.useContext(ConfigContext);
   const clientApp = useInjectable<IClientApp>(IClientApp);
-  const componentKeys = appConfig.layoutConfig[slot]?.modules ?? [];
   if (isTabbar) {
     slotRendererRegistry.addTabbar(slot);
   }
-  if (!componentKeys || !componentKeys.length) {
-    getDebugLogger().warn(`No ${slot} view declared by location.`);
-  }
+
   const [componentInfos, setInfos] = React.useState<ComponentRegistryInfo[]>([]);
-  const updateComponentInfos = React.useCallback(() => {
+
+  const prepareComponentInfos = () => {
+    const componentKeys = appConfig.layoutConfig[slot]?.modules ?? [];
     const infos: ComponentRegistryInfo[] = [];
+    if (!componentKeys || !componentKeys.length) {
+      logger.warn(`No ${slot} view declared by location.`);
+    }
     componentKeys.forEach((token) => {
       const info = componentRegistry.getComponentRegistryInfo(token);
       if (!info) {
-        getDebugLogger().warn(`${token} view isn't registered, please check.`);
+        logger.warn(`${token} view isn't registered, please check.`);
       } else {
         infos.push(info);
       }
     });
     setInfos(infos);
-  }, []);
+  };
+
   React.useEffect(() => {
     // 对于嵌套在模块视图的SlotRenderer，渲染时应用已启动
-    clientApp.appInitialized.promise.then(updateComponentInfos);
+    clientApp.appInitialized.promise.then(prepareComponentInfos);
   }, []);
 
   const Renderer = slotRendererRegistry.getSlotRenderer(slot);
+
   return (
     <ErrorBoundary>
-      <SlotDecorator slot={slot} backgroundColor={props.backgroundColor}>
+      <SlotDecorator slot={slot} id={id}>
         <Renderer components={componentInfos} {...props} />
       </SlotDecorator>
     </ErrorBoundary>

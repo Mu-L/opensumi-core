@@ -484,6 +484,16 @@ declare module 'vscode' {
     export function registerDocumentRangeSemanticTokensProvider(selector: DocumentSelector, provider: DocumentRangeSemanticTokensProvider, legend: SemanticTokensLegend): Disposable;
 
     /**
+		 * Registers a new {@link DocumentDropEditProvider}.
+		 *
+		 * @param selector A selector that defines the documents this provider applies to.
+		 * @param provider A drop provider.
+		 *
+		 * @returns A {@link Disposable} that unregisters this provider when disposed of.
+		 */
+		export function registerDocumentDropEditProvider(selector: DocumentSelector, provider: DocumentDropEditProvider): Disposable;
+
+    /**
      * Register a provider that locates evaluatable expressions in text documents.
      * VS Code will evaluate the expression in the active debug session and will show the result in the debug hover.
      *
@@ -1388,52 +1398,8 @@ declare module 'vscode' {
   }
 
   /**
-   * An inline completion item represents a text snippet that is proposed inline to complete text that is being typed.
-   *
-   * @see {@link InlineCompletionItemProvider.provideInlineCompletionItems}
-   */
-  export class InlineCompletionItem {
-    /**
-     * The text to replace the range with. Must be set.
-     * Is used both for the preview and the accept operation.
-     */
-    insertText: string | SnippetString;
-
-    /**
-     * A text that is used to decide if this inline completion should be shown. When `falsy`
-     * the {@link InlineCompletionItem.insertText} is used.
-     *
-     * An inline completion is shown if the text to replace is a prefix of the filter text.
-     */
-    filterText?: string;
-
-    /**
-     * The range to replace.
-     * Must begin and end on the same line.
-     *
-     * Prefer replacements over insertions to provide a better experience when the user deletes typed text.
-     */
-    range?: Range;
-
-    /**
-     * An optional {@link Command} that is executed *after* inserting this completion.
-     */
-    command?: Command;
-
-    /**
-     * Creates a new inline completion item.
-     *
-     * @param insertText The text to replace the range with.
-     * @param range The range to replace. If not set, the word at the requested position will be used.
-     * @param command An optional {@link Command} that is executed *after* inserting this completion.
-     */
-    constructor(insertText: string | SnippetString, range?: Range, command?: Command);
-  }
-
-  /**
    * A document link is a range in a text document that links to an internal or external resource, like another
    * text document or a web site.
-   * @木农
    */
   export class DocumentLink {
 
@@ -1583,7 +1549,6 @@ declare module 'vscode' {
   /**
    * Folding context (for future use)
    */
-  // tslint:disable-next-line: no-empty-interface
   export interface FoldingContext { }
 
   /**
@@ -1629,6 +1594,47 @@ declare module 'vscode' {
      */
     Outdent = 3,
   }
+
+  /**
+	 * Enumeration of commonly encountered syntax token types.
+	 */
+	export enum SyntaxTokenType {
+		/**
+		 * Everything except tokens that are part of comments, string literals and regular expressions.
+		 */
+		Other = 0,
+		/**
+		 * A comment.
+		 */
+		Comment = 1,
+		/**
+		 * A string literal.
+		 */
+		String = 2,
+		/**
+		 * A regular expression.
+		 */
+		RegEx = 3
+	}
+
+  /**
+	 * Describes pairs of strings where the close string will be automatically inserted when typing the opening string.
+	 */
+	export interface AutoClosingPair {
+		/**
+		 * The string that will trigger the automatic insertion of the closing string.
+		 */
+		open: string;
+		/**
+		 * The closing string that will be automatically inserted when typing the opening string.
+		 */
+		close: string;
+		/**
+		 * A set of tokens where the pair should not be auto closed.
+		 */
+		notIn?: SyntaxTokenType[];
+	}
+
   export interface LanguageConfiguration {
     /**
      * The language's comment settings.
@@ -1655,6 +1661,10 @@ declare module 'vscode' {
      * The language's rules to be evaluated when pressing Enter.
      */
     onEnterRules?: OnEnterRule[];
+    /**
+     * The language's auto closing pairs.
+     */
+    autoClosingPairs?: AutoClosingPair[];
 
     /**
      * **Deprecated** Do not use.
@@ -1766,12 +1776,29 @@ declare module 'vscode' {
      * Indicates that this markdown string is from a trusted source. Only *trusted*
      * markdown supports links that execute commands, e.g. `[Run it](command:myCommandId)`.
      */
-    isTrusted?: boolean;
+    isTrusted?: boolean | {
+			/**
+			 * A set of commend ids that are allowed to be executed by this markdown string.
+			 */
+			readonly enabledCommands: readonly string[];
+		};
 
     /**
      * Indicates that this markdown string can contain [ThemeIcons](#ThemeIcon), e.g. `$(zap)`.
      */
     readonly supportThemeIcons?: boolean;
+
+		/**
+		 * Indicates that this markdown string can contain raw html tags. Defaults to `false`.
+		 *
+		 * When `supportHtml` is false, the markdown renderer will strip out any raw html tags
+		 * that appear in the markdown text. This means you can only use markdown syntax for rendering.
+		 *
+		 * When `supportHtml` is true, the markdown render will also allow a safe subset of html tags
+		 * and attributes to be rendered. See https://github.com/microsoft/vscode/blob/6d2920473c6f13759c978dd89104c4270a83422d/src/vs/base/browser/markdownRenderer.ts#L296
+		 * for a list of all supported tags and attributes.
+		 */
+		supportHtml?: boolean;
 
     /**
      * Uri that relative paths are resolved relative to.
@@ -2062,6 +2089,13 @@ declare module 'vscode' {
   export class RelativePattern {
 
     /**
+		 * A base file path to which this pattern will be matched against relatively. The
+		 * file path must be absolute, should not have any trailing path separators and
+		 * not include any relative segments (`.` or `..`).
+		 */
+		baseUri?: Uri;
+
+    /**
      * A base file path to which this pattern will be matched against relatively.
      */
     base: string;
@@ -2130,6 +2164,11 @@ declare module 'vscode' {
      * to filter documents to a [workspace folder](#WorkspaceFolder).
      */
     pattern?: GlobPattern;
+
+    /**
+     * notebook type, like `jupyter-notebook`
+     */
+    notebookType?: string;
   }
 
   /**
@@ -2272,7 +2311,7 @@ declare module 'vscode' {
      * @param value A value to append 'as given'. The string will be escaped.
      * @return This snippet string.
      */
-    appendText(value: string): SnippetString;
+    appendText(string: string): SnippetString;
 
     /**
      * Builder-function that appends a tabstop (`$1`, `$2` etc) to
@@ -2282,7 +2321,7 @@ declare module 'vscode' {
      * value starting at 1.
      * @return This snippet string.
      */
-    appendTabstop(num?: number): SnippetString;
+    appendTabstop(number?: number): SnippetString;
 
     /**
      * Builder-function that appends a placeholder (`${1:value}`) to
@@ -2294,7 +2333,7 @@ declare module 'vscode' {
      * value starting at 1.
      * @return This snippet string.
      */
-    appendPlaceholder(value: string | ((snippet: SnippetString) => any), num?: number): SnippetString;
+    appendPlaceholder(value: string | ((snippet: SnippetString) => any), number?: number): SnippetString;
 
     /**
      * Builder-function that appends a choice (`${1|a,b,c}`) to
@@ -2305,7 +2344,7 @@ declare module 'vscode' {
      * value starting at 1.
      * @return This snippet string.
      */
-    appendChoice(values: string[], num?: number): SnippetString;
+    appendChoice(values: string[], number?: number): SnippetString;
 
     /**
      * Builder-function that appends a variable (`${VAR}`) to
@@ -2410,6 +2449,26 @@ declare module 'vscode' {
      * signaled by returning `undefined`, `null`, or an empty array.
      */
     provideDocumentRangeFormattingEdits(document: TextDocument, range: Range, options: FormattingOptions, token: CancellationToken): ProviderResult<TextEdit[]>;
+
+    /**
+		 * Provide formatting edits for multiple ranges in a document.
+		 *
+		 * This function is optional but allows a formatter to perform faster when formatting only modified ranges or when
+		 * formatting a large number of selections.
+		 *
+		 * The given ranges are hints and providers can decide to format a smaller
+		 * or larger range. Often this is done by adjusting the start and end
+		 * of the range to full syntax nodes.
+		 *
+		 * @param document The document in which the command was invoked.
+		 * @param ranges The ranges which should be formatted.
+		 * @param options Options controlling formatting.
+		 * @param token A cancellation token.
+		 * @returns A set of text edits or a thenable that resolves to such. The lack of a result can be
+		 * signaled by returning `undefined`, `null`, or an empty array.
+     * @monaco-todo the current monaco version does not yet use this API
+		 */
+		provideDocumentRangesFormattingEdits?(document: TextDocument, ranges: Range[], options: FormattingOptions, token: CancellationToken): ProviderResult<TextEdit[]>;
   }
 
   /**
@@ -2580,6 +2639,49 @@ declare module 'vscode' {
   }
 
   /**
+	 * An inline completion item represents a text snippet that is proposed inline to complete text that is being typed.
+	 *
+	 * @see {@link InlineCompletionItemProvider.provideInlineCompletionItems}
+	 */
+	export class InlineCompletionItem {
+		/**
+		 * The text to replace the range with. Must be set.
+		 * Is used both for the preview and the accept operation.
+		 */
+		insertText: string | SnippetString;
+
+		/**
+		 * A text that is used to decide if this inline completion should be shown. When `falsy`
+		 * the {@link InlineCompletionItem.insertText} is used.
+		 *
+		 * An inline completion is shown if the text to replace is a prefix of the filter text.
+		 */
+		filterText?: string;
+
+		/**
+		 * The range to replace.
+		 * Must begin and end on the same line.
+		 *
+		 * Prefer replacements over insertions to provide a better experience when the user deletes typed text.
+		 */
+		range?: Range;
+
+		/**
+		 * An optional {@link Command} that is executed *after* inserting this completion.
+		 */
+		command?: Command;
+
+		/**
+		 * Creates a new inline completion item.
+		 *
+		 * @param insertText The text to replace the range with.
+		 * @param range The range to replace. If not set, the word at the requested position will be used.
+		 * @param command An optional {@link Command} that is executed *after* inserting this completion.
+		 */
+		constructor(insertText: string | SnippetString, range?: Range, command?: Command);
+	}
+
+  /**
    * Represents programming constructs like variables, classes, interfaces etc. that appear in a document. Document
    * symbols can be hierarchical and they have two ranges: one that encloses its definition and one that points to
    * its most interesting range, e.g. the range of an identifier.
@@ -2711,7 +2813,7 @@ declare module 'vscode' {
    * To get an instance of a `DiagnosticCollection` use
    * [createDiagnosticCollection](#languages.createDiagnosticCollection).
    */
-  export interface DiagnosticCollection {
+  export interface DiagnosticCollection extends Iterable<[uri: Uri, diagnostics: readonly Diagnostic[]]>{
 
     /**
      * The name of this diagnostic collection, for instance `typescript`. Every diagnostic

@@ -1,10 +1,11 @@
 import { Autowired } from '@opensumi/di';
-import { Domain, URI, localize, ClientAppContribution, RecentFilesManager } from '@opensumi/ide-core-browser';
-import { ResourceService, IResource, WorkbenchEditorService } from '@opensumi/ide-editor';
+import { ClientAppContribution, Domain, RecentFilesManager, URI, localize } from '@opensumi/ide-core-browser';
+import { IResource, ResourceService, WorkbenchEditorService } from '@opensumi/ide-editor';
 import {
   BrowserEditorContribution,
   EditorComponentRegistry,
   EditorComponentRenderMode,
+  EditorOpenType,
 } from '@opensumi/ide-editor/lib/browser';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 
@@ -31,7 +32,7 @@ export class WelcomeContribution implements BrowserEditorContribution, ClientApp
     });
     registry.registerEditorComponentResolver('welcome', (resource, results) => {
       results.push({
-        type: 'component',
+        type: EditorOpenType.component,
         componentId: 'welcome',
       });
     });

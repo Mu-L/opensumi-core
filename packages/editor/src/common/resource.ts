@@ -1,4 +1,4 @@
-import { URI, BasicEvent, MaybePromise, IDisposable, Event } from '@opensumi/ide-core-common';
+import { BasicEvent, Event, IDisposable, MaybePromise, URI } from '@opensumi/ide-core-common';
 
 export interface IResourceProvider {
   scheme?: string; // 相当于 handlesUri => 10
@@ -75,6 +75,11 @@ export abstract class ResourceService {
    * 是否存在 provider 可以处理某个 uri
    */
   abstract handlesUri(uri: URI): boolean;
+
+  /**
+   * 获取支持的 scehme 列表
+   */
+  abstract getSupportedSchemes(): string[];
 }
 
 /**
@@ -93,7 +98,8 @@ export class ResourceDecorationNeedChangeEvent extends BasicEvent<IResourceDecor
 export type IResourceUpdateType = 'change' | 'remove';
 
 export interface IResourceDecoration {
-  dirty: boolean;
+  dirty?: boolean;
+  readOnly?: boolean;
 }
 
 export interface IResourceDecorationChangeEventPayload {
@@ -121,6 +127,8 @@ export interface IResource<MetaData = any> {
   metadata?: MetaData;
   // 资源已被删除
   deleted?: any;
+  // 资源在编辑器 tab 上显示的标题
+  title?: string;
 }
 
 export type IDiffResource = IResource<{ original: URI; modified: URI }>;
@@ -136,3 +144,12 @@ export enum AskSaveResult {
   SAVE = 2,
   CANCEL = 3,
 }
+
+// #region merge editor
+export type IMergeEditorResource = IResource<{
+  ancestor: string;
+  input1: string;
+  input2: string;
+  output: string;
+}>;
+// #endregion merge editor

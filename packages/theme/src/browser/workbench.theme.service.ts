@@ -1,55 +1,64 @@
 import { Autowired, Injectable } from '@opensumi/di';
 import {
-  Logger,
-  PreferenceService,
-  PreferenceSchemaProvider,
   IPreferenceSettingsService,
+  Logger,
+  PreferenceSchemaProvider,
+  PreferenceService,
 } from '@opensumi/ide-core-browser';
 import {
+  AppLifeCycleServiceToken,
+  ContributionProvider,
+  Deferred,
+  DisposableCollection,
+  Emitter,
   Event,
+  ExtensionDidContributes,
+  GeneralSettingsId,
+  IAppLifeCycleService,
+  IThemeColor,
+  LifeCyclePhase,
+  OnEvent,
+  PreferenceScope,
   URI,
   WithEventBus,
-  localize,
-  Emitter,
-  isObject,
-  DisposableCollection,
-  uuid,
+  isFunction,
   isLinux,
+  isObject,
   isWindows,
-  IThemeColor,
-  OnEvent,
-  ExtensionDidContributes,
-  Deferred,
+  localize,
+  uuid,
 } from '@opensumi/ide-core-common';
 
-import { ICSSStyleService } from '../common';
+import { ICSSStyleService, ThemeContributionProvider } from '../common';
 import { Color } from '../common/color';
 import {
   editorSelectionBackground,
   getColorRegistry,
   ktInputSelectionBackground,
-  menuDisableForeground,
   selectionBackground,
 } from '../common/color-registry';
+import { CSSVarRegistry } from '../common/css-var';
 import { ThemeChangedEvent } from '../common/event';
 import {
-  ITheme,
-  ThemeType,
   ColorIdentifier,
-  getBuiltinRules,
-  getThemeType,
-  ThemeContribution,
-  IColorMap,
-  ThemeInfo,
-  IThemeService,
-  ExtColorContribution,
-  getThemeId,
-  getThemeTypeSelector,
-  IColorCustomizations,
-  ITokenColorizationRule,
-  ITokenColorCustomizations,
   DEFAULT_THEME_ID,
+  ExtColorContribution,
+  IColorCustomizations,
+  IColorMap,
+  ITheme,
+  IThemeContribution,
+  IThemeData,
+  IThemeService,
+  IThemeStore,
+  ITokenColorCustomizations,
+  ITokenColorizationRule,
+  ThemeInfo,
+  ThemeType,
   colorIdPattern,
+  getBuiltinRules,
+  getThemeId,
+  getThemeType,
+  getThemeTypeSelector,
 } from '../common/theme.service';
 
 import { ThemeData } from './theme-data';
@@ -73,6 +82,8 @@ const tokenGroupToScopesMap = {
 export class WorkbenchThemeService extends WithEventBus implements IThemeService {
   private colorRegistry = getColorRegistry();
 
+  private cssVarRegistry = CSSVarRegistry.instance();
+
   private colorClassNameMap = new Map<string, string>();
 
   colorThemeLoaded: Deferred<void> = new Deferred();
@@ -82,14 +93,14 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
   private latestApplyTheme: string;
 
   private themes: Map<string, ThemeData> = new Map();
-  private themeContributionRegistry: Map<string, { contribution: ThemeContribution; basePath: URI }> = new Map();
+  private themeContributionRegistry: Map<string, { contribution: IThemeContribution; basePath: URI }> = new Map();
 
   private themeChangeEmitter: Emitter<ITheme> = new Emitter();
   protected extensionReady: boolean;
 
   public onThemeChange: Event<ITheme> = this.themeChangeEmitter.event;
 
-  @Autowired()
+  @Autowired(IThemeStore)
   private themeStore: ThemeStore;
 
   @Autowired()
@@ -107,10 +118,45 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
   @Autowired(ICSSStyleService)
   private readonly styleService: ICSSStyleService;
 
+  @Autowired(ThemeContributionProvider)
+  protected readonly themeContributionProvider: ContributionProvider<ThemeContributionProvider>;
+
+  @Autowired(AppLifeCycleServiceToken)
+  private readonly appLifeCycleService: IAppLifeCycleService;
+
   constructor() {
     super();
     this.listen();
     this.applyPlatformClass();
+  }
+
+  async ensureValidTheme(defaultThemeId = DEFAULT_THEME_ID): Promise<string> {
+    await Event.toPromise(
+      Event.filter(this.appLifeCycleService.onDidLifeCyclePhaseChange, (phase) => phase === LifeCyclePhase.Ready),
+    );
+
+    const themeInfos = this.getAvailableThemeInfos();
+    // scope 优先级从高到低匹配有效主题
+    const scopes = PreferenceScope.getReversedScopes();
+
+    let validThemeId = '';
+
+    for (const scope of scopes) {
+      const provider = this.preferenceService.getProvider(scope);
+      const scopeThemeId = provider!.get<string>(GeneralSettingsId.Theme);
+
+      if (themeInfos.some((info) => info.themeId === scopeThemeId)) {
+        validThemeId = scopeThemeId!;
+        break;
+      }
+    }
+
+    // 做最后兜底
+    if (!validThemeId) {
+      return defaultThemeId;
+    }
+
+    return validThemeId;
   }
 
   @OnEvent(ExtensionDidContributes)
@@ -132,7 +178,7 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
     return this.preferenceService.get<string>(COLOR_THEME_SETTING);
   }
 
-  public registerThemes(themeContributions: ThemeContribution[], extPath: URI) {
+  public registerThemes(themeContributions: IThemeContribution[], extPath: URI) {
     const disposables = new DisposableCollection();
     disposables.push({
       dispose: () => this.doSetPreferenceSchema(),
@@ -286,24 +332,26 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
   public getAvailableThemeInfos(): ThemeInfo[] {
     const themeInfos: ThemeInfo[] = [];
     for (const { contribution } of this.themeContributionRegistry.values()) {
-      const { label, uiTheme } = contribution;
+      const { label, uiTheme, extensionId } = contribution;
       themeInfos.push({
         themeId: getThemeId(contribution),
         name: label,
         base: uiTheme || 'vs',
+        extensionId,
       });
     }
     return themeInfos;
   }
 
   protected doSetPreferenceSchema() {
+    const enums = this.getAvailableThemeInfos().map((info) => info.themeId);
     this.preferenceSchemaProvider.setSchema(
       {
         properties: {
           [COLOR_THEME_SETTING]: {
             type: 'string',
-            default: 'Default Dark+',
-            enum: this.getAvailableThemeInfos().map((info) => info.themeId),
+            default: enums[0],
+            enum: enums,
           },
         },
       },
@@ -312,11 +360,11 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
   }
 
   private get colorCustomizations(): IColorCustomizations {
-    return this.preferenceService.get(CUSTOM_WORKBENCH_COLORS_SETTING) || {};
+    return this.preferenceService.getValid(CUSTOM_WORKBENCH_COLORS_SETTING, {});
   }
 
   private get tokenColorCustomizations(): ITokenColorCustomizations {
-    return this.preferenceService.get<ITokenColorCustomizations>(CUSTOM_EDITOR_COLORS_SETTING) || {};
+    return this.preferenceService.getValid<ITokenColorCustomizations>(CUSTOM_EDITOR_COLORS_SETTING, {});
   }
 
   private listen() {
@@ -423,7 +471,7 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
     return Color.red;
   };
 
-  private async getTheme(id: string): Promise<ThemeData> {
+  private async getTheme(id: string): Promise<IThemeData> {
     const theme = this.themes.get(id);
     if (theme) {
       return theme;
@@ -437,22 +485,22 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
   }
 
   private doApplyTheme(theme: Theme) {
-    const colorContributions = this.colorRegistry.getColors();
-    const colors = {};
-    colorContributions.forEach((contribution) => {
-      const colorId = contribution.id;
+    const registeredColors = this.colorRegistry.getColors();
+    const colors = {} as Record<string, string | undefined>;
+
+    registeredColors.forEach((c) => {
+      const colorId = c.id;
       const color = theme.getColor(colorId);
       colors[colorId] = color ? color.toString() : '';
     });
-    /** @deprecated Needs to be removed start */
-    const foreground = theme.getColor('foreground');
-    if (foreground) {
-      colors['foreground.secondary'] = foreground.darken(0.2).toString();
+
+    const contributions = this.themeContributionProvider.getContributions();
+    for (const c of contributions) {
+      if (isFunction(c.onWillApplyTheme)) {
+        const contributionColor = c.onWillApplyTheme(theme);
+        Object.assign(colors, contributionColor);
+      }
     }
-    if (theme.getColor('menu.foreground')) {
-      colors[menuDisableForeground] = theme.getColor('menu.foreground')!.darken(0.4).toString();
-    }
-    /** Needs to be removed end */
 
     // fallback to editorSelectionBackground when global selectionBackgroun is null.
     if (!theme.getColor(selectionBackground)) {
@@ -461,20 +509,30 @@ export class WorkbenchThemeService extends WithEventBus implements IThemeService
     }
 
     let cssVariables = ':root{';
+    let editorCssVariables = '#workbench-editor .monaco-editor {';
     for (const colorKey of Object.keys(colors)) {
       const targetColor = colors[colorKey] || theme.getColor(colorKey);
       if (targetColor) {
         const hexRule = `--${colorKey.replace(/\./g, '-')}: ${targetColor.toString()};\n`;
-        cssVariables += hexRule;
+        if (colorKey.startsWith('vscode')) {
+          editorCssVariables += hexRule;
+        } else {
+          cssVariables += hexRule;
+        }
       }
     }
+
+    this.cssVarRegistry.getVars().forEach((value, key) => {
+      cssVariables += `--${key}: ${value};\n`;
+    });
+
     let styleNode = document.getElementById('theme-style');
     if (styleNode) {
-      styleNode.innerHTML = cssVariables + '}';
+      styleNode.innerHTML = editorCssVariables + '}' + cssVariables + '}';
     } else {
       styleNode = document.createElement('style');
       styleNode.id = 'theme-style';
-      styleNode.innerHTML = cssVariables + '}';
+      styleNode.innerHTML = editorCssVariables + '}' + cssVariables + '}';
       document.getElementsByTagName('head')[0].appendChild(styleNode);
     }
     if (this.currentTheme) {
@@ -544,7 +602,7 @@ export class Themable extends WithEventBus {
 
 class Theme implements ITheme {
   readonly type: ThemeType;
-  readonly themeData: ThemeData;
+  readonly themeData: IThemeData;
   private readonly colorRegistry = getColorRegistry();
   private readonly defaultColors: { [colorId: string]: Color | undefined } = Object.create(null);
 
@@ -552,7 +610,7 @@ class Theme implements ITheme {
   private customColorMap: IColorMap = {};
   private customTokenColors: ITokenColorizationRule[] = [];
 
-  constructor(type: ThemeType, themeData: ThemeData) {
+  constructor(type: ThemeType, themeData: IThemeData) {
     this.type = type;
     this.themeData = themeData;
     this.patchColors();
@@ -655,17 +713,22 @@ class Theme implements ITheme {
 
   // 将encodedTokensColors转为monaco可用的形式
   private patchTokenColors() {
-    // 当默认颜色不在settings当中时，此处不能使用之前那种直接给encodedTokenColors赋值的做法，会导致monaco使用时颜色错位（theia的bug
-    if (this.themeData.themeSettings.filter((setting) => !setting.scope).length === 0) {
+    // 当默认颜色不在settings当中时，需要补充至颜色值中，默认颜色设置 scope 为 ['']
+    // 需要注意的是，后续进行取值时，会依赖数组顺序，初始化后，请不要随意修改
+    if (
+      this.themeData.themeSettings.filter((setting) => setting.scope?.length === 1 && setting.scope[0] === '')
+        .length === 0
+    ) {
       this.themeData.themeSettings.unshift({
         settings: {
           foreground: this.themeData.colors['editor.foreground']
-            ? this.themeData.colors['editor.foreground'].substr(0, 7)
+            ? this.themeData.colors['editor.foreground'].substring(0, 7)
             : Color.Format.CSS.formatHexA(this.colorRegistry.resolveDefaultColor('editor.foreground', this)!), // 这里要去掉透明度信息
           background: this.themeData.colors['editor.background']
-            ? this.themeData.colors['editor.background'].substr(0, 7)
+            ? this.themeData.colors['editor.background'].substring(0, 7)
             : Color.Format.CSS.formatHexA(this.colorRegistry.resolveDefaultColor('editor.background', this)!),
         },
+        scope: [''],
       });
     }
   }

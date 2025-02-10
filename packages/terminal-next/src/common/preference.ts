@@ -1,6 +1,8 @@
-import { Event, TerminalSettingsId } from '@opensumi/ide-core-common';
-import { localize } from '@opensumi/ide-core-common';
+import { Event, TerminalSettingsId, localize } from '@opensumi/ide-core-common';
 import { PreferenceSchema } from '@opensumi/ide-core-common/lib/preferences';
+
+import { RenderType } from './xterm';
+
 export interface IPreferenceValue {
   name: string;
   value: string | number | boolean | Array<string | number | boolean>;
@@ -121,6 +123,7 @@ export const enum CodeTerminalSettingId {
   LocalEchoEnabled = 'terminal.integrated.localEchoEnabled',
   LocalEchoExcludePrograms = 'terminal.integrated.localEchoExcludePrograms',
   LocalEchoStyle = 'terminal.integrated.localEchoStyle',
+  XtermRenderType = 'terminal.integrated.xtermRenderType',
   EnablePersistentSessions = 'terminal.integrated.enablePersistentSessions',
   PersistentSessionReviveProcess = 'terminal.integrated.persistentSessionReviveProcess',
   CustomGlyphs = 'terminal.integrated.customGlyphs',
@@ -195,10 +198,7 @@ export const terminalPreferenceSchema: PreferenceSchema = {
     },
     [CodeTerminalSettingId.ShellArgsMacOs]: {
       type: 'array',
-      // Unlike on Linux, ~/.profile is not sourced when logging into a macOS session. This
-      // is the reason terminals on macOS typically run login shells by default which set up
-      // the environment. See http://unix.stackexchange.com/a/119675/115410
-      default: ['-l'],
+      default: [],
       markdownDeprecationMessage: shellDeprecationMessageOsx,
     },
     [CodeTerminalSettingId.ShellArgsWindows]: {
@@ -325,6 +325,7 @@ export const terminalPreferenceSchema: PreferenceSchema = {
     [CodeTerminalSettingId.LocalEchoStyle]: {
       type: 'string',
       description: '%preference.terminal.integrated.localEchoStyleDesc%',
+      enum: ['bold', 'dim', 'italic', 'underlined', 'inverted'],
       default: 'dim',
     },
     [CodeTerminalSettingId.CursorStyle]: {
@@ -332,6 +333,17 @@ export const terminalPreferenceSchema: PreferenceSchema = {
       description: '%preference.terminal.integrated.cursorStyleDesc%',
       enum: [TerminalCursorStyle.BLOCK, TerminalCursorStyle.LINE, TerminalCursorStyle.UNDERLINE],
       default: TerminalCursorStyle.BLOCK,
+    },
+    [CodeTerminalSettingId.XtermRenderType]: {
+      type: 'string',
+      description: '%preference.terminal.integrated.xtermRenderTypeDesc%',
+      enum: [RenderType.WebGL, RenderType.Canvas, RenderType.Dom],
+      default: RenderType.WebGL,
+    },
+    [CodeTerminalSettingId.EnablePersistentSessions]: {
+      type: 'boolean',
+      description: '%preference.terminal.integrated.enablePersistentSessionDesc%',
+      default: true,
     },
   },
 };

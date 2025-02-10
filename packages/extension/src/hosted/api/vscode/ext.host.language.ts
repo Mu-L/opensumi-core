@@ -3,50 +3,51 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 // some code copied and modified from https://github.com/microsoft/vscode/blob/main/src/vs/workbench/api/common/extHostLanguageFeatures.ts
-
-import vscode from 'vscode';
-import {
-  DocumentSelector,
-  HoverProvider,
+import vscode, {
+  CallHierarchyProvider,
   CancellationToken,
-  DocumentHighlightProvider,
-  DocumentFilter,
-  CompletionItemProvider,
-  DefinitionProvider,
-  TypeDefinitionProvider,
-  FoldingRangeProvider,
-  FoldingContext,
-  DocumentColorProvider,
-  DocumentRangeFormattingEditProvider,
-  OnTypeFormattingEditProvider,
-  CodeLensProvider,
   CodeActionProvider,
   CodeActionProviderMetadata,
-  ImplementationProvider,
+  CodeLensProvider,
+  CompletionItemProvider,
   DeclarationProvider,
+  DefinitionProvider,
   Diagnostic,
-  DiagnosticCollection,
-  DocumentLinkProvider,
-  ReferenceProvider,
-  TextDocument,
-  LanguageConfiguration,
-  DocumentSymbolProvider,
-  WorkspaceSymbolProvider,
-  SignatureHelpProvider,
-  RenameProvider,
-  SignatureHelpProviderMetadata,
-  Event,
   DiagnosticChangeEvent,
-  SelectionRangeProvider,
+  DiagnosticCollection,
+  DocumentColorProvider,
+  DocumentFilter,
   DocumentFormattingEditProvider,
-  CallHierarchyProvider,
-  TypeHierarchyProvider,
-  DocumentSemanticTokensProvider,
-  SemanticTokensLegend,
+  DocumentHighlightProvider,
+  DocumentLinkProvider,
+  DocumentRangeFormattingEditProvider,
   DocumentRangeSemanticTokensProvider,
+  DocumentSelector,
+  DocumentSemanticTokensProvider,
+  DocumentSymbolProvider,
   EvaluatableExpressionProvider,
+  Event,
+  FoldingContext,
+  FoldingRangeProvider,
+  HoverProvider,
+  ImplementationProvider,
   InlineValuesProvider,
+  LanguageConfiguration,
   LinkedEditingRangeProvider,
+  NewSymbolName,
+  NewSymbolNamesProvider,
+  OnTypeFormattingEditProvider,
+  ReferenceProvider,
+  RenameProvider,
+  SelectionRangeProvider,
+  SemanticTokensLegend,
+  SignatureHelpProvider,
+  SignatureHelpProviderMetadata,
+  TextDocument,
+  TypeDefinitionProvider,
+  TypeHierarchyProvider,
+  WorkspaceSymbolProvider,
+  // eslint-disable-next-line import/no-unresolved
 } from 'vscode';
 import { SymbolInformation } from 'vscode-languageserver-types';
 
@@ -54,69 +55,77 @@ import { ConstructorOf } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
   DisposableStore,
-  disposableTimeout,
   IDisposable,
   IExtensionLogger,
   Severity,
   Uri,
   UriComponents,
+  disposableTimeout,
+  toDisposable,
 } from '@opensumi/ide-core-common';
 import { InlineValue } from '@opensumi/ide-debug/lib/common/inline-values';
-import type { CodeActionContext } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+
 
 import {
-  IMainThreadLanguages,
-  MainThreadAPIIdentifier,
   ExtensionDocumentDataManager,
-  IExtHostLanguages,
-  ISuggestDataDto,
-  IExtensionDescription,
+  ExtensionIdentifier,
+  ExtensionNotebookDocumentManager,
   ICodeActionListDto,
-  IInlineValueContextDto,
-  ILinkedEditingRangesDto,
+  IExtHostLanguages,
+  IExtensionDescription,
   IInlayHintDto,
   IInlayHintsDto,
-  InlineCompletionContext,
+  IInlineValueContextDto,
+  ILinkedEditingRangesDto,
+  IMainThreadLanguages,
+  ISuggestDataDto,
   IdentifiableInlineCompletions,
+  InlineCompletionContext,
+  MainThreadAPIIdentifier,
 } from '../../../common/vscode';
 import * as typeConvert from '../../../common/vscode/converter';
 import { CancellationError, Disposable, LanguageStatusSeverity } from '../../../common/vscode/ext-types';
 import {
-  SerializedDocumentFilter,
-  Hover,
-  Position,
-  Range,
-  Selection,
+  ChainedCacheId,
+  CodeLens,
+  ColorPresentation,
   CompletionContext,
   Definition,
   DefinitionLink,
-  FoldingRange,
-  RawColorInfo,
-  ColorPresentation,
   DocumentHighlight,
-  FormattingOptions,
-  SingleEditOperation,
-  CodeLens,
-  ReferenceContext,
-  Location,
-  SerializedLanguageConfiguration,
-  ILink,
   DocumentSymbol,
-  WorkspaceEditDto,
-  RenameLocation,
-  ISerializedSignatureHelpProviderMetadata,
-  SignatureHelpContextDto,
-  SelectionRange,
+  FoldingRange,
+  FormattingOptions,
+  Hover,
   ICallHierarchyItemDto,
-  IIncomingCallDto,
-  IOutgoingCallDto,
-  WithDuration,
-  ChainedCacheId,
   ICodeLensListDto,
-  ISignatureHelpDto,
+  IIncomingCallDto,
+  ILink,
   ILinksListDto,
+  IOutgoingCallDto,
+  ISerializedSignatureHelpProviderMetadata,
+  ISignatureHelpDto,
+  Location,
+  Position,
+  Range,
+  RawColorInfo,
+  ReferenceContext,
+  RenameLocation,
+  Selection,
+  SelectionRange,
+  SerializedDocumentFilter,
+  SerializedLanguageConfiguration,
+  SignatureHelpContextDto,
+  SingleEditOperation,
+  WithDuration,
+  WorkspaceEditDto,
 } from '../../../common/vscode/model.api';
-import { serializeEnterRules, serializeRegExp, serializeIndentation } from '../../../common/vscode/utils';
+import {
+  serializeAutoClosingPairs,
+  serializeEnterRules,
+  serializeIndentation,
+  serializeRegExp,
+} from '../../../common/vscode/utils';
 
 import { ExtHostCommands } from './ext.host.command';
 import { CallHierarchyAdapter } from './language/callhierarchy';
@@ -137,9 +146,10 @@ import { InlineCompletionAdapter, InlineCompletionAdapterBase } from './language
 import { CodeLensAdapter } from './language/lens';
 import { LinkProviderAdapter } from './language/link-provider';
 import { LinkedEditingRangeAdapter } from './language/linked-editing-range';
+import { NewSymbolNamesAdapter } from './language/new-symbol-names';
 import { OnTypeFormattingAdapter } from './language/on-type-formatting';
 import { OutlineAdapter } from './language/outline';
-import { RangeFormattingAdapter, FormattingAdapter } from './language/range-formatting';
+import { FormattingAdapter, RangeFormattingAdapter } from './language/range-formatting';
 import { ReferenceAdapter } from './language/reference';
 import { RenameAdapter } from './language/rename';
 import { SelectionRangeAdapter } from './language/selection';
@@ -147,11 +157,16 @@ import { DocumentRangeSemanticTokensAdapter, DocumentSemanticTokensAdapter } fro
 import { SignatureHelpAdapter } from './language/signature';
 import { TypeDefinitionAdapter } from './language/type-definition';
 import { TypeHierarchyAdapter } from './language/type-hierarchy';
-import { getDurationTimer, score } from './language/util';
+import { getDurationTimer, score, targetsNotebooks } from './language/util';
 import { WorkspaceSymbolAdapter } from './language/workspace-symbol';
+
+import type { IPosition } from '@opensumi/ide-monaco/lib/common';
+import type { CodeActionContext } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
+import type { NewSymbolNameTriggerKind } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 export function createLanguagesApiFactory(
   extHostLanguages: ExtHostLanguages,
+  extHostNotebook: ExtensionNotebookDocumentManager,
   extension: IExtensionDescription,
 ): typeof vscode.languages {
   return {
@@ -171,8 +186,9 @@ export function createLanguagesApiFactory(
     registerInlineCompletionItemProvider(
       selector: vscode.DocumentSelector,
       provider: vscode.InlineCompletionItemProvider,
+      metadata?: vscode.InlineCompletionItemProviderMetadata,
     ): vscode.Disposable {
-      return extHostLanguages.registerInlineCompletionsProvider(selector, provider, extension);
+      return extHostLanguages.registerInlineCompletionsProvider(extension, selector, provider, metadata);
     },
     registerDefinitionProvider(selector: DocumentSelector, provider: DefinitionProvider): Disposable {
       return extHostLanguages.registerDefinitionProvider(selector, provider, extension);
@@ -196,7 +212,14 @@ export function createLanguagesApiFactory(
       return extHostLanguages.registerReferenceProvider(selector, provider, extension);
     },
     match(selector: DocumentSelector, document: TextDocument): number {
-      return score(typeConvert.fromLanguageSelector(selector), document.uri, document.languageId, true);
+      const interalSelector = typeConvert.fromLanguageSelector(selector);
+      let notebook: vscode.NotebookDocument | undefined;
+      if (interalSelector && targetsNotebooks(interalSelector)) {
+        notebook = extHostNotebook.notebookDocuments.find((value) =>
+          value.getCells().find((c) => c.document === document),
+        );
+      }
+      return score(interalSelector, document.uri, document.languageId, true, notebook?.uri, notebook?.notebookType);
     },
     setLanguageConfiguration(language: string, configuration: LanguageConfiguration): Disposable {
       return extHostLanguages.setLanguageConfiguration(language, configuration);
@@ -234,6 +257,9 @@ export function createLanguagesApiFactory(
     },
     registerRenameProvider(selector: DocumentSelector, provider: RenameProvider): Disposable {
       return extHostLanguages.registerRenameProvider(selector, provider, extension);
+    },
+    registerNewSymbolNamesProvider(selector: DocumentSelector, provider: NewSymbolNamesProvider): Disposable {
+      return extHostLanguages.registerNewSymbolNamesProvider(selector, provider, extension);
     },
     registerSignatureHelpProvider(
       selector: DocumentSelector,
@@ -323,6 +349,30 @@ export function createLanguagesApiFactory(
     createLanguageStatusItem(id: string, selector: vscode.DocumentSelector): vscode.LanguageStatusItem {
       return extHostLanguages.createLanguageStatusItem(extension, id, selector);
     },
+    registerDocumentDropEditProvider(
+      selector: vscode.DocumentSelector,
+      provider: vscode.DocumentDropEditProvider,
+      metadata?: vscode.DocumentDropEditProviderMetadata,
+    ): vscode.Disposable {
+      return extHostLanguages.registerDocumentDropEditProvider(extension, selector, provider, metadata);
+    },
+    registerDocumentPasteEditProvider(
+      selector: vscode.DocumentSelector,
+      provider: vscode.DocumentPasteEditProvider,
+      metadata: vscode.DocumentPasteProviderMetadata,
+    ): vscode.Disposable {
+      return extHostLanguages.registerDocumentPasteEditProvider(extension, selector, provider, metadata);
+    },
+    /**
+     * @monaco-todo: wait until API is available in Monaco (1.85.0+)
+     */
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    registerMultiDocumentHighlightProvider(
+      selector: vscode.DocumentSelector,
+      provider: vscode.MultiDocumentHighlightProvider,
+    ): vscode.Disposable {
+      return toDisposable(() => {});
+    },
   };
 }
 
@@ -360,7 +410,8 @@ export type Adapter =
   | InlineValuesAdapter
   | LinkedEditingRangeAdapter
   | InlayHintsAdapter
-  | InlineCompletionAdapter;
+  | InlineCompletionAdapter
+  | NewSymbolNamesAdapter;
 
 export class ExtHostLanguages implements IExtHostLanguages {
   private readonly proxy: IMainThreadLanguages;
@@ -585,21 +636,27 @@ export class ExtHostLanguages implements IExtHostLanguages {
 
   // ### Inline Completion begin
   registerInlineCompletionsProvider(
+    extension: IExtensionDescription,
     selector: vscode.DocumentSelector,
     provider: vscode.InlineCompletionItemProvider,
-    extension: IExtensionDescription,
+    metadata: vscode.InlineCompletionItemProviderMetadata | undefined,
   ): Disposable {
-    const callId = this.addNewAdapter(
-      new InlineCompletionAdapter(this.documents, provider, this.commands.converter),
-      extension,
+    const adapter = new InlineCompletionAdapter(extension, this.documents, provider, this.commands.converter);
+    const callId = this.addNewAdapter(adapter, extension);
+    this.proxy.$registerInlineCompletionsSupport(
+      callId,
+      this.transformDocumentSelector(selector),
+      true,
+      ExtensionIdentifier.toKey(extension.identifier.value),
+      metadata?.yieldTo?.map((extId) => ExtensionIdentifier.toKey(extId)) || [],
     );
-    this.proxy.$registerInlineCompletionsSupport(callId, this.transformDocumentSelector(selector), true);
     return this.createDisposable(callId);
   }
+
   $provideInlineCompletions(
     handle: number,
     resource: UriComponents,
-    position: Position,
+    position: IPosition,
     context: InlineCompletionContext,
     token: CancellationToken,
   ): Promise<IdentifiableInlineCompletions | undefined> {
@@ -611,12 +668,25 @@ export class ExtHostLanguages implements IExtHostLanguages {
       undefined,
     );
   }
-  $handleInlineCompletionDidShow(handle: number, pid: number, idx: number): void {
+
+  $handleInlineCompletionDidShow(handle: number, pid: number, idx: number, updatedInsertText: string): void {
     this.withAdapter(
       handle,
       InlineCompletionAdapterBase,
       async (adapter) => {
-        adapter.handleDidShowCompletionItem(pid, idx);
+        adapter.handleDidShowCompletionItem(pid, idx, updatedInsertText);
+      },
+      undefined,
+      undefined,
+    );
+  }
+
+  $handleInlineCompletionPartialAccept(handle: number, pid: number, idx: number, acceptedCharacters: number): void {
+    this.withAdapter(
+      handle,
+      InlineCompletionAdapterBase,
+      async (adapter) => {
+        adapter.handlePartialAccept(pid, idx, acceptedCharacters);
       },
       undefined,
       undefined,
@@ -981,7 +1051,7 @@ export class ExtHostLanguages implements IExtHostLanguages {
     return this.withAdapter(
       handle,
       CodeActionAdapter,
-      (adapter) => adapter.provideCodeAction(resource, rangeOrSelection, context, this.commands.converter, token),
+      (adapter) => adapter.provideCodeActions(resource, rangeOrSelection, context, this.commands.converter, token),
       false,
       undefined,
     );
@@ -1142,6 +1212,7 @@ export class ExtHostLanguages implements IExtHostLanguages {
       onEnterRules: serializeEnterRules(configuration.onEnterRules),
       wordPattern: serializeRegExp(configuration.wordPattern),
       indentationRules: serializeIndentation(configuration.indentationRules),
+      autoClosingPairs: serializeAutoClosingPairs(configuration.autoClosingPairs),
     };
     this.proxy.$setLanguageConfiguration(callId, language, config);
     return this.createDisposable(callId);
@@ -1292,6 +1363,34 @@ export class ExtHostLanguages implements IExtHostLanguages {
     );
   }
   // ### Rename Provider end
+
+  // ### New Symbol Names Provider start
+  registerNewSymbolNamesProvider(
+    selector: DocumentSelector,
+    provider: NewSymbolNamesProvider,
+    extension: IExtensionDescription,
+  ): Disposable {
+    const callId = this.addNewAdapter(new NewSymbolNamesAdapter(provider, this.documents), extension);
+    this.proxy.$registerNewSymbolNamesProvider(callId, this.transformDocumentSelector(selector));
+    return this.createDisposable(callId);
+  }
+
+  $provideNewSymbolNames(
+    handle: number,
+    resource: Uri,
+    range: Range,
+    triggerKind: NewSymbolNameTriggerKind,
+    token: CancellationToken,
+  ): Promise<NewSymbolName[] | undefined> {
+    return this.withAdapter(
+      handle,
+      NewSymbolNamesAdapter,
+      (adapter) => adapter.provideNewSymbolNames(resource, range, triggerKind, token),
+      false,
+      undefined,
+    );
+  }
+  // ### New Symbol Names Provider end
 
   // ### smart select
   registerSelectionRangeProvider(
@@ -1779,5 +1878,31 @@ export class ExtHostLanguages implements IExtHostLanguages {
     };
     updateAsync();
     return result;
+  }
+
+  registerDocumentDropEditProvider(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    extension: IExtensionDescription,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    selector: vscode.DocumentSelector,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    provider: vscode.DocumentDropEditProvider,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    metadata?: vscode.DocumentDropEditProviderMetadata,
+  ) {
+    return toDisposable(() => {});
+  }
+
+  registerDocumentPasteEditProvider(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    extension: IExtensionDescription,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    selector: vscode.DocumentSelector,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    provider: vscode.DocumentPasteEditProvider,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    metadata: vscode.DocumentPasteProviderMetadata,
+  ) {
+    return toDisposable(() => {});
   }
 }

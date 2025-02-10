@@ -1,11 +1,11 @@
 import { VALIDATE_TYPE } from '@opensumi/ide-components';
 import { HideReason, IContextKeyService, URI } from '@opensumi/ide-core-browser';
 import { MockContextKeyService } from '@opensumi/ide-core-browser/__mocks__/context-key';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
+import { StaticResourceServiceImpl } from '@opensumi/ide-core-browser/lib/static-resource/static.service';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
 import { MockInjector, mockService } from '@opensumi/ide-dev-tool/src/mock-injector';
 import { MonacoContextKeyService } from '@opensumi/ide-monaco/lib/browser/monaco.context-key.service';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
-import { StaticResourceServiceImpl } from '@opensumi/ide-static-resource/lib/browser/static.service';
 import { IconService } from '@opensumi/ide-theme/lib/browser/icon.service';
 import { IIconService, IThemeService } from '@opensumi/ide-theme/lib/common';
 
@@ -82,8 +82,8 @@ describe('quick-open service test', () => {
     const $widgetShow = jest.spyOn(widget, 'show');
     quickOpenService.open(model);
     expect(widget.isShow).toBeTruthy();
-    expect($widgetShow).toBeCalledTimes(1);
-    expect($widgetShow).toBeCalledWith('', {
+    expect($widgetShow).toHaveBeenCalledTimes(1);
+    expect($widgetShow).toHaveBeenCalledWith('', {
       inputEnable: true,
       password: false,
       placeholder: '',
@@ -100,8 +100,8 @@ describe('quick-open service test', () => {
       enabled: false,
       valueSelection: [2, 2],
     });
-    expect($widgetShow).toBeCalledTimes(1);
-    expect($widgetShow).toBeCalledWith('>', {
+    expect($widgetShow).toHaveBeenCalledTimes(1);
+    expect($widgetShow).toHaveBeenCalledWith('>', {
       inputEnable: false,
       password: true,
       placeholder: 'This is placeholder',
@@ -113,7 +113,7 @@ describe('quick-open service test', () => {
     quickOpenService.open(model, {
       prefix: '>',
     });
-    expect(model.onType).toBeCalledWith('>', expect.anything());
+    expect(model.onType).toHaveBeenCalledWith('>', expect.anything());
   });
 
   it('hide quick-open with element select', () => {
@@ -123,11 +123,11 @@ describe('quick-open service test', () => {
       onClose: $onClose,
     });
     quickOpenService.hide(HideReason.ELEMENT_SELECTED);
-    expect($widgetHide).toBeCalledTimes(1);
-    expect(widget.isShow).toBeFalsy();
-    expect($onClose).toBeCalledTimes(1);
+    expect($widgetHide).toHaveBeenCalledTimes(1);
+    expect(widget.isShow.get()).toBeFalsy();
+    expect($onClose).toHaveBeenCalledTimes(1);
     // false 为非取消类型的关闭
-    expect($onClose).toBeCalledWith(false);
+    expect($onClose).toHaveBeenCalledWith(false);
   });
 
   it('hide quick-open with element select', () => {
@@ -137,25 +137,25 @@ describe('quick-open service test', () => {
       onClose: $onClose,
     });
     quickOpenService.hide(HideReason.FOCUS_LOST);
-    expect($widgetHide).toBeCalledTimes(1);
-    expect(widget.isShow).toBeFalsy();
+    expect($widgetHide).toHaveBeenCalledTimes(1);
+    expect(widget.isShow.get()).toBeFalsy();
     // true 为取消类型的关闭
-    expect($onClose).toBeCalledWith(true);
+    expect($onClose).toHaveBeenCalledWith(true);
   });
 
   it('refresh quick-open', () => {
     quickOpenService.open(model);
     quickOpenService.refresh();
     // refresh 时 onType 会被重新调用
-    expect(model.onType).toBeCalledWith(widget.inputValue, expect.anything());
+    expect(model.onType).toHaveBeenCalledWith(widget.inputValue.get(), expect.anything());
   });
 
   it('show quick-open decoration', () => {
     quickOpenService.open(model);
     quickOpenService.showDecoration(VALIDATE_TYPE.ERROR);
-    expect(widget.validateType).toBe(VALIDATE_TYPE.ERROR);
+    expect(widget.validateType.get()).toBe(VALIDATE_TYPE.ERROR);
     quickOpenService.hideDecoration();
-    expect(widget.validateType).toBeUndefined();
+    expect(widget.validateType.get()).toBeUndefined();
   });
 
   it('show quick-open item buttons', () => {
@@ -201,7 +201,7 @@ describe('quick-open service test', () => {
       quickOpenService.open(model, {
         prefix: 'AAA',
       });
-      expect(widget.items).toStrictEqual(items);
+      expect(widget.items.get()).toStrictEqual(items);
     });
 
     it('match label', () => {
@@ -209,9 +209,9 @@ describe('quick-open service test', () => {
         prefix: 'AAA',
         fuzzyMatchLabel: true,
       });
-      expect(widget.items).toHaveLength(2);
-      expect(widget.items[0].getLabel()).toBe('AAAAA');
-      expect(widget.items[1].getLabel()).toBe('AAAAA2');
+      expect(widget.items.get()).toHaveLength(2);
+      expect(widget.items.get()[0].getLabel()).toBe('AAAAA');
+      expect(widget.items.get()[1].getLabel()).toBe('AAAAA2');
     });
 
     it('match label width enableSeparateSubstringMatching', () => {
@@ -221,8 +221,8 @@ describe('quick-open service test', () => {
           enableSeparateSubstringMatching: true,
         },
       });
-      expect(widget.items).toHaveLength(1);
-      const [labelHighlights] = widget.items[0].getHighlights();
+      expect(widget.items.get()).toHaveLength(1);
+      const [labelHighlights] = widget.items.get()[0].getHighlights();
       expect(labelHighlights).toStrictEqual([
         { end: 1, start: 0 },
         { end: 3, start: 2 },
@@ -244,7 +244,7 @@ describe('quick-open service test', () => {
       quickOpenService.open(model, {
         prefix: 'AAA',
       });
-      expect(widget.items).toHaveLength(1);
+      expect(widget.items.get()).toHaveLength(1);
     });
 
     it('match description', () => {
@@ -252,8 +252,8 @@ describe('quick-open service test', () => {
         prefix: 'BBB',
         fuzzyMatchDescription: true,
       });
-      expect(widget.items).toHaveLength(4);
-      const [, descriptionHighlights] = widget.items[2].getHighlights();
+      expect(widget.items.get()).toHaveLength(4);
+      const [, descriptionHighlights] = widget.items.get()[2].getHighlights();
       expect(descriptionHighlights).toStrictEqual([{ start: 23, end: 26 }]);
     });
 
@@ -262,8 +262,8 @@ describe('quick-open service test', () => {
         prefix: 'Hello',
         fuzzyMatchDetail: true,
       });
-      expect(widget.items).toHaveLength(4);
-      const [, , detailHighlights] = widget.items[3].getHighlights();
+      expect(widget.items.get()).toHaveLength(4);
+      const [, , detailHighlights] = widget.items.get()[3].getHighlights();
       expect(detailHighlights).toStrictEqual([{ start: 8, end: 13 }]);
     });
 
@@ -283,8 +283,8 @@ describe('quick-open service test', () => {
           enableSeparateSubstringMatching: true,
         },
       });
-      expect(widget.items).toHaveLength(2);
-      expect(widget.items[0].getLabel()).toBe('Hon');
+      expect(widget.items.get()).toHaveLength(2);
+      expect(widget.items.get()[0].getLabel()).toBe('Hon');
     });
   });
 
@@ -300,7 +300,7 @@ describe('quick-open service test', () => {
       });
       // trigger onSelect
       widget.callbacks.onSelect(item, 1);
-      expect($onSelect).toBeCalledWith(item, 1);
+      expect($onSelect).toHaveBeenCalledWith(item, 1);
     });
 
     it('onConfirm to be call', () => {
@@ -313,7 +313,7 @@ describe('quick-open service test', () => {
       });
       // trigger onSelect
       widget.callbacks.onConfirm([item]);
-      expect($onConfirm).toBeCalledWith([item]);
+      expect($onConfirm).toHaveBeenCalledWith([item]);
     });
 
     it('the inQuickOpen contextkey to be false when onHide be called', () => {
@@ -334,7 +334,7 @@ describe('quick-open service test', () => {
       });
       // trigger onOk
       widget.callbacks.onOk();
-      expect($onClose).toBeCalledWith(false);
+      expect($onClose).toHaveBeenCalledWith(false);
     });
 
     it('onClose to be called when onCancel be called', () => {
@@ -345,7 +345,7 @@ describe('quick-open service test', () => {
       });
       // trigger onOk
       widget.callbacks.onCancel();
-      expect($onClose).toBeCalledWith(true);
+      expect($onClose).toHaveBeenCalledWith(true);
     });
 
     it('onClose to be called when ignoreFocusOut is true', () => {
@@ -357,7 +357,7 @@ describe('quick-open service test', () => {
       // trigger onFocusLost
       const ignoreFocusOut = widget.callbacks.onFocusLost();
       expect(ignoreFocusOut).toBeTruthy();
-      expect($onClose).toBeCalledTimes(0);
+      expect($onClose).toHaveBeenCalledTimes(0);
     });
 
     it('onClose to be called when ignoreFocusOut is false', () => {
@@ -370,7 +370,7 @@ describe('quick-open service test', () => {
       const ignoreFocusOut = widget.callbacks.onFocusLost();
       // true 为取消类型的关闭
       expect(ignoreFocusOut).toBeFalsy();
-      expect($onClose).toBeCalledWith(true);
+      expect($onClose).toHaveBeenCalledWith(true);
     });
   });
 

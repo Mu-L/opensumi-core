@@ -1,8 +1,9 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { IDisposable, Disposable } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { Disposable, IDisposable } from '@opensumi/ide-core-common';
 
 import { AbstractSumiBrowserContributionRunner, IRunTimeParams } from '../types';
 
+import { ChatBrowserContributionRunner } from './chat';
 import { EditorBrowserContributionRunner } from './editor';
 import { EditorSideBrowserContributionRunner } from './editorSide';
 import { TabbarBrowserContributionRunner } from './tabbar';
@@ -26,6 +27,9 @@ export class SumiBrowserContributionRunner extends AbstractSumiBrowserContributi
     );
     disposer.addDispose(
       this.injector.get(ToolBarBrowserContributionRunner, [this.extension, this.contribution]).run(param),
+    );
+    disposer.addDispose(
+      this.injector.get(ChatBrowserContributionRunner, [this.extension, this.contribution]).run(param),
     );
     return disposer;
   }

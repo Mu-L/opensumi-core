@@ -27,15 +27,15 @@ export class OpenSumiExplorerFileStatNode extends OpenSumiTreeNode {
 
   async open(preview = true) {
     if (!preview) {
-      await this.elementHandle.dblclick();
+      await this.elementHandle?.dblclick();
     } else {
-      await this.elementHandle.click();
+      await this.elementHandle?.click();
     }
   }
 
   async isDirty() {
     const classname = await this.elementHandle.getAttribute('class');
-    if (classname?.includes('mod_dirty__')) {
+    if (classname?.includes('dirty__')) {
       return true;
     }
     return false;
@@ -129,7 +129,7 @@ export class OpenSumiExplorerView extends OpenSumiPanel {
     let node;
     for (const item of treeItems) {
       const title = await item.getAttribute('title');
-      if (title?.startsWith('Group')) {
+      if (title?.startsWith('GROUP')) {
         if (title === path) {
           node = item;
           break;

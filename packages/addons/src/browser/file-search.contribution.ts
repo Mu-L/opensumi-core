@@ -3,31 +3,32 @@
  */
 import fuzzy from 'fuzzy';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  localize,
-  formatLocalize,
   CommandService,
-  URI,
   EDITOR_COMMANDS,
+  Highlight,
+  ILogger,
+  KeybindingContribution,
+  KeybindingRegistry,
+  Mode,
+  PreferenceService,
   QuickOpenActionProvider,
   QuickOpenItem,
-  PreferenceService,
+  RecentFilesManager,
+  URI,
+  formatLocalize,
+  getIcon,
   getSymbolIcon,
-  Highlight,
-  Mode,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { KeybindingContribution, KeybindingRegistry, ILogger } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
-import { RecentFilesManager } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import {
+  CancellationToken,
+  CancellationTokenSource,
+  Command,
   CommandContribution,
   CommandRegistry,
-  Command,
-  CancellationTokenSource,
-  Schemes,
-  CancellationToken,
   IRange,
   IReporterService,
   REPORT_NAME,
@@ -40,11 +41,12 @@ import {
   INormalizedDocumentSymbol,
 } from '@opensumi/ide-editor/lib/browser/breadcrumb/document-symbol';
 import { FileSearchServicePath, IFileSearchService } from '@opensumi/ide-file-search/lib/common';
+import * as monaco from '@opensumi/ide-monaco';
 import {
-  QuickOpenModel,
-  QuickOpenOptions,
   PrefixQuickOpenService,
   QuickOpenBaseAction,
+  QuickOpenModel,
+  QuickOpenOptions,
 } from '@opensumi/ide-quick-open';
 import {
   QuickOpenContribution,
@@ -52,7 +54,6 @@ import {
 } from '@opensumi/ide-quick-open/lib/browser/prefix-quick-open.service';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { matchesFuzzy } from '@opensumi/monaco-editor-core/esm/vs/base/common/filters';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 const DEFAULT_FILE_SEARCH_LIMIT = 200;
 
@@ -105,7 +106,7 @@ class FileSearchActionLeftRight extends QuickOpenBaseAction {
   constructor() {
     super({
       id: 'file-search:splitToRight',
-      tooltip: localize('file-search.quickOpen.leftRight'),
+      tooltip: localize('quickOpen.openOnTheRightSide'),
       class: getIcon('embed'),
     });
   }
@@ -232,7 +233,9 @@ export class FileSearchQuickCommandHandler {
       },
       getPlaceholderItem: (lookFor: string) =>
         new QuickOpenItem({
-          label: localize(lookFor.indexOf('@') > -1 ? 'fileSymbolResults.notfound' : 'fileResults.notfound'),
+          label: localize(
+            lookFor.indexOf('@') > -1 ? 'search.fileSymbolResults.notfound' : 'search.fileResults.notfound',
+          ),
           run: () => false,
         }),
     };
@@ -247,7 +250,6 @@ export class FileSearchQuickCommandHandler {
       this.prevEditorState = {};
     }
     this.prevSelected = undefined;
-    this.commandService.executeCommand(EDITOR_COMMANDS.FOCUS.id);
     this.cancelIndicator.cancel();
   }
 
@@ -278,7 +280,7 @@ export class FileSearchQuickCommandHandler {
 
   private async getFindOutItems(alreadyCollected: Set<string>, lookFor: string, token: CancellationToken) {
     let results: QuickOpenItem[];
-    // 有@时进入查找symbol逻辑
+    // 有 @ 时进入查找symbol逻辑
     if (lookFor.indexOf('@') > -1) {
       // save current editor state
       this.trySaveEditorState();
@@ -319,7 +321,7 @@ export class FileSearchQuickCommandHandler {
                 iconClass: getSymbolIcon(symbol.kind),
                 description: (symbol.parent as INormalizedDocumentSymbol)?.name,
                 labelHighlights: (symbol as any).labelHighlights,
-                groupLabel: index === 0 ? formatLocalize('fileSymbolResults', flatSymbols.length) : '',
+                groupLabel: index === 0 ? formatLocalize('search.fileSymbolResults', flatSymbols.length) : '',
                 showBorder: false,
                 run: (mode: Mode) => {
                   if (mode === Mode.PREVIEW) {
@@ -342,8 +344,8 @@ export class FileSearchQuickCommandHandler {
       results = await this.getQueryFiles(lookFor, alreadyCollected, token);
       // 排序后设置第一个元素的样式
       if (results[0]) {
-        const newItems = await this.getItems([results[0].getUri()!.toString()], {
-          groupLabel: localize('fileResults'),
+        const newItems = await this.getItems([results[0].getUri()!.codeUri.fsPath], {
+          groupLabel: localize('search.fileResults'),
           showBorder: true,
         });
         results[0] = newItems[0];
@@ -354,15 +356,7 @@ export class FileSearchQuickCommandHandler {
 
   protected async getQueryFiles(fileQuery: string, alreadyCollected: Set<string>, token: CancellationToken) {
     const roots = await this.workspaceService.roots;
-    const rootUris: string[] = [];
-    roots.forEach((stat) => {
-      const uri = new URI(stat.uri);
-      if (uri.scheme !== Schemes.file) {
-        return;
-      }
-      this.logger.debug('file-search.contribution rootUri', uri.toString());
-      return rootUris.push(uri.toString());
-    });
+    const rootUris: string[] = roots.map((stat) => new URI(stat.uri).codeUri.fsPath);
     const files = await this.fileSearchService.find(
       fileQuery,
       {
@@ -371,7 +365,7 @@ export class FileSearchQuickCommandHandler {
         limit: DEFAULT_FILE_SEARCH_LIMIT,
         useGitIgnore: true,
         noIgnoreParent: true,
-        excludePatterns: ['*.git*', ...this.getPreferenceSearchExcludes()],
+        excludePatterns: this.getPreferenceSearchExcludes(),
       },
       token,
     );
@@ -411,7 +405,7 @@ export class FileSearchQuickCommandHandler {
         return true;
       }),
       {
-        groupLabel: localize('historyMatches'),
+        groupLabel: localize('search.historyMatches'),
       },
     );
   }
@@ -420,9 +414,17 @@ export class FileSearchQuickCommandHandler {
     const items: QuickOpenItem[] = [];
 
     for (const [index, strUri] of uriList.entries()) {
-      const uri = new URI(strUri);
-      const icon = `file-icon ${await this.labelService.getIcon(uri.withoutFragment())}`;
-      const description = await this.workspaceService.asRelativePath(uri.parent.withoutFragment());
+      const uri = URI.isUriString(strUri) ? new URI(strUri) : URI.file(strUri);
+      const icon = `file-icon ${this.labelService.getIcon(uri.withoutFragment())}`;
+      let description = '';
+      const relative = await this.workspaceService.asRelativePath(uri.parent);
+      if (relative) {
+        if (this.workspaceService.isMultiRootWorkspaceOpened) {
+          description = `${new URI(relative.root).displayName}${relative.path ? ` ・ ${relative.path}` : ''}`;
+        } else {
+          description = relative.path || '';
+        }
+      }
       const item = new QuickOpenItem({
         uri,
         label: uri.displayName,
@@ -448,11 +450,11 @@ export class FileSearchQuickCommandHandler {
   }
 
   private openFile(uri: URI) {
-    const filePath = uri.path.toString();
+    const filePath = uri.codeUri.fsPath;
     // 优先从输入上获取 line 和 column
     let range = getRangeByInput(this.currentLookFor);
     if (!range || (!range.startLineNumber && !range.startColumn)) {
-      range = getRangeByInput(uri.fragment ? filePath + '#' + uri.fragment : filePath);
+      range = getRangeByInput(uri.fragment ? '#' + uri.fragment : filePath);
     }
     this.currentLookFor = '';
     this.commandService.executeCommand(EDITOR_COMMANDS.OPEN_RESOURCE.id, uri.withoutFragment(), {

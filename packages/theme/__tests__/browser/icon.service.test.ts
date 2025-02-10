@@ -1,15 +1,15 @@
 import { Injectable } from '@opensumi/di';
 import {
-  PreferenceSchemaProvider,
-  IPreferenceSettingsService,
   IFileServiceClient,
+  IPreferenceSettingsService,
+  PreferenceSchemaProvider,
   URI,
 } from '@opensumi/ide-core-browser';
 import {
   MockPreferenceSchemaProvider,
   MockPreferenceSettingsService,
 } from '@opensumi/ide-core-browser/__mocks__/preference';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
@@ -187,6 +187,7 @@ describe('icon theme test', () => {
           label: 'Test IconTheme',
           uiTheme: 'vs',
           path: './test/path',
+          extensionId: 'mock',
         },
       ],
       new URI('file://mock/path'),
@@ -273,6 +274,7 @@ describe('icon theme test', () => {
           label: 'Test IconTheme',
           uiTheme: 'vs',
           path: './test/font/path',
+          extensionId: 'mock',
         },
       ],
       new URI('file://mock/path'),

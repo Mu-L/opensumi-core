@@ -4,18 +4,17 @@ import { Autowired, Injectable } from '@opensumi/di';
 import {
   CommandService,
   EDITOR_COMMANDS,
-  Event,
   Emitter,
-  getSymbolIcon,
+  Event,
   IPosition,
   IRange,
+  LRUMap,
   MaybeNull,
   OnEvent,
   URI,
   WithEventBus,
-  LRUMap,
+  getSymbolIcon,
   path,
-  Schemes,
 } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import { FileStat } from '@opensumi/ide-file-service/lib/common';
@@ -98,6 +97,7 @@ export class DefaultBreadCrumbProvider extends WithEventBus implements IBreadCru
 
     const res: IBreadCrumbPart = {
       name: uri.path.base,
+      uri,
       icon: this.labelService.getIcon(uri, { isDirectory }),
       getSiblings: async () => {
         const parentDir = URI.from({
@@ -173,6 +173,7 @@ export class DefaultBreadCrumbProvider extends WithEventBus implements IBreadCru
     const res: IBreadCrumbPart = {
       name: symbol.name,
       icon: getSymbolIcon(symbol.kind),
+      isSymbol: true,
       onClick: () => {
         editor.setSelection({
           startColumn: symbol.range.startColumn,

@@ -1,17 +1,17 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { OperatingSystem } from '@opensumi/ide-core-common';
 
 import {
-  generateSessionId,
-  ITerminalService,
-  ITerminalInternalService,
-  ITerminalError,
   IPtyExitEvent,
-  ITerminalController,
-  ITerminalProfile,
+  IPtyProcessChangeEvent,
   IShellLaunchConfig,
   ITerminalConnection,
-  IPtyProcessChangeEvent,
+  ITerminalController,
+  ITerminalError,
+  ITerminalInternalService,
+  ITerminalProfile,
+  ITerminalService,
+  generateSessionId,
 } from '../common';
 import { IXTerm } from '../common/xterm';
 
@@ -127,5 +127,8 @@ export class TerminalInternalService implements ITerminalInternalService {
       };
     }
     return await this.service.attachByLaunchConfig(sessionId, cols, rows, launchConfig, xterm);
+  }
+  async getCwd(sessionId: string): Promise<string | undefined> {
+    return await this.service.getCwd(sessionId);
   }
 }

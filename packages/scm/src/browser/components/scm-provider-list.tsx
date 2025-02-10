@@ -1,10 +1,9 @@
-import clx from 'classnames';
-import React from 'react';
+import cls from 'classnames';
+import React, { CSSProperties, FC, useCallback } from 'react';
 
 import { Badge } from '@opensumi/ide-components';
-import { useInjectable } from '@opensumi/ide-core-browser';
-import { ViewState } from '@opensumi/ide-core-browser';
-import { ICtxMenuRenderer, MenuId, AbstractContextMenuService } from '@opensumi/ide-core-browser/lib/menu/next';
+import { ViewState, useInjectable } from '@opensumi/ide-core-browser';
+import { AbstractContextMenuService, ICtxMenuRenderer, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IStatusBarService } from '@opensumi/ide-status-bar';
 import { StatusBarItem } from '@opensumi/ide-status-bar/lib/browser/status-bar-item.view';
 
@@ -13,12 +12,12 @@ import { getSCMRepositoryDesc } from '../scm-util';
 
 import styles from './scm-provider-list.module.less';
 
-const SCMProvider: React.FC<{
+const SCMProvider: FC<{
   repository: ISCMRepository;
   selected?: boolean;
   onClick?: React.MouseEventHandler<HTMLDivElement>;
   onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 }> = ({ repository, selected, ...restProps }) => {
   const { provider } = repository;
   const { title, type } = getSCMRepositoryDesc(repository);
@@ -36,7 +35,7 @@ const SCMProvider: React.FC<{
   );
 
   return (
-    <div className={clx(styles.provider, { [styles.selected]: selected })} {...restProps}>
+    <div className={cls(styles.provider, { [styles.selected]: selected })} {...restProps}>
       <div className={styles.info}>
         <div className={styles.title}>{title}&nbsp;</div>
         <div className={styles.type}>{type}&nbsp;</div>
@@ -44,18 +43,18 @@ const SCMProvider: React.FC<{
       </div>
       <div className={styles.toolbar}>
         {statusConfig.map((config) => (
-          <StatusBarItem key={config.id} className={styles.status} {...config} />
+          <StatusBarItem key={config.id} entryId={config.id} className={styles.status} {...config} />
         ))}
       </div>
     </div>
   );
 };
 
-export const SCMProviderList: React.FC<{
+export const SCMProviderList: FC<{
   repositoryList: ISCMRepository[];
   selectedRepository?: ISCMRepository;
   viewState: ViewState;
-}> = function SCMRepoSelect({ repositoryList, selectedRepository }) {
+}> = ({ repositoryList, selectedRepository }) => {
   if (!selectedRepository) {
     return null;
   }
@@ -63,30 +62,26 @@ export const SCMProviderList: React.FC<{
   const ctxMenuRenderer = useInjectable<ICtxMenuRenderer>(ICtxMenuRenderer);
   const ctxmenuService = useInjectable<AbstractContextMenuService>(AbstractContextMenuService);
 
-  const handleRepositorySelect = React.useCallback((selectedRepo: ISCMRepository) => {
+  const handleRepositorySelect = useCallback((selectedRepo: ISCMRepository) => {
     selectedRepo.setSelected(true);
     selectedRepo.focus();
   }, []);
 
-  const handleProviderCtxMenu = React.useCallback(
-    (selectedRepo: ISCMRepository, e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const { x, y } = e.nativeEvent;
+  const handleProviderCtxMenu = useCallback((selectedRepo: ISCMRepository, e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { x, y } = e.nativeEvent;
 
-      const menus = ctxmenuService.createMenu({ id: MenuId.SCMSourceControl });
-      const menuNodes = menus.getMergedMenuNodes();
-      menus.dispose();
+    const menus = ctxmenuService.createMenu({ id: MenuId.SCMSourceControl });
+    const menuNodes = menus.getMergedMenuNodes();
+    menus.dispose();
 
-      ctxMenuRenderer.show({
-        anchor: { x, y },
-        menuNodes,
-        args: [selectedRepo.provider.toJSON()],
-      });
-    },
-    [],
-  );
-
+    ctxMenuRenderer.show({
+      anchor: { x, y },
+      menuNodes,
+      args: [selectedRepo.provider.toJSON()],
+    });
+  }, []);
   return (
     <div className={styles.scmSelect}>
       {repositoryList.map((currentRepo) => (

@@ -40,6 +40,16 @@ declare module 'vscode' {
     readonly label: string;
   }
 
+  /**
+	 * Optional options to be used when calling {@link authentication.getSession} with the flag `forceNewSession`.
+	 */
+	export interface AuthenticationForceNewSessionOptions {
+		/**
+		 * An optional message that will be displayed to the user when we ask to re-authenticate. Providing additional context
+		 * as to why you are asking a user to re-authenticate can help increase the odds that they will accept.
+		 */
+		detail?: string;
+	}
 
   /**
    * Options to be used when getting an {@link AuthenticationSession} from an {@link AuthenticationProvider}.
@@ -60,14 +70,17 @@ declare module 'vscode' {
     createIfNone?: boolean;
 
     /**
-     * Whether we should attempt to reauthenticate even if there is already a session available.
-     *
-     * If true, a modal dialog will be shown asking the user to sign in again. This is mostly used for scenarios
-     * where the token needs to be re minted because it has lost some authorization.
-     *
-     * Defaults to false.
-     */
-    forceNewSession?: boolean | { detail: string };
+		 * Whether we should attempt to reauthenticate even if there is already a session available.
+		 *
+		 * If true, a modal dialog will be shown asking the user to sign in again. This is mostly used for scenarios
+		 * where the token needs to be re minted because it has lost some authorization.
+		 *
+		 * If there are no existing sessions and forceNewSession is true, it will behave identically to
+		 * {@link AuthenticationGetSessionOptions.createIfNone createIfNone}.
+		 *
+		 * This defaults to false.
+		 */
+		forceNewSession?: boolean | AuthenticationForceNewSessionOptions;
 
 
     /**
@@ -92,6 +105,11 @@ declare module 'vscode' {
      * Note: you cannot use this option with any other options that prompt the user like {@link createIfNone}.
      */
     silent?: boolean;
+
+    /**
+     * The account that you would like to get a session for. This is passed down to the Authentication Provider to be used for creating the correct session.
+     */
+    account?: AuthenticationSessionAccountInformation;
   }
 
   /**
@@ -153,6 +171,18 @@ declare module 'vscode' {
   }
 
   /**
+   * The options passed in to the {@link AuthenticationProvider.getSessions} and
+   * {@link AuthenticationProvider.createSession} call.
+   */
+  export interface AuthenticationProviderSessionOptions {
+    /**
+     * The account that is being asked about. If this is passed in, the provider should
+     * attempt to return the sessions that are only related to this account.
+     */
+    account?: AuthenticationSessionAccountInformation;
+  }
+
+  /**
    * A provider for performing authentication to a service.
    */
   export interface AuthenticationProvider {
@@ -168,7 +198,7 @@ declare module 'vscode' {
      * these permissions, otherwise all sessions should be returned.
      * @returns A promise that resolves to an array of authentication sessions.
      */
-    getSessions(scopes?: string[]): Thenable<ReadonlyArray<AuthenticationSession>>;
+    getSessions(scopes?: string[], options?: AuthenticationProviderSessionOptions): Thenable<ReadonlyArray<AuthenticationSession>>;
 
     /**
      * Prompts a user to login.
@@ -183,8 +213,8 @@ declare module 'vscode' {
      * @param scopes A list of scopes, permissions, that the new session should be created with.
      * @returns A promise that resolves to an authentication session.
      */
-    createSession(scopes: string[]): Thenable<AuthenticationSession>;
-
+    createSession(scopes: string[], options: AuthenticationProviderSessionOptions): Thenable<AuthenticationSession>;
+    
     /**
      * Removes the session corresponding to session id.
      *
@@ -202,34 +232,63 @@ declare module 'vscode' {
    */
   export namespace authentication {
     /**
-     * Get an authentication session matching the desired scopes. Rejects if a provider with providerId is not
-     * registered, or if the user does not consent to sharing authentication information with
-     * the extension. If there are multiple sessions with the same scopes, the user will be shown a
-     * quickpick to select which account they would like to use.
-     *
-     * Currently, there are only two authentication providers that are contributed from built in extensions
-     * to VS Code that implement GitHub and Microsoft authentication: their providerId's are 'github' and 'microsoft'.
-     * @param providerId The id of the provider to use
-     * @param scopes A list of scopes representing the permissions requested. These are dependent on the authentication provider
-     * @param options The {@link GetSessionOptions} to use
-     * @returns A thenable that resolves to an authentication session
-     */
-    export function getSession(providerId: string, scopes: string[], options: AuthenticationGetSessionOptions & { createIfNone: true }): Thenable<AuthenticationSession>;
+		 * Get an authentication session matching the desired scopes. Rejects if a provider with providerId is not
+		 * registered, or if the user does not consent to sharing authentication information with
+		 * the extension. If there are multiple sessions with the same scopes, the user will be shown a
+		 * quickpick to select which account they would like to use.
+		 *
+		 * Currently, there are only two authentication providers that are contributed from built in extensions
+		 * to the editor that implement GitHub and Microsoft authentication: their providerId's are 'github' and 'microsoft'.
+		 * @param providerId The id of the provider to use
+		 * @param scopes A list of scopes representing the permissions requested. These are dependent on the authentication provider
+		 * @param options The {@link AuthenticationGetSessionOptions} to use
+		 * @returns A thenable that resolves to an authentication session
+		 */
+		export function getSession(providerId: string, scopes: readonly string[], options: AuthenticationGetSessionOptions & { /** */createIfNone: true }): Thenable<AuthenticationSession>;
+
+		/**
+		 * Get an authentication session matching the desired scopes. Rejects if a provider with providerId is not
+		 * registered, or if the user does not consent to sharing authentication information with
+		 * the extension. If there are multiple sessions with the same scopes, the user will be shown a
+		 * quickpick to select which account they would like to use.
+		 *
+		 * Currently, there are only two authentication providers that are contributed from built in extensions
+		 * to the editor that implement GitHub and Microsoft authentication: their providerId's are 'github' and 'microsoft'.
+		 * @param providerId The id of the provider to use
+		 * @param scopes A list of scopes representing the permissions requested. These are dependent on the authentication provider
+		 * @param options The {@link AuthenticationGetSessionOptions} to use
+		 * @returns A thenable that resolves to an authentication session
+		 */
+		export function getSession(providerId: string, scopes: readonly string[], options: AuthenticationGetSessionOptions & { /** literal-type defines return type */forceNewSession: true | AuthenticationForceNewSessionOptions }): Thenable<AuthenticationSession>;
+
+		/**
+		 * Get an authentication session matching the desired scopes. Rejects if a provider with providerId is not
+		 * registered, or if the user does not consent to sharing authentication information with
+		 * the extension. If there are multiple sessions with the same scopes, the user will be shown a
+		 * quickpick to select which account they would like to use.
+		 *
+		 * Currently, there are only two authentication providers that are contributed from built in extensions
+		 * to the editor that implement GitHub and Microsoft authentication: their providerId's are 'github' and 'microsoft'.
+		 * @param providerId The id of the provider to use
+		 * @param scopes A list of scopes representing the permissions requested. These are dependent on the authentication provider
+		 * @param options The {@link AuthenticationGetSessionOptions} to use
+		 * @returns A thenable that resolves to an authentication session if available, or undefined if there are no sessions
+		 */
+		export function getSession(providerId: string, scopes: readonly string[], options?: AuthenticationGetSessionOptions): Thenable<AuthenticationSession | undefined>;
 
     /**
-     * Get an authentication session matching the desired scopes. Rejects if a provider with providerId is not
-     * registered, or if the user does not consent to sharing authentication information with
-     * the extension. If there are multiple sessions with the same scopes, the user will be shown a
-     * quickpick to select which account they would like to use.
+     * Get all accounts that the user is logged in to for the specified provider.
+     * Use this paired with {@link getSession} in order to get an authentication session for a specific account.
      *
      * Currently, there are only two authentication providers that are contributed from built in extensions
-     * to VS Code that implement GitHub and Microsoft authentication: their providerId's are 'github' and 'microsoft'.
+     * to the editor that implement GitHub and Microsoft authentication: their providerId's are 'github' and 'microsoft'.
+     *
+     * Note: Getting accounts does not imply that your extension has access to that account or its authentication sessions. You can verify access to the account by calling {@link getSession}.
+     *
      * @param providerId The id of the provider to use
-     * @param scopes A list of scopes representing the permissions requested. These are dependent on the authentication provider
-     * @param options The {@link GetSessionOptions} to use
-     * @returns A thenable that resolves to an authentication session if available, or undefined if there are no sessions
+     * @returns A thenable that resolves to a readonly array of authentication accounts.
      */
-    export function getSession(providerId: string, scopes: string[], options?: AuthenticationGetSessionOptions): Thenable<AuthenticationSession | undefined>;
+    export function getAccounts(providerId: string): Thenable<readonly AuthenticationSessionAccountInformation[]>;
 
     /**
      * An {@link Event} which fires when the authentication sessions of an authentication provider have

@@ -1,8 +1,8 @@
-import { Terminal } from 'xterm';
+import { Terminal } from '@xterm/xterm';
 
-import { IDisposable, Disposable, Event, Deferred } from '@opensumi/ide-core-common';
+import { Deferred, Disposable, Event, IDisposable } from '@opensumi/ide-core-common';
 
-import { INodePtyInstance, TerminalOptions, ICreateTerminalOptions, IShellLaunchConfig } from './pty';
+import { ICreateTerminalOptions, INodePtyInstance, IShellLaunchConfig, TerminalOptions } from './pty';
 import { IWidget } from './resize';
 
 export interface ITerminalDataEvent {
@@ -141,6 +141,16 @@ export interface ITerminalClient extends Disposable {
    * 更新终端客户端配置
    */
   updateLaunchConfig(launchConfig: IShellLaunchConfig): void;
+
+  /**
+   * 检查终端的健康状态，Shell 进程是否存活
+   */
+  checkHealthy(): Promise<boolean>;
+
+  /**
+   * 在终端不健康时(对应的Shell 进程被 Kill)，使用 Xterm 提示用户，避免误解
+   */
+  displayUnHealthyMessage(): void;
   /**
    * clear 参数用于判断是否需要清理 meta 信息，
    * 不需要 clear 参数的时候基本为正常推出，

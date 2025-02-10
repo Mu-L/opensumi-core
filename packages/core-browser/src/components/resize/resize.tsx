@@ -1,5 +1,9 @@
-import classnames from 'classnames';
+import cls from 'classnames';
 import React from 'react';
+
+import { IDisposable } from '@opensumi/ide-core-common';
+
+import { fastdom } from '../../dom';
 
 import styles from './resize.module.less';
 
@@ -42,9 +46,11 @@ export interface IResizeHandleDelegate {
   getAbsoluteSize(isLatter?: boolean): number;
 }
 
-function preventWebviewCatchMouseEvents() {
+export function preventWebviewCatchMouseEvents() {
   const iframes = document.getElementsByTagName('iframe');
   const webviews = document.getElementsByTagName('webview');
+  const shadowRootHost = document.getElementsByClassName('shadow-root-host');
+
   for (const webview of webviews as unknown as HTMLElement[]) {
     webview.classList.add('none-pointer-event');
   }
@@ -52,23 +58,23 @@ function preventWebviewCatchMouseEvents() {
     iframe.classList.add('none-pointer-event');
   }
 
-  const shadowRootHost = document.getElementsByClassName('shadow-root-host');
   for (const host of shadowRootHost as unknown as HTMLElement[]) {
     host?.classList.add('none-pointer-event');
   }
 }
 
-function allowWebviewCatchMouseEvents() {
+export function allowWebviewCatchMouseEvents() {
   const iframes = document.getElementsByTagName('iframe');
   const webviews = document.getElementsByTagName('webview');
-  for (const webview of webviews as any) {
+  const shadowRootHost = document.getElementsByClassName('shadow-root-host');
+
+  for (const webview of webviews as unknown as HTMLElement[]) {
     webview.classList.remove('none-pointer-event');
   }
-  for (const iframe of iframes as any) {
+  for (const iframe of iframes as unknown as HTMLIFrameElement[]) {
     iframe.classList.remove('none-pointer-event');
   }
 
-  const shadowRootHost = document.getElementsByClassName('shadow-root-host');
   for (const host of shadowRootHost as unknown as HTMLElement[]) {
     host?.classList.remove('none-pointer-event');
   }
@@ -82,22 +88,34 @@ export const ResizeHandleHorizontal = (props: ResizeHandleProps) => {
   const startNextWidth = React.useRef<number>(0);
   const prevElement = React.useRef<HTMLElement | null>();
   const nextElement = React.useRef<HTMLElement | null>();
-  const requestFrame = React.useRef<number>();
+  const requestFrameToDispose = React.useRef<IDisposable>();
 
   const setSize = (prev: number, next: number) => {
-    const parentWidth = ref.current!.parentElement!.offsetWidth;
     const prevEle = props.findPrevElement ? props.findPrevElement() : prevElement.current!;
     const nextEle = props.findNextElement ? props.findNextElement() : nextElement.current!;
+
     if ((prevEle && prevEle.classList.contains(RESIZE_LOCK)) || (nextEle && nextEle.classList.contains(RESIZE_LOCK))) {
       return;
     }
-    const prevMinResize = prevEle!.dataset.minResize || 0;
-    const nextMinResize = nextEle!.dataset.minResize || 0;
+
+    const parentWidth = ref.current!.parentElement!.offsetWidth;
+
+    const prevMinResize = Number(prevEle?.dataset.minResize || 0);
+    const nextMinResize = Number(nextEle?.dataset.minResize || 0);
+
+    const prevMaxResize = Number(prevEle?.dataset.maxResize || 0);
+    const nextMaxResize = Number(nextEle?.dataset.maxResize || 0);
     if (prevMinResize || nextMinResize) {
       if (prev * parentWidth <= prevMinResize || next * parentWidth <= nextMinResize) {
         return;
       }
     }
+    if (prevMaxResize || nextMaxResize) {
+      if (prev * parentWidth >= prevMaxResize || next * parentWidth >= nextMaxResize) {
+        return;
+      }
+    }
+
     if (nextEle) {
       nextEle.style.width = next * 100 + '%';
     }
@@ -109,34 +127,49 @@ export const ResizeHandleHorizontal = (props: ResizeHandleProps) => {
     }
   };
 
-  const flexModeSetSize = (prevWidth: number, nextWidth: number, ignoreMin?: boolean, direction?: boolean) => {
+  const flexModeSetSize = (prevWidth: number, nextWidth: number, ignoreResizeRange?: boolean, direction?: boolean) => {
     const prevEle = props.findPrevElement ? props.findPrevElement(direction) : prevElement.current!;
     const nextEle = props.findNextElement ? props.findNextElement(direction) : nextElement.current!;
-    let fixedElement: HTMLElement;
-    let flexElement: HTMLElement;
-    let targetFixedWidth = 0;
-    const prevMinResize = parseInt(prevEle!.dataset.minResize || '0', 10);
-    const nextMinResize = parseInt(nextEle!.dataset.minResize || '0', 10);
-    if (props.flexMode === ResizeFlexMode.Prev) {
-      fixedElement = prevEle!;
-      flexElement = nextEle!;
-      targetFixedWidth = prevWidth;
-      if (!ignoreMin) {
-        if (prevMinResize > prevWidth) {
-          targetFixedWidth = prevMinResize;
-        } else if (nextMinResize > nextWidth) {
-          targetFixedWidth = prevWidth + nextWidth - nextMinResize;
+    const prevMinResize = Number(prevEle?.dataset.minResize ?? 0);
+    const nextMinResize = Number(nextEle?.dataset.minResize ?? 0);
+
+    const prevMaxResize = prevEle?.dataset.maxResize ? Number(prevEle?.dataset.maxResize) : null;
+    const nextMaxResize = nextEle?.dataset.maxResize ? Number(nextEle?.dataset.maxResize) : null;
+
+    const isPreFlexMode = props.flexMode === ResizeFlexMode.Prev;
+    const fixedElement = (isPreFlexMode ? prevEle : nextEle)!;
+    const flexElement = (isPreFlexMode ? nextEle : prevEle)!;
+    let targetFixedWidth = isPreFlexMode ? prevWidth : nextWidth;
+
+    if (!ignoreResizeRange) {
+      if (prevMinResize || nextMinResize) {
+        if (isPreFlexMode) {
+          if (prevMinResize > prevWidth) {
+            targetFixedWidth = prevMinResize;
+          } else if (nextMinResize > nextWidth) {
+            targetFixedWidth = prevWidth + nextWidth - nextMinResize;
+          }
+        } else {
+          if (nextMinResize > nextWidth) {
+            targetFixedWidth = nextMinResize;
+          } else if (prevMinResize > prevWidth) {
+            targetFixedWidth = prevWidth + nextWidth - prevMinResize;
+          }
         }
       }
-    } else {
-      fixedElement = nextEle!;
-      flexElement = prevEle!;
-      targetFixedWidth = nextWidth;
-      if (!ignoreMin) {
-        if (nextMinResize > nextWidth) {
-          targetFixedWidth = nextMinResize;
-        } else if (prevMinResize > prevWidth) {
-          targetFixedWidth = prevWidth + nextWidth - prevMinResize;
+      if (prevMaxResize || nextMaxResize) {
+        if (isPreFlexMode) {
+          if (prevMaxResize && prevMaxResize <= prevWidth) {
+            targetFixedWidth = prevMaxResize;
+          } else if (nextMaxResize && nextMaxResize > nextWidth) {
+            targetFixedWidth = prevWidth + nextWidth - nextMaxResize;
+          }
+        } else {
+          if (nextMaxResize && nextMaxResize <= nextWidth) {
+            targetFixedWidth = nextMaxResize;
+          } else if (prevMaxResize && prevMaxResize > nextWidth) {
+            targetFixedWidth = prevWidth + nextWidth - prevMaxResize;
+          }
         }
       }
     }
@@ -221,32 +254,38 @@ export const ResizeHandleHorizontal = (props: ResizeHandleProps) => {
   };
 
   const setAbsoluteSize = (size: number, isLatter?: boolean) => {
-    const currentPrev = prevElement.current!.clientWidth;
-    const currentNext = nextElement.current!.clientWidth;
-    const totalSize = currentPrev + currentNext;
-    if (props.flexMode) {
-      const prevWidth = props.flexMode === ResizeFlexMode.Prev ? size : totalSize - size;
-      const nextWidth = props.flexMode === ResizeFlexMode.Next ? size : totalSize - size;
-      flexModeSetSize(prevWidth, nextWidth, true);
-    } else {
-      const currentTotalWidth =
-        +nextElement.current!.style.width!.replace('%', '') + +prevElement.current!.style.width!.replace('%', '');
-      if (isLatter) {
-        nextElement.current!.style.width = currentTotalWidth * (size / totalSize) + '%';
-        prevElement.current!.style.width = currentTotalWidth * (1 - size / totalSize) + '%';
+    fastdom.measure(() => {
+      const currentPrev = prevElement.current!.clientWidth;
+      const currentNext = nextElement.current!.clientWidth;
+
+      const totalSize = currentPrev + currentNext;
+      if (props.flexMode) {
+        const prevWidth = props.flexMode === ResizeFlexMode.Prev ? size : totalSize - size;
+        const nextWidth = props.flexMode === ResizeFlexMode.Next ? size : totalSize - size;
+        flexModeSetSize(prevWidth, nextWidth, true);
       } else {
-        prevElement.current!.style.width = currentTotalWidth * (size / totalSize) + '%';
-        nextElement.current!.style.width = currentTotalWidth * (1 - size / totalSize) + '%';
+        const nextTotolWidth = +nextElement.current!.style.width!.replace('%', '');
+        const prevTotalWidth = +prevElement.current!.style.width!.replace('%', '');
+
+        const currentTotalWidth = nextTotolWidth + prevTotalWidth;
+
+        if (isLatter) {
+          nextElement.current!.style.width = currentTotalWidth * (size / totalSize) + '%';
+          prevElement.current!.style.width = currentTotalWidth * (1 - size / totalSize) + '%';
+        } else {
+          prevElement.current!.style.width = currentTotalWidth * (size / totalSize) + '%';
+          nextElement.current!.style.width = currentTotalWidth * (1 - size / totalSize) + '%';
+        }
       }
-    }
-    if (isLatter) {
-      handleZeroSize(totalSize - size, size);
-    } else {
-      handleZeroSize(size, totalSize - size);
-    }
-    if (props.onResize) {
-      props.onResize(prevElement.current!, nextElement.current!);
-    }
+      if (isLatter) {
+        handleZeroSize(totalSize - size, size);
+      } else {
+        handleZeroSize(size, totalSize - size);
+      }
+      if (props.onResize) {
+        props.onResize(prevElement.current!, nextElement.current!);
+      }
+    });
   };
 
   const getAbsoluteSize = (isLatter?: boolean) => {
@@ -279,43 +318,57 @@ export const ResizeHandleHorizontal = (props: ResizeHandleProps) => {
     }
     const prevWidth = startPrevWidth.current + e.pageX - startX.current;
     const nextWidth = startNextWidth.current - (e.pageX - startX.current);
-    if (requestFrame.current) {
-      window.cancelAnimationFrame(requestFrame.current);
+    if (requestFrameToDispose.current) {
+      requestFrameToDispose.current.dispose();
     }
-    const parentWidth = ref.current!.parentElement!.offsetWidth;
-    requestFrame.current = window.requestAnimationFrame(() => {
+
+    requestFrameToDispose.current = fastdom.mutate(() => {
       if (props.flexMode) {
         flexModeSetSize(prevWidth, nextWidth);
       } else {
+        const parentWidth = ref.current!.parentElement!.offsetWidth;
         setSize(prevWidth / parentWidth, nextWidth / parentWidth);
       }
     });
   };
-  const onMouseUp = (e) => {
+  const onMouseUp = () => {
     resizing.current = false;
-    ref.current?.classList.remove(styles.active);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
-    // 结束拖拽时恢复拖拽区域滚动条
-    restoreScrollBar(prevElement.current!);
-    restoreScrollBar(nextElement.current!);
+
     if (props.onFinished) {
       props.onFinished();
     }
-    allowWebviewCatchMouseEvents();
+
+    fastdom.mutate(() => {
+      ref.current?.classList.remove(styles.active);
+
+      // 结束拖拽时恢复拖拽区域滚动条
+      restoreScrollBar(prevElement.current!);
+      restoreScrollBar(nextElement.current!);
+
+      allowWebviewCatchMouseEvents();
+    });
   };
   const onMouseDown = (e) => {
     resizing.current = true;
-    ref.current?.classList.add(styles.active);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
     startX.current = e.pageX;
-    startPrevWidth.current = prevElement.current!.offsetWidth;
-    startNextWidth.current = nextElement.current!.offsetWidth;
-    // 开始拖拽时隐藏拖拽区域滚动条
-    hideScrollBar(prevElement.current!);
-    hideScrollBar(nextElement.current!);
-    preventWebviewCatchMouseEvents();
+
+    fastdom.measure(() => {
+      startPrevWidth.current = prevElement.current!.offsetWidth;
+      startNextWidth.current = nextElement.current!.offsetWidth;
+
+      fastdom.mutate(() => {
+        ref.current?.classList.add(styles.active);
+
+        // 开始拖拽时隐藏拖拽区域滚动条
+        hideScrollBar(prevElement.current!);
+        hideScrollBar(nextElement.current!);
+        preventWebviewCatchMouseEvents();
+      });
+    });
   };
 
   React.useEffect(() => {
@@ -349,7 +402,7 @@ export const ResizeHandleHorizontal = (props: ResizeHandleProps) => {
       ref={(e) => {
         ref.current = e;
       }}
-      className={classnames({
+      className={cls({
         [styles['resize-handle-horizontal']]: true,
         [styles['with-color']]: !props.noColor,
         [props.className || '']: true,
@@ -371,8 +424,7 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
   const cachedPrevElement = React.useRef<HTMLElement>();
   const cachedNextElement = React.useRef<HTMLElement>();
 
-  const requestFrame = React.useRef<number>();
-  // direction: true为向下，false为向上
+  // direction: true 为向下，false 为向上
   const setSize = (prev: number, next: number, direction?: boolean) => {
     const prevEle = props.findPrevElement ? props.findPrevElement(direction) : prevElement.current!;
     const nextEle = props.findNextElement ? props.findNextElement(direction) : nextElement.current!;
@@ -395,8 +447,9 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
     let fixedElement: HTMLElement;
     let flexElement: HTMLElement;
     let targetFixedHeight = 0;
-    const prevMinResize = parseInt(prevEle!.dataset.minResize || '0', 10);
-    const nextMinResize = parseInt(nextEle!.dataset.minResize || '0', 10);
+    const prevMinResize = Number(prevEle?.dataset?.minResize || 0);
+    const nextMinResize = Number(nextEle?.dataset?.minResize || 0);
+
     if (props.flexMode === ResizeFlexMode.Prev) {
       fixedElement = prevEle!;
       flexElement = nextEle!;
@@ -440,7 +493,6 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
     let currentTotalHeight;
     if (props.flexMode) {
       currentTotalHeight = ((prevEle.offsetHeight + nextEle.offsetHeight) / prevEle.parentElement!.offsetHeight) * 100;
-      // flexModeSetSize(prev / (prev + next) * totalHeight, next / (prev + next) * totalHeight, true);
     } else {
       currentTotalHeight = +nextEle.style.height!.replace('%', '') + +prevEle.style.height!.replace('%', '');
     }
@@ -516,8 +568,11 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
 
   // keep = true 左右侧面板使用，保证相邻节点的总宽度不变
   const setAbsoluteSize = (size: number, isLatter?: boolean, keep?: boolean) => {
-    const currentPrev = prevElement.current!.clientHeight;
-    const currentNext = nextElement.current!.clientHeight;
+    if (!prevElement.current || !nextElement.current) {
+      return;
+    }
+    const currentPrev = prevElement.current.clientHeight;
+    const currentNext = nextElement.current.clientHeight;
     const totalSize = currentPrev + currentNext;
     if (props.flexMode) {
       const prevHeight = props.flexMode === ResizeFlexMode.Prev ? size : totalSize - size;
@@ -559,15 +614,21 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
 
   const onMouseDown = (e) => {
     resizing.current = true;
-    ref.current?.classList.add(styles.active);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
     startY.current = e.pageY;
     cachedNextElement.current = nextElement.current;
     cachedPrevElement.current = prevElement.current;
-    startPrevHeight.current = prevElement.current!.offsetHeight;
-    startNextHeight.current = nextElement.current!.offsetHeight;
-    preventWebviewCatchMouseEvents();
+
+    fastdom.measure(() => {
+      startPrevHeight.current = prevElement.current!.offsetHeight;
+      startNextHeight.current = nextElement.current!.offsetHeight;
+
+      fastdom.mutate(() => {
+        ref.current?.classList.add(styles.active);
+        preventWebviewCatchMouseEvents();
+      });
+    });
   };
 
   const onMouseMove = (e: MouseEvent) => {
@@ -575,58 +636,63 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
     if (ref.current && ref.current.classList.contains('no-resize')) {
       return;
     }
-    const direction = e.pageY > startY.current;
-    // 若上层未传入findNextElement，dynamicNext为null，否则找不到符合要求的panel时返回undefined
-    const dynamicNext = props.findNextElement ? props.findNextElement(direction) : null;
-    const dynamicPrev = props.findPrevElement ? props.findPrevElement(direction) : null;
-    // 作用元素变化重新初始化当前位置，传入findNextElement时默认已传入findPrevElement
-    if (
-      (dynamicNext !== null && cachedNextElement.current !== dynamicNext) ||
-      (dynamicPrev !== null && cachedPrevElement.current !== dynamicPrev)
-    ) {
-      if (!dynamicNext || !dynamicPrev) {
-        return;
-      }
-      cachedNextElement.current = dynamicNext!;
-      cachedPrevElement.current = dynamicPrev!;
-      startY.current = e.pageY;
-      startPrevHeight.current = cachedPrevElement.current!.offsetHeight;
-      startNextHeight.current = cachedNextElement.current!.offsetHeight;
-    }
 
-    const prevHeight = startPrevHeight.current + e.pageY - startY.current;
-    const nextHeight = startNextHeight.current - (e.pageY - startY.current);
-    if (requestFrame.current) {
-      window.cancelAnimationFrame(requestFrame.current);
-    }
-    requestFrame.current = window.requestAnimationFrame(() => {
-      const prevMinResize = cachedPrevElement.current!.dataset.minResize || 0;
-      const nextMinResize = cachedNextElement.current!.dataset.minResize || 0;
+    fastdom.measure(() => {
+      const direction = e.pageY > startY.current;
+      // 若上层未传入findNextElement，dynamicNext为null，否则找不到符合要求的panel时返回undefined
+      const dynamicNext = props.findNextElement ? props.findNextElement(direction) : null;
+      const dynamicPrev = props.findPrevElement ? props.findPrevElement(direction) : null;
+      // 作用元素变化重新初始化当前位置，传入findNextElement时默认已传入findPrevElement
+      if (
+        (dynamicNext !== null && cachedNextElement.current !== dynamicNext) ||
+        (dynamicPrev !== null && cachedPrevElement.current !== dynamicPrev)
+      ) {
+        if (!dynamicNext || !dynamicPrev) {
+          return;
+        }
+        cachedNextElement.current = dynamicNext!;
+        cachedPrevElement.current = dynamicPrev!;
+        startY.current = e.pageY;
+        startPrevHeight.current = cachedPrevElement.current!.offsetHeight;
+        startNextHeight.current = cachedNextElement.current!.offsetHeight;
+      }
+
+      const prevHeight = startPrevHeight.current + e.pageY - startY.current;
+      const nextHeight = startNextHeight.current - (e.pageY - startY.current);
+
+      const prevMinResize = Number(cachedPrevElement.current!.dataset.minResize || 0);
+      const nextMinResize = Number(cachedNextElement.current!.dataset.minResize || 0);
       if (prevMinResize || nextMinResize) {
         if (prevHeight <= prevMinResize || nextHeight <= nextMinResize) {
           return;
         }
       }
-      if (props.flexMode === ResizeFlexMode.Prev || props.flexMode === ResizeFlexMode.Next) {
-        flexModeSetSize(prevHeight, nextHeight);
-      } else if (props.flexMode === ResizeFlexMode.Percentage) {
-        const parentHeight = ref.current!.parentElement!.offsetHeight;
-        setSize(prevHeight / parentHeight, nextHeight / parentHeight);
-      } else {
-        setDomSize(prevHeight, nextHeight, cachedPrevElement.current!, cachedNextElement.current!);
-      }
+
+      fastdom.mutate(() => {
+        if (props.flexMode === ResizeFlexMode.Prev || props.flexMode === ResizeFlexMode.Next) {
+          flexModeSetSize(prevHeight, nextHeight);
+        } else if (props.flexMode === ResizeFlexMode.Percentage) {
+          const parentHeight = ref.current!.parentElement!.offsetHeight;
+          setSize(prevHeight / parentHeight, nextHeight / parentHeight);
+        } else {
+          setDomSize(prevHeight, nextHeight, cachedPrevElement.current!, cachedNextElement.current!);
+        }
+      });
     });
   };
 
   const onMouseUp = (e) => {
     resizing.current = false;
-    ref.current?.classList.remove(styles.active);
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
-    if (props.onFinished) {
-      props.onFinished();
-    }
-    allowWebviewCatchMouseEvents();
+
+    fastdom.mutate(() => {
+      ref.current?.classList.remove(styles.active);
+      if (props.onFinished) {
+        props.onFinished();
+      }
+      allowWebviewCatchMouseEvents();
+    });
   };
 
   React.useEffect(() => {
@@ -653,7 +719,7 @@ export const ResizeHandleVertical = (props: ResizeHandleProps) => {
   return (
     <div
       ref={(e) => e && (ref.current = e)}
-      className={classnames({
+      className={cls({
         [styles['resize-handle-vertical']]: true,
         [props.className || '']: true,
         [styles['with-color']]: !props.noColor,

@@ -1,10 +1,10 @@
-import type vscode from 'vscode';
-
-import { IWebSocket } from '@opensumi/ide-connection';
-import { Disposable, DisposableCollection, Event } from '@opensumi/ide-core-common';
-import { DebugStreamConnection } from '@opensumi/ide-debug';
-import { getSequenceId } from '@opensumi/ide-debug';
+import { Disposable, DisposableCollection, Emitter, Event } from '@opensumi/ide-core-common';
+import { DebugStreamConnection, getSequenceId } from '@opensumi/ide-debug';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
+
+import { ExtensionConnection } from '../../../../common/vscode';
+
+import type vscode from 'vscode';
 
 export abstract class AbstractDebugAdapter implements vscode.DebugAdapter {
   constructor(readonly id: string) {}
@@ -15,33 +15,52 @@ export abstract class AbstractDebugAdapter implements vscode.DebugAdapter {
 }
 
 export class DirectDebugAdapter extends AbstractDebugAdapter {
+  private messageReceivedEmitter = new Emitter<string>();
+  private closeEmitter = new Emitter<void>();
+  onError: Event<Error> = Event.None;
+
   constructor(public id: string, public readonly implementation: vscode.DebugAdapter) {
     super(id);
+    this.implementation.onDidSendMessage((msg) => {
+      this.messageReceivedEmitter.fire(JSON.stringify(msg));
+    });
   }
 
-  start(channel: NodeJS.ReadableStream, outStream: NodeJS.WritableStream): void {
-    // @ts-ignore
-    this.implementation.start(channel, outStream);
+  get onClose() {
+    return this.closeEmitter.event;
   }
+
+  get onMessageReceived() {
+    return this.messageReceivedEmitter.event;
+  }
+
+  async start(): Promise<void> {}
 
   sendMessage(message: DebugProtocol.ProtocolMessage): void {
     this.implementation.handleMessage(message);
   }
 
-  stopSession(): Promise<void> {
+  async stop(): Promise<void> {
     this.implementation.dispose();
-    return Promise.resolve(undefined);
   }
 }
 
+/**
+ * communicate with debug adapter via stream
+ */
 export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
   private static TWO_CRLF = '\r\n\r\n';
+  private static CRLF = '\r\n';
   private static CONTENT_LENGTH = 'Content-Length';
+  // allow for non-RFC 2822 conforming line separators
+  private static readonly HEADER_LINE_SEPARATOR = /\r?\n/;
+  private static readonly HEADER_FIELD_SEPARATOR = /: +/;
 
   private readonly toDispose = new DisposableCollection();
-  private channel: IWebSocket | undefined;
   private contentLength: number;
   private buffer: Buffer;
+
+  private frontendConnection: ExtensionConnection;
 
   constructor(readonly id: string, protected readonly debugStreamConnection: DebugStreamConnection) {
     super(id);
@@ -58,13 +77,14 @@ export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
     ]);
   }
 
-  async start(channel: IWebSocket): Promise<void> {
-    if (this.channel) {
+  async start(connection: ExtensionConnection): Promise<void> {
+    if (this.frontendConnection) {
       throw new Error('The session has already been started, id: ' + this.id);
     }
-    this.channel = channel;
-    this.channel.onMessage((message: string) => this.write(message));
-    this.channel.onClose(() => (this.channel = undefined));
+
+    this.frontendConnection = connection;
+    this.frontendConnection.onMessage((message) => this.write(message));
+    this.frontendConnection.onceClose(() => (this.frontendConnection = undefined!));
 
     this.debugStreamConnection.output.on('data', (data: Buffer) => this.handleData(data));
     this.debugStreamConnection.output.on('close', () => this.onDebugAdapterExit(1, undefined));
@@ -81,7 +101,7 @@ export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
         exitCode,
       },
     };
-    this.send(JSON.stringify(event));
+    this.sendToFrontend(JSON.stringify(event));
   }
 
   protected onDebugAdapterError(error: Error): void {
@@ -91,7 +111,7 @@ export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
       seq: getSequenceId(),
       body: error,
     };
-    this.send(JSON.stringify(event));
+    this.sendToFrontend(JSON.stringify(event));
   }
 
   protected handleData(data: Buffer): void {
@@ -105,7 +125,7 @@ export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
           this.contentLength = -1;
 
           if (message.length > 0) {
-            this.send(message);
+            this.sendToFrontend(message);
           }
           continue;
         }
@@ -119,9 +139,9 @@ export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
         idx = this.buffer.indexOf(StreamDebugAdapter.TWO_CRLF);
         if (idx !== -1) {
           const header = this.buffer.toString('utf8', 0, idx);
-          const lines = header.split('\r\n');
+          const lines = header.split(StreamDebugAdapter.HEADER_LINE_SEPARATOR);
           for (const line of lines) {
-            const pair = line.split(/: +/);
+            const pair = line.split(StreamDebugAdapter.HEADER_FIELD_SEPARATOR);
             if (pair[0] === StreamDebugAdapter.CONTENT_LENGTH) {
               this.contentLength = +pair[1];
             }
@@ -134,19 +154,19 @@ export abstract class StreamDebugAdapter extends AbstractDebugAdapter {
     }
   }
 
-  protected send(message: string): void {
-    if (this.channel) {
-      this.channel.send(message);
+  protected sendToFrontend(message: string): void {
+    if (this.frontendConnection) {
+      this.frontendConnection.send(message);
     }
   }
 
   protected write(message: string): void {
-    // 在自定义 bash 模式下，需要使用 \r\n 来保证被写入
-    const finalMessage = message + '\r\n';
-    // 在 Stream 关闭后不再发送消息
+    // In the custom bash mode, it is necessary to use \r\n to ensure that it is written in.
+    const finalMessage = message + StreamDebugAdapter.CRLF;
+    // No more messages will be sent after the Stream is closed.
     if (this.debugStreamConnection.input.writable) {
       this.debugStreamConnection.input.write(
-        `Content-Length: ${Buffer.byteLength(finalMessage, 'utf8')}\r\n\r\n${finalMessage}`,
+        `Content-Length: ${Buffer.byteLength(finalMessage, 'utf8')}${StreamDebugAdapter.TWO_CRLF}${finalMessage}`,
         'utf8',
       );
     }

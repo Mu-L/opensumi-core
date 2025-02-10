@@ -1,37 +1,38 @@
-import { Injectable, Optional, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { PreferenceService } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import {
-  WithEventBus,
-  OnEvent,
-  Event,
-  URI,
-  IDisposable,
   Disposable,
-  isUndefinedOrNull,
   Emitter,
+  Event,
+  IDisposable,
   LRUMap,
+  OnEvent,
   Schemes,
+  URI,
+  WithEventBus,
+  isUndefinedOrNull,
 } from '@opensumi/ide-core-common';
 import { ResourceService } from '@opensumi/ide-editor';
 import {
   EditorComponentRegistry,
-  IEditorDocumentModelService,
-  IEditorDocumentModelContentRegistry,
-  IEditorDocumentModelRef,
   EditorDocumentModelContentChangedEvent,
   EditorDocumentModelCreationEvent,
+  EditorDocumentModelOptionChangedEvent,
   EditorDocumentModelRemovalEvent,
   EditorDocumentModelSavedEvent,
-  IEditorDocumentModelContentProvider,
-  EditorDocumentModelOptionChangedEvent,
   EditorDocumentModelWillSaveEvent,
+  EditorOpenType,
+  IEditorDocumentModelContentProvider,
+  IEditorDocumentModelContentRegistry,
+  IEditorDocumentModelRef,
+  IEditorDocumentModelService,
 } from '@opensumi/ide-editor/lib/browser';
 import { UntitledDocumentIdCounter } from '@opensumi/ide-editor/lib/browser/untitled-resource';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
-import { ExtHostAPIIdentifier, IMainThreadDocumentsShape, IExtensionHostDocService } from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtensionHostDocService, IMainThreadDocumentsShape } from '../../../common/vscode';
 
 const DEFAULT_EXT_HOLD_DOC_REF_MAX_AGE = 1000 * 60 * 3; // 插件进程openDocument持有的最长时间
 const DEFAULT_EXT_HOLD_DOC_REF_MIN_AGE = 1000 * 20; // 插件进程openDocument持有的最短时间，防止bounce
@@ -115,12 +116,16 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
         this.docSyncEnabled.set(
           uriString,
           docRef.instance.getMonacoModel().getValueLength() <
-            (this.preference.get<number>('editor.docExtHostSyncMaxSize') || 2 * 1024 * 1024),
+            this.preference.getValid<number>('editor.docExtHostSyncMaxSize', 4 * 1024 * 1024 * 1024),
         );
         docRef.dispose();
       }
     }
-    return this.docSyncEnabled.get(uriString)!;
+    return this.docSyncEnabled.get(uriString) ?? false;
+  }
+
+  public isDocIgnored(uri: URI): boolean {
+    return uri.codeUri.scheme === Schemes.walkThroughSnippet;
   }
 
   constructor(@Optional(Symbol()) private rpcProtocol: IRPCProtocol) {
@@ -147,7 +152,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
 
   @OnEvent(EditorDocumentModelContentChangedEvent)
   onEditorDocumentModelContentChangeEvent(e: EditorDocumentModelContentChangedEvent) {
-    if (!this.isDocSyncEnabled(e.payload.uri)) {
+    if (!this.isDocSyncEnabled(e.payload.uri) || this.isDocIgnored(e.payload.uri)) {
       return;
     }
 
@@ -164,30 +169,32 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
 
   @OnEvent(EditorDocumentModelWillSaveEvent)
   async onEditorDocumentModelWillSaveEvent(e: EditorDocumentModelWillSaveEvent) {
-    if (!this.isDocSyncEnabled(e.payload.uri)) {
+    if (!this.isDocSyncEnabled(e.payload.uri) || this.isDocIgnored(e.payload.uri)) {
       return;
     }
     await this.proxy.$fireModelWillSaveEvent({
       uri: e.payload.uri.toString(),
       reason: e.payload.reason,
+      dirty: e.payload.dirty,
     });
   }
 
   @OnEvent(EditorDocumentModelOptionChangedEvent)
   onEditorDocumentModelOptionChangedEvent(e: EditorDocumentModelOptionChangedEvent) {
-    if (!this.isDocSyncEnabled(e.payload.uri)) {
+    if (!this.isDocSyncEnabled(e.payload.uri) || this.isDocIgnored(e.payload.uri)) {
       return;
     }
     this.proxy.$fireModelOptionsChangedEvent({
       encoding: e.payload.encoding,
       uri: e.payload.uri.toString(),
       languageId: e.payload.languageId,
+      dirty: e.payload.dirty,
     });
   }
 
   @OnEvent(EditorDocumentModelCreationEvent)
   onEditorDocumentModelContentCreationEvent(e: EditorDocumentModelCreationEvent) {
-    if (!this.isDocSyncEnabled(e.payload.uri)) {
+    if (!this.isDocSyncEnabled(e.payload.uri) || this.isDocIgnored(e.payload.uri)) {
       return;
     }
     this.proxy.$fireModelOpenedEvent({
@@ -202,7 +209,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
 
   @OnEvent(EditorDocumentModelRemovalEvent)
   onEditorDocumentModelRemovedEvent(e: EditorDocumentModelRemovalEvent) {
-    if (!this.isDocSyncEnabled(e.payload)) {
+    if (!this.isDocSyncEnabled(e.payload) || this.isDocIgnored(e.payload)) {
       return;
     }
     this.proxy.$fireModelRemovedEvent({
@@ -212,7 +219,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
 
   @OnEvent(EditorDocumentModelSavedEvent)
   onEditorDocumentModelSavingEvent(e: EditorDocumentModelSavedEvent) {
-    if (!this.isDocSyncEnabled(e.payload)) {
+    if (!this.isDocSyncEnabled(e.payload) || this.isDocIgnored(e.payload)) {
       return;
     }
     this.proxy.$fireModelSavedEvent({
@@ -288,7 +295,7 @@ export class MainThreadExtensionDocumentData extends WithEventBus implements IMa
           return;
         }
         results.push({
-          type: 'code',
+          type: EditorOpenType.code,
           readonly: true,
         });
       }),

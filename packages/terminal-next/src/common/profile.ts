@@ -1,6 +1,4 @@
-import type vscode from 'vscode';
-
-import { IDisposable, Event, URI, OperatingSystem } from '@opensumi/ide-core-common';
+import { Event, IDisposable, OperatingSystem, URI } from '@opensumi/ide-core-common';
 
 import {
   ICreateContributedTerminalProfileOptions,
@@ -9,6 +7,8 @@ import {
   ITerminalProfileProvider,
   TerminalIcon,
 } from '..';
+
+import type vscode from 'vscode';
 
 export interface IResolveDefaultProfileOptions {
   os?: OperatingSystem;
@@ -21,6 +21,7 @@ export interface ITerminalProfileService {
   readonly profilesReady: Promise<void>;
   onTerminalProfileResolved: Event<string>;
   onDidChangeAvailableProfiles: Event<ITerminalProfile[]>;
+  onDidChangeDefaultShell: Event<string>;
   getDefaultProfileName(): string | undefined;
   getContributedDefaultProfile(shellLaunchConfig: IShellLaunchConfig): Promise<IExtensionTerminalProfile | undefined>;
   getContributedProfileProvider(extensionIdentifier: string, id: string): ITerminalProfileProvider | undefined;

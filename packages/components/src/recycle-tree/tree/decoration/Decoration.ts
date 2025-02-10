@@ -1,6 +1,6 @@
-import { IDisposable, Disposable, Emitter } from '@opensumi/ide-utils';
+import { Disposable, Emitter, IDisposable } from '@opensumi/ide-utils';
 
-import { ITreeNode, ICompositeTreeNode } from '../../types';
+import { ICompositeTreeNode, ITreeNode } from '../../types';
 import { TreeNode } from '../TreeNode';
 
 export enum TargetMatchMode {
@@ -173,6 +173,26 @@ export class Decoration {
         disposable.dispose();
       }
       this.onDidRemoveTargetEmitter.fire({ decoration: this, target });
+    }
+  }
+
+  /**
+   * 清理所有应用的装饰器
+   */
+  public clearAppliedTarget() {
+    const appliedTargets = Array.from(this._appliedTargets.keys());
+    for (const target of appliedTargets) {
+      this.removeTarget(target);
+    }
+  }
+
+  /**
+   * 清理所有应用的否定装饰器
+   */
+  public clearNegateTarget() {
+    const negatedTargets = Array.from(this._negatedTargets.keys());
+    for (const target of negatedTargets) {
+      this.unNegateTarget(target);
     }
   }
 

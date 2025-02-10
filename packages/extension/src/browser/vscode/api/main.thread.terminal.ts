@@ -1,32 +1,32 @@
-import type vscode from 'vscode';
-
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { ILogger, Disposable, PreferenceService, IDisposable } from '@opensumi/ide-core-browser';
+import { Disposable, IDisposable, ILogger, PreferenceService } from '@opensumi/ide-core-browser';
 import {
-  ITerminalApiService,
-  ITerminalGroupViewService,
-  ITerminalController,
-  ITerminalInfo,
-  ITerminalProcessExtHostProxy,
   IStartExtensionTerminalRequest,
+  ITerminalApiService,
+  ITerminalClient,
+  ITerminalController,
   ITerminalDimensions,
   ITerminalDimensionsDto,
   ITerminalExternalLinkProvider,
-  ITerminalClient,
+  ITerminalGroupViewService,
+  ITerminalInfo,
   ITerminalLink,
+  ITerminalProcessExtHostProxy,
   ITerminalProfileInternalService,
 } from '@opensumi/ide-terminal-next';
 import {
+  EnvironmentVariableServiceToken,
   IEnvironmentVariableService,
   SerializableEnvironmentVariableCollection,
-  EnvironmentVariableServiceToken,
+  deserializeEnvironmentVariableCollection,
 } from '@opensumi/ide-terminal-next/lib/common/environmentVariable';
-import { deserializeEnvironmentVariableCollection } from '@opensumi/ide-terminal-next/lib/common/environmentVariable';
 import { ITerminalProfileService } from '@opensumi/ide-terminal-next/lib/common/profile';
 
-import { IMainThreadTerminal, IExtHostTerminal, ExtHostAPIIdentifier } from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtHostTerminal, IMainThreadTerminal } from '../../../common/vscode';
 import { IActivationEventService } from '../../types';
+
+import type vscode from 'vscode';
 
 @Injectable({ multiple: true })
 export class MainThreadTerminal implements IMainThreadTerminal {
@@ -126,6 +126,11 @@ export class MainThreadTerminal implements IMainThreadTerminal {
         await this.activationEventService.fireEvent(`onTerminalProfile:${id}`);
       }),
     );
+    this.disposable.addDispose(
+      this.profileService.onDidChangeDefaultShell((shell: string) => {
+        this.proxy.$setShell(shell);
+      }),
+    );
   }
 
   private initData() {
@@ -188,7 +193,7 @@ export class MainThreadTerminal implements IMainThreadTerminal {
     const proxy = request.proxy;
     this._terminalProcessProxies.set(proxy.terminalId, proxy);
 
-    // Note that onReisze is not being listened to here as it needs to fire when max dimensions
+    // Note that onResize is not being listened to here as it needs to fire when max dimensions
     // change, excluding the dimension override
     const initialDimensions: ITerminalDimensionsDto | undefined =
       request.cols && request.rows

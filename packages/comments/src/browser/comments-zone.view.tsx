@@ -1,21 +1,28 @@
-import clx from 'classnames';
-import { observer } from 'mobx-react-lite';
+import cls from 'classnames';
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { INJECTOR_TOKEN, Injectable, Autowired } from '@opensumi/di';
-import { ConfigProvider, localize, AppConfig, useInjectable, Event, Emitter } from '@opensumi/ide-core-browser';
+import { Autowired, INJECTOR_TOKEN, Injectable } from '@opensumi/di';
+import {
+  AppConfig,
+  ConfigProvider,
+  Emitter,
+  Event,
+  localize,
+  useAutorun,
+  useInjectable,
+} from '@opensumi/ide-core-browser';
 import { InlineActionBar } from '@opensumi/ide-core-browser/lib/components/actions';
 import { MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IEditor } from '@opensumi/ide-editor';
-import { ResizeZoneWidget } from '@opensumi/ide-monaco-enhance';
+import { IOptions, ResizeZoneWidget } from '@opensumi/ide-monaco-enhance';
 
 import {
   ICommentReply,
-  ICommentsZoneWidget,
   ICommentThreadTitle,
   ICommentsFeatureRegistry,
   ICommentsThread,
+  ICommentsZoneWidget,
 } from '../common';
 
 import { CommentItem } from './comments-item.view';
@@ -28,8 +35,11 @@ export interface ICommentProps {
   widget: ICommentsZoneWidget;
 }
 
-const CommentsZone: React.FC<ICommentProps> = observer(({ thread, widget }) => {
-  const { comments, threadHeaderTitle, contextKeyService } = thread;
+const CommentsZone: React.FC<ICommentProps> = ({ thread, widget }) => {
+  const { contextKeyService } = thread;
+  const comments = useAutorun(thread.comments);
+  const threadHeaderTitle = useAutorun(thread.threadHeaderTitle);
+
   const injector = useInjectable(INJECTOR_TOKEN);
   const commentsZoneService: CommentsZoneService = injector.get(CommentsZoneService, [thread]);
   const commentsFeatureRegistry = useInjectable<ICommentsFeatureRegistry>(ICommentsFeatureRegistry);
@@ -72,7 +82,7 @@ const CommentsZone: React.FC<ICommentProps> = observer(({ thread, widget }) => {
   React.useEffect(() => {
     const disposer = widget.onFirstDisplay(() => {
       setTimeout(() => {
-        widget.coreEditor.monacoEditor.revealLine(thread.range.startLineNumber + 1);
+        widget.coreEditor.monacoEditor.revealLine(thread.range.endLineNumber + 1);
       }, 0);
     });
     return () => {
@@ -80,9 +90,32 @@ const CommentsZone: React.FC<ICommentProps> = observer(({ thread, widget }) => {
     };
   }, []);
 
+  const handleMouseOver = React.useCallback(() => {
+    commentsZoneService.setCurrentCommentThread(commentsZoneService.thread);
+  }, []);
+
+  const handleMouseOut = React.useCallback(() => {
+    commentsZoneService.setCurrentCommentThread(undefined);
+  }, []);
+
+  const handleFocus = React.useCallback(() => {
+    commentsZoneService.setCurrentCommentThread(commentsZoneService.thread);
+  }, []);
+
+  const handleBlur = React.useCallback(() => {
+    commentsZoneService.setCurrentCommentThread(undefined);
+  }, []);
+
   return (
-    <div className={clx(thread.options.threadClassName, styles.comment_container)}>
-      <div className={clx(thread.options.threadHeadClassName, styles.head)}>
+    <div
+      tabIndex={-1}
+      onMouseOver={handleMouseOver}
+      onMouseOut={handleMouseOut}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      className={cls(thread.options.threadClassName, styles.comment_container)}
+    >
+      <div className={cls(thread.options.threadHeadClassName, styles.head)}>
         <div className={styles.review_title}>{threadHeaderTitle}</div>
         <InlineActionBar<ICommentThreadTitle>
           menus={commentThreadTitle}
@@ -131,18 +164,18 @@ const CommentsZone: React.FC<ICommentProps> = observer(({ thread, widget }) => {
       </div>
     </div>
   );
-});
+};
 
 @Injectable({ multiple: true })
 export class CommentsZoneWidget extends ResizeZoneWidget implements ICommentsZoneWidget {
-  protected _fillContainer(container: HTMLElement): void {}
+  protected _fillContainer(): void {}
   @Autowired(AppConfig)
   appConfig: AppConfig;
 
   @Autowired(ICommentsFeatureRegistry)
   private readonly commentsFeatureRegistry: ICommentsFeatureRegistry;
 
-  private _wrapper: HTMLDivElement;
+  private wrapperRoot: ReactDOM.Root;
 
   private _editor: IEditor;
 
@@ -152,20 +185,31 @@ export class CommentsZoneWidget extends ResizeZoneWidget implements ICommentsZon
   private _onHide = new Emitter<void>();
   public onHide: Event<void> = this._onHide.event;
 
-  constructor(editor: IEditor, thread: ICommentsThread) {
-    super(editor.monacoEditor, thread.range);
+  constructor(editor: IEditor, thread: ICommentsThread, options?: IOptions) {
+    super(editor.monacoEditor, thread.range, {
+      ...options,
+      showInHiddenAreas: true,
+    });
     this._editor = editor;
-    this._wrapper = document.createElement('div');
-    this._isShow = !thread.isCollapsed;
-    this._container.appendChild(this._wrapper);
-    this.observeContainer(this._wrapper);
+
+    const _wrapper = document.createElement('div');
+    this._isShow = !thread.isCollapsed.get();
+    this._container.appendChild(_wrapper);
+    this.observeContainer(_wrapper);
     const customRender = this.commentsFeatureRegistry.getZoneWidgetRender();
-    ReactDOM.render(
+
+    this.wrapperRoot = ReactDOM.createRoot(_wrapper);
+    this.wrapperRoot.render(
       <ConfigProvider value={this.appConfig}>
         {customRender ? customRender(thread, this) : <CommentsZone thread={thread} widget={this} />}
       </ConfigProvider>,
-      this._wrapper,
     );
+
+    this.addDispose({
+      dispose: () => {
+        this.wrapperRoot.unmount();
+      },
+    });
   }
 
   get coreEditor() {

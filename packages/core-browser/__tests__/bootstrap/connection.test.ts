@@ -1,11 +1,12 @@
-import { WebSocket, Server } from 'mock-socket';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { ReconnectingWebSocketConnection } from '@opensumi/ide-connection/lib/common/connection/drivers/reconnecting-websocket';
+import { BrowserConnectionErrorEvent, IEventBus } from '@opensumi/ide-core-common';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+import { Server, WebSocket } from '@opensumi/mock-socket';
 
-import { IEventBus, BrowserConnectionErrorEvent } from '@opensumi/ide-core-common';
-
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { ClientAppStateService } from '../../src/application';
-import { createClientConnection2 } from '../../src/bootstrap/connection';
+import { createConnectionService } from '../../src/bootstrap/connection';
 (global as any).WebSocket = WebSocket;
 
 describe('packages/core-browser/src/bootstrap/connection.test.ts', () => {
@@ -30,7 +31,8 @@ describe('packages/core-browser/src/bootstrap/connection.test.ts', () => {
       done();
     });
     stateService = injector.get(ClientAppStateService);
-    createClientConnection2(injector, [], fakeWSURL, () => {});
+    const channelHandler = new WSChannelHandler(ReconnectingWebSocketConnection.forURL(fakeWSURL), 'test-client-id');
+    createConnectionService(injector, [], channelHandler);
     stateService.state = 'core_module_initialized';
     new Promise<void>((resolve) => {
       setTimeout(() => {

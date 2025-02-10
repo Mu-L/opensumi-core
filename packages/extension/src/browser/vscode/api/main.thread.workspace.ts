@@ -1,20 +1,16 @@
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { URI, ILogger, WithEventBus, OnEvent, CancellationToken } from '@opensumi/ide-core-browser';
+import { CancellationToken, IDisposable, ILogger, OnEvent, URI, WithEventBus } from '@opensumi/ide-core-browser';
 import { WorkbenchEditorService } from '@opensumi/ide-editor';
 import { IExtensionStorageService } from '@opensumi/ide-extension-storage';
 import { FileSearchServicePath, IFileSearchService } from '@opensumi/ide-file-search/lib/common';
 import { FileStat } from '@opensumi/ide-file-service';
+import { IBulkEditResult, ResourceEdit } from '@opensumi/ide-monaco/lib/browser/monaco-api/index';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
-import { IWorkspaceEditService, WorkspaceEditDidRenameFileEvent } from '@opensumi/ide-workspace-edit';
+import { IBulkEditServiceShape, WorkspaceEditDidRenameFileEvent } from '@opensumi/ide-workspace-edit';
 
-import {
-  ExtHostAPIIdentifier,
-  IMainThreadWorkspace,
-  IExtHostStorage,
-  IExtHostWorkspace,
-  reviveWorkspaceEditDto,
-} from '../../../common/vscode';
+import { ExtHostAPIIdentifier, IExtHostStorage, IExtHostWorkspace, IMainThreadWorkspace } from '../../../common/vscode';
+
 import type * as model from '../../../common/vscode/model.api';
 
 @Injectable({ multiple: true })
@@ -29,20 +25,20 @@ export class MainThreadWorkspace extends WithEventBus implements IMainThreadWork
   editorService: WorkbenchEditorService;
 
   @Autowired(FileSearchServicePath)
-  private readonly fileSearchService;
+  private readonly fileSearchService: IFileSearchService;
 
   @Autowired(IExtensionStorageService)
   extensionStorageService: IExtensionStorageService;
 
-  @Autowired(IWorkspaceEditService)
-  workspaceEditService: IWorkspaceEditService;
+  @Autowired(IBulkEditServiceShape)
+  protected readonly bulkEditService: IBulkEditServiceShape;
 
   storageProxy: IExtHostStorage;
 
   @Autowired(ILogger)
   logger: ILogger;
 
-  private workspaceChangeEvent;
+  private workspaceChangeEvent: IDisposable;
 
   constructor(@Optional(Symbol()) private rpcProtocol: IRPCProtocol) {
     super();
@@ -72,8 +68,7 @@ export class MainThreadWorkspace extends WithEventBus implements IMainThreadWork
       limit: maxResult,
       includePatterns: [includePattern],
     };
-    const result = await this.fileSearchService.find('', fileSearchOptions);
-
+    const result = await this.fileSearchService.find('', fileSearchOptions, token);
     return result;
   }
 
@@ -117,13 +112,45 @@ export class MainThreadWorkspace extends WithEventBus implements IMainThreadWork
     );
   }
 
-  async $tryApplyWorkspaceEdit(dto: model.WorkspaceEditDto): Promise<boolean> {
-    const workspaceEdit = reviveWorkspaceEditDto(dto);
+  async $tryApplyWorkspaceEdit(
+    dto: model.WorkspaceEditDto,
+    metadata?: model.WorkspaceEditMetadataDto,
+  ): Promise<boolean> {
     try {
-      await this.workspaceEditService.apply(workspaceEdit);
-      return true;
+      const edits = ResourceEdit.convert(dto);
+      const { success } = (await this.bulkEditService.apply(edits, {
+        respectAutoSaveConfig: metadata?.isRefactoring,
+      })) as IBulkEditResult & { success: boolean };
+      return success;
     } catch (e) {
       return false;
+    }
+  }
+
+  async $save(uri: URI): Promise<URI | undefined> {
+    if (!uri) {
+      return undefined;
+    }
+
+    try {
+      const saveUri = URI.file(uri.path.toString());
+      return await this.editorService.save(saveUri);
+    } catch (error) {
+      this.logger.error(`Save Failed: ${error.message}`);
+      return undefined;
+    }
+  }
+
+  async $saveAs(uri: URI): Promise<URI | undefined> {
+    if (!uri) {
+      return undefined;
+    }
+
+    try {
+      return await this.editorService.saveAs(uri);
+    } catch (error) {
+      this.logger.error(`SaveAs Failed: ${error.message}`);
+      return undefined;
     }
   }
 

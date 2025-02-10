@@ -1,27 +1,25 @@
-import { Provider, Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector, Provider } from '@opensumi/di';
 import {
-  BrowserModule,
-  Domain,
   AppConfig,
-  isOSX,
+  BrowserModule,
   ClientAppContribution,
-  IElectronMainMenuService,
-  localize,
-  SlotLocation,
-  IElectronNativeDialogService,
   CommandContribution,
   CommandRegistry,
+  Domain,
+  IClipboardService,
+  IElectronMainMenuService,
+  IElectronNativeDialogService,
+  IEventBus,
+  ILogger,
   KeybindingContribution,
   KeybindingRegistry,
-  isWindows,
-  electronEnv,
-  replaceLocalizePlaceholder,
-  URI,
-  ILogger,
-  formatLocalize,
-  IEventBus,
   Schemes,
-  IClipboardService,
+  SlotLocation,
+  URI,
+  electronEnv,
+  formatLocalize,
+  isOSX,
+  isWindows,
 } from '@opensumi/ide-core-browser';
 import { ComponentContribution, ComponentRegistry } from '@opensumi/ide-core-browser/lib/layout';
 import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
@@ -29,8 +27,8 @@ import { IElectronMenuBarService } from '@opensumi/ide-core-browser/lib/menu/nex
 import { IElectronMainLifeCycleService, IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
 import { IResourceOpenOptions } from '@opensumi/ide-editor';
 import {
-  EditorGroupFileDropEvent,
   DragOverPosition,
+  EditorGroupFileDropEvent,
   getSplitActionFromDragDrop,
 } from '@opensumi/ide-editor/lib/browser';
 import { IMessageService } from '@opensumi/ide-overlay/lib/common';
@@ -39,9 +37,12 @@ import { IElectronHeaderService } from '../common/header';
 
 import { ElectronClipboardService } from './clipboard';
 import { ElectronNativeDialogService } from './dialog';
+import { ElectronPreferenceContribution } from './electron-preference.contribution';
 import { ElectronHeaderService } from './header/header.service';
 import { ElectronHeaderBar } from './header/header.view';
 import { WelcomeContribution } from './welcome/contribution';
+
+import '../common/i18n/setup';
 
 @Injectable()
 export class ElectronBasicModule extends BrowserModule {
@@ -55,6 +56,7 @@ export class ElectronBasicModule extends BrowserModule {
       useClass: ElectronHeaderService,
     },
     ElectronBasicContribution,
+    ElectronPreferenceContribution,
     WelcomeContribution,
   ];
 }
@@ -94,7 +96,6 @@ const nativeRoles = [
     name: 'toggleDevTools',
     key: 'alt+ctrlcmd+i',
     label: '%window.toggleDevTools%',
-    alias: 'Toggle Developer Tools',
   },
 ];
 
@@ -159,7 +160,7 @@ export class ElectronBasicContribution
     menuRegistry.registerMenuItem(MenuId.MenubarAppMenu, {
       command: {
         id: 'electron.about',
-        label: localize('common.about'),
+        label: '%common.about%',
       },
       group: '0_about',
       nativeRole: 'about',
@@ -168,7 +169,7 @@ export class ElectronBasicContribution
     menuRegistry.registerMenuItem(MenuId.MenubarHelpMenu, {
       command: {
         id: 'electron.toggleDevTools',
-        label: localize('window.toggleDevTools'),
+        label: '%window.toggleDevTools%',
       },
       nativeRole: 'toggledevtools',
     });
@@ -176,7 +177,7 @@ export class ElectronBasicContribution
     menuRegistry.registerMenuItem(MenuId.MenubarHelpMenu, {
       command: {
         id: 'electron.reload',
-        label: localize('window.reload'),
+        label: '%window.reload%',
       },
     });
 
@@ -197,8 +198,7 @@ export class ElectronBasicContribution
       commands.registerCommand(
         {
           id: 'electron.' + role.name,
-          label: replaceLocalizePlaceholder(role.label),
-          alias: role.alias,
+          label: role.label,
         },
         {
           execute: () => {
@@ -211,8 +211,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.zoomIn',
-        label: localize('view.zoomIn'),
-        alias: 'View: Zoom In',
+        label: '%view.zoomIn%',
       },
       {
         execute: () => {
@@ -226,8 +225,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.zoomOut',
-        label: localize('view.zoomOut'),
-        alias: 'View: Zoom Out',
+        label: '%view.zoomOut%',
       },
       {
         execute: () => {
@@ -241,8 +239,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.zoomReset',
-        label: localize('view.zoomReset'),
-        alias: 'View: Zoom Reset',
+        label: '%view.zoomReset%',
       },
       {
         execute: () => {
@@ -256,8 +253,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.reload',
-        label: localize('window.reload'),
-        alias: 'Reload Window',
+        label: '%window.reload%',
       },
       {
         execute: () => {
@@ -269,7 +265,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.revealInFinder',
-        label: localize('explorer.electron.revealInFinder'),
+        label: '%explorer.electron.revealInFinder%',
       },
       {
         execute: (uri: URI) => {
@@ -283,7 +279,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.revealInFinderTab',
-        label: localize('explorer.electron.revealInFinder'),
+        label: '%explorer.electron.revealInFinder%',
       },
       {
         execute: ({ uri }: { uri?: URI } = {}) => {
@@ -297,7 +293,7 @@ export class ElectronBasicContribution
     commands.registerCommand(
       {
         id: 'electron.openInSystemTerminal',
-        label: localize('explorer.electron.openInSystemTerminal'),
+        label: '%explorer.electron.openInSystemTerminal%',
       },
       {
         execute: (uri: URI) => {

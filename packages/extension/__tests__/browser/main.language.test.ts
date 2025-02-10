@@ -1,9 +1,6 @@
-import type vscode from 'vscode';
-
-import { RPCProtocol } from '@opensumi/ide-connection';
-import { Emitter, CancellationToken, MonacoService, DisposableCollection } from '@opensumi/ide-core-browser';
+import { CancellationToken, DisposableCollection, MonacoService } from '@opensumi/ide-core-browser';
 import { useMockStorage } from '@opensumi/ide-core-browser/__mocks__/storage';
-import { URI, Uri, Position } from '@opensumi/ide-core-common';
+import { URI, Uri } from '@opensumi/ide-core-common';
 import {
   EvaluatableExpressionServiceImpl,
   IEvaluatableExpressionService,
@@ -11,24 +8,26 @@ import {
 import { addEditorProviders } from '@opensumi/ide-dev-tool/src/injector-editor';
 import { IDocPersistentCacheProvider } from '@opensumi/ide-editor';
 import {
-  EditorDocumentModelServiceImpl,
   EditorDocumentModelContentRegistryImpl,
+  EditorDocumentModelServiceImpl,
 } from '@opensumi/ide-editor/lib/browser/doc-model/main';
 import { CallHierarchyService, TypeHierarchyService } from '@opensumi/ide-editor/lib/browser/monaco-contrib';
 import {
-  IEditorDocumentModelService,
-  IEditorDocumentModelContentRegistry,
   EmptyDocCacheImpl,
+  IEditorDocumentModelContentRegistry,
+  IEditorDocumentModelService,
 } from '@opensumi/ide-editor/src/browser';
+import * as monaco from '@opensumi/ide-monaco';
 import { ICallHierarchyService, ITypeHierarchyService } from '@opensumi/ide-monaco/lib/browser/contrib';
+import { monaco as monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 import { languageFeaturesService } from '@opensumi/ide-monaco/lib/browser/monaco-api/languages';
 import { ITextModel } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 import { createModel } from '@opensumi/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneEditor';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
 import { mockService } from '../../../../tools/dev-tool/src/mock-injector';
 import { MockedMonacoService } from '../../../monaco/__mocks__/monaco.service.mock';
+import { createMockPairRPCProtocol } from '../../__mocks__/initRPCProtocol';
 import { MainThreadCommands } from '../../src/browser/vscode/api/main.thread.commands';
 import { MainThreadLanguages } from '../../src/browser/vscode/api/main.thread.language';
 import { ExtHostAPIIdentifier, IExtensionDescription, MainThreadAPIIdentifier } from '../../src/common/vscode';
@@ -39,20 +38,9 @@ import { ExtHostCommands } from '../../src/hosted/api/vscode/ext.host.command';
 import { ExtHostLanguages } from '../../src/hosted/api/vscode/ext.host.language';
 import { createToken } from '../../src/hosted/api/vscode/language/util';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
+import type vscode from 'vscode';
 
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 const defaultSelector = { scheme: 'far', language: 'a' };
 const disposables: DisposableCollection = new DisposableCollection();
@@ -109,6 +97,7 @@ describe('ExtHostLanguageFeatures', () => {
       undefined,
       monaco.Uri.parse('far://testing/file.a'),
     );
+    model.setLanguage('a');
     extHostDocuments.$fireModelOpenedEvent({
       uri: model.uri.toString(),
       dirty: false,
@@ -133,7 +122,7 @@ describe('ExtHostLanguageFeatures', () => {
       injector.get(MainThreadLanguages, [rpcProtocolMain]),
     );
 
-    monaco.languages.register({
+    monacoApi.languages.register({
       id: 'a',
       extensions: ['.a'],
     });
@@ -230,7 +219,7 @@ describe('ExtHostLanguageFeatures', () => {
         defaultSelector,
         new (class implements vscode.DefinitionProvider {
           provideDefinition(): any {
-            return [new types.Location(model.uri, new types.Range(1, 2, 3, 4))];
+            return [new types.Location(model.uri as Uri, new types.Range(1, 2, 3, 4))];
           }
         })(),
         createToken(),
@@ -258,7 +247,7 @@ describe('ExtHostLanguageFeatures', () => {
         defaultSelector,
         new (class implements vscode.ImplementationProvider {
           provideImplementation(): any {
-            return [new types.Location(model.uri, new types.Range(1, 2, 3, 4))];
+            return [new types.Location(model.uri as Uri, new types.Range(1, 2, 3, 4))];
           }
         })(),
         createToken(),
@@ -285,7 +274,7 @@ describe('ExtHostLanguageFeatures', () => {
         defaultSelector,
         new (class implements vscode.TypeDefinitionProvider {
           provideTypeDefinition(): any {
-            return [new types.Location(model.uri, new types.Range(1, 2, 3, 4))];
+            return [new types.Location(model.uri as Uri, new types.Range(1, 2, 3, 4))];
           }
         })(),
         createToken(),
@@ -384,7 +373,7 @@ describe('ExtHostLanguageFeatures', () => {
         defaultSelector,
         new (class implements vscode.ReferenceProvider {
           provideReferences(): any {
-            return [new types.Location(model.uri, new types.Position(0, 0))];
+            return [new types.Location(model.uri as Uri, new types.Position(0, 0))];
           }
         })(),
         createToken(),
@@ -514,7 +503,7 @@ describe('ExtHostLanguageFeatures', () => {
         new (class implements vscode.RenameProvider {
           provideRenameEdits(): any {
             const edit = new types.WorkspaceEdit();
-            edit.replace(model.uri, new types.Range(0, 0, 0, 0), 'testing');
+            edit.replace(model.uri as Uri, new types.Range(0, 0, 0, 0), 'testing');
             return edit;
           }
         })(),
@@ -905,7 +894,7 @@ An error case:
 
   it('registerDocumentSemanticTokensProvider should be work', (done) => {
     const semanticLegend = new types.SemanticTokensLegend(tokenTypesLegend, tokenModifiersLegend);
-    monaco.languages.register({
+    monacoApi.languages.register({
       id: 'semanticLanguage',
       aliases: ['Semantic Language'],
       extensions: ['.semanticLanguage'],
@@ -923,7 +912,7 @@ An error case:
     );
 
     setTimeout(() => {
-      expect(mockMainThreadFunc).toBeCalled();
+      expect(mockMainThreadFunc).toHaveBeenCalled();
       const uri = monaco.Uri.parse('file:///path/to/simple.semanticLanguage');
       const textModel = createModel('', 'semanticLanguage', uri);
       expect(languageFeaturesService.documentSemanticTokensProvider.ordered(textModel as any).length).toBe(1);
@@ -955,7 +944,7 @@ An error case:
     const mockProvideFunc = jest.spyOn(hostedProvider, 'provideDocumentSemanticTokens');
     const tokens = await provider.provideDocumentSemanticTokens(textModel as any, null, tokenSource.token);
 
-    expect(mockProvideFunc).toBeCalled();
+    expect(mockProvideFunc).toHaveBeenCalled();
     expect(tokens?.resultId).toBe('1');
     expect((tokens as types.SemanticTokens)?.data instanceof Uint32Array).toBeTruthy();
   });
@@ -1033,10 +1022,10 @@ An error case:
 
       await 0;
 
-      expect(mockMainThreadFunc).toBeCalled();
+      expect(mockMainThreadFunc).toHaveBeenCalled();
       const prepareCallHierarchyItems = await callHierarchyService.prepareCallHierarchyProvider(
-        model.uri,
-        new Position(1, 1),
+        model.uri as Uri,
+        new monaco.Position(1, 1),
       );
       expect(prepareCallHierarchyItems.length).toBe(1);
       expect(prepareCallHierarchyItems[0].kind).toBe(types.SymbolKind.Object);
@@ -1140,11 +1129,11 @@ An error case:
 
       await 0;
 
-      expect(mockMainThreadFunc).toBeCalled();
+      expect(mockMainThreadFunc).toHaveBeenCalled();
 
       const prepareTypeHierarchyItems = await typeHierarchyService.prepareTypeHierarchyProvider(
-        model.uri,
-        new Position(1, 1),
+        model.uri as Uri,
+        new monaco.Position(1, 1),
       );
       expect(Array.isArray(prepareTypeHierarchyItems)).toBe(true);
       expect(prepareTypeHierarchyItems.length).toBe(1);
@@ -1161,7 +1150,8 @@ An error case:
   });
   // #endregion TypeHierarchy
 
-  const textModel = createModel('test.a = "test"', 'test');
+  const textModel = createModel('test.a = "test"', undefined, monaco.Uri.parse('far://testing/file.test'));
+  textModel.setLanguage('test');
   const evaluatableExpressionService = injector.get<IEvaluatableExpressionService>(IEvaluatableExpressionService);
   const expressionProvider = {
     provideEvaluatableExpression(document, position) {
@@ -1172,7 +1162,7 @@ An error case:
 
   // #region EvaluatableExpressionProvider
   it('registerEvaluatableExpressionProvider should be work', (done) => {
-    monaco.languages.register({
+    monacoApi.languages.register({
       id: 'test',
       extensions: ['.test'],
     });
@@ -1188,7 +1178,7 @@ An error case:
     extHost.registerEvaluatableExpressionProvider(extension as any, 'test', expressionProvider);
 
     setTimeout(() => {
-      expect(mockedMainthreadFunc).toBeCalled();
+      expect(mockedMainthreadFunc).toHaveBeenCalled();
       expect(evaluatableExpressionService.hasEvaluatableExpressProvider(textModel)).toBeTruthy();
       done();
     }, 0);
@@ -1214,7 +1204,7 @@ An error case:
     const tokenSource = new monaco.CancellationTokenSource();
     const expression = await providers[0].provideEvaluatableExpression(textModel, pos, tokenSource.token);
 
-    expect(mockProvideFunc).toBeCalled();
+    expect(mockProvideFunc).toHaveBeenCalled();
     expect(expression?.range).toEqual({
       startLineNumber: 1,
       startColumn: 7,
@@ -1245,8 +1235,8 @@ An error case:
 
     await 0;
 
-    expect(mockMainThreadFunc).toBeCalled();
-    expect(mockMainThreadFunc).toBeCalledWith(expect.anything(), [{ $serialized: true, language: 'plaintext' }]);
+    expect(mockMainThreadFunc).toHaveBeenCalled();
+    expect(mockMainThreadFunc).toHaveBeenCalledWith(expect.anything(), [{ $serialized: true, language: 'plaintext' }]);
   });
   // #endregion registerLinkedEditingRangeProvider
   // #region registerInlayHintsProvider
@@ -1262,15 +1252,21 @@ An error case:
       }
     }
     const mockMainThreadFunc = jest.spyOn(mainThread, '$registerInlayHintsProvider');
-    extHost.registerInlayHintsProvider(mockService({}), 'plaintext', new TestInlayHintsProvider());
+    extHost.registerInlayHintsProvider(
+      mockService({
+        displayName: 'test',
+      }),
+      'plaintext',
+      new TestInlayHintsProvider(),
+    );
     await 0;
-    expect(mockMainThreadFunc).toBeCalled();
-    expect(mockMainThreadFunc).toBeCalledWith(
+    expect(mockMainThreadFunc).toHaveBeenCalled();
+    expect(mockMainThreadFunc).toHaveBeenCalledWith(
       expect.anything(),
       [{ $serialized: true, language: 'plaintext' }],
       false,
       undefined,
-      undefined,
+      'test',
     );
   });
   // #endregion registerInlayHintsProvider

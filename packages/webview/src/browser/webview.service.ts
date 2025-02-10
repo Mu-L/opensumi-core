@@ -1,27 +1,28 @@
-import { Injectable, Injector, Autowired, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
+  AppConfig,
+  Disposable,
+  Emitter,
+  IEventBus,
+  ILogger,
+  IStorage,
+  MaybeNull,
+  STORAGE_SCHEMA,
+  StorageProvider,
+  URI,
+  arrays,
   getDebugLogger,
   localize,
-  URI,
-  IEventBus,
-  Disposable,
-  MaybeNull,
-  ILogger,
-  arrays,
-  Emitter,
-  StorageProvider,
-  IStorage,
-  STORAGE_SCHEMA,
-  AppConfig,
 } from '@opensumi/ide-core-browser';
-import { IEditorGroup, WorkbenchEditorService, ResourceNeedUpdateEvent, IResource } from '@opensumi/ide-editor';
+import { throwNonElectronError } from '@opensumi/ide-core-common/lib/error';
+import { IEditorGroup, IResource, ResourceNeedUpdateEvent, WorkbenchEditorService } from '@opensumi/ide-editor';
 import {
   EditorComponentRegistry,
   EditorComponentRenderMode,
-  EditorPreferences,
   EditorGroupChangeEvent,
+  EditorOpenType,
+  EditorPreferences,
 } from '@opensumi/ide-editor/lib/browser';
-import { LIGHT, DARK, HIGH_CONTRAST_DARK, HIGH_CONTRAST_LIGHT, ITheme } from '@opensumi/ide-theme';
 import { getColorRegistry } from '@opensumi/ide-theme/lib/common/color-registry';
 
 import { EditorWebviewComponentView } from './editor-webview';
@@ -29,20 +30,22 @@ import { ElectronWebviewWebviewPanel } from './electron-webview-webview';
 import { IFrameWebviewPanel } from './iframe-webview';
 import { ElectronPlainWebview, IframePlainWebview } from './plain-webview';
 import {
-  IWebviewService,
-  IPlainWebviewConstructionOptions,
+  EDITOR_WEBVIEW_SCHEME,
+  IEditorWebviewComponent,
+  IEditorWebviewMetaData,
   IPlainWebview,
+  IPlainWebviewComponentHandle,
+  IPlainWebviewConstructionOptions,
+  IPlainWebviewWindow,
   IWebview,
   IWebviewContentOptions,
-  IWebviewThemeData,
-  IEditorWebviewComponent,
-  EDITOR_WEBVIEW_SCHEME,
-  IEditorWebviewMetaData,
-  IPlainWebviewComponentHandle,
-  IPlainWebviewWindow,
   IWebviewReviver,
+  IWebviewService,
+  IWebviewThemeData,
 } from './types';
 import { ElectronPlainWebviewWindow } from './webview-window';
+
+import type { ITheme } from '@opensumi/ide-theme';
 
 const { addElement } = arrays;
 
@@ -127,7 +130,10 @@ export class WebviewServiceImpl implements IWebviewService {
     } else {
       if (options.preferredImpl && options.preferredImpl === 'webview') {
         getDebugLogger().warn(
-          localize('webview.webviewTagUnavailable', '无法在非Electron环境使用Webview标签。回退至使用iframe。'),
+          localize(
+            'webview.webviewTagUnavailable',
+            'Webview is unsupported on non-electron env, please use iframe instead.',
+          ),
         );
       }
       return new IframePlainWebview();
@@ -155,7 +161,8 @@ export class WebviewServiceImpl implements IWebviewService {
   private async storeWebviewResource(id: string) {
     return this.storage.then((storage) => {
       if (this.editorWebviewComponents.has(id)) {
-        const res = { ...this.editorWebviewComponents.get(id)!.resource };
+        const editorWebview = this.editorWebviewComponents.get(id)!;
+        const res = { v: 2, resource: editorWebview.resource, metadata: editorWebview.metadata };
         storage.set(id, JSON.stringify(res));
       } else {
         storage.delete(id);
@@ -165,16 +172,31 @@ export class WebviewServiceImpl implements IWebviewService {
 
   public async tryRestoredWebviewComponent(id: string): Promise<void> {
     const storage = await this.storage;
-    const resource: IResource<IEditorWebviewMetaData> | null = storage.get(id) ? JSON.parse(storage.get(id)!) : null;
+    const res = storage.get(id) ? JSON.parse(storage.get(id)!) : null;
+    if (!res) {
+      return;
+    }
+    let resource: IResource<IEditorWebviewMetaData> | null;
+    let metadata: Record<string, any> | undefined;
+    if (res?.v === 2) {
+      resource = res.resource;
+      metadata = res.metadata;
+    } else {
+      resource = res;
+    }
     if (resource) {
-      const component = this.createEditorWebviewComponent(resource.metadata?.options, resource.metadata?.id);
+      const component = this.createEditorWebviewComponent(resource.metadata?.options, resource.metadata?.id, metadata);
       component.title = resource.name;
       component.supportsRevive = !!resource.supportsRevive;
       this.tryReviveWebviewComponent(id);
     }
   }
 
-  createEditorWebviewComponent(options?: IWebviewContentOptions, id?: string): IEditorWebviewComponent<IWebview> {
+  createEditorWebviewComponent(
+    options?: IWebviewContentOptions,
+    id?: string,
+    metadata?: Record<string, any>,
+  ): IEditorWebviewComponent<IWebview> {
     if (!id) {
       id = (this.editorWebviewIdCount++).toString();
     }
@@ -184,6 +206,7 @@ export class WebviewServiceImpl implements IWebviewService {
     const component = this.injector.get(EditorWebviewComponent, [
       id,
       () => this.createWebview(options),
+      metadata,
     ]) as EditorWebviewComponent<IWebview>;
     this.editorWebviewComponents.set(id, component);
     component.addDispose({
@@ -220,7 +243,7 @@ export class WebviewServiceImpl implements IWebviewService {
 
   getWebviewThemeData(theme: ITheme): IWebviewThemeData {
     const editorFontFamily = this.editorPreferences['editor.fontFamily'];
-    const editorFontWeight = this.editorPreferences['editor.fontFamily'];
+    const editorFontWeight = this.editorPreferences['editor.fontWeight'];
     const editorFontSize = this.editorPreferences['editor.fontSize'];
 
     const exportedColors = getColorRegistry()
@@ -235,7 +258,7 @@ export class WebviewServiceImpl implements IWebviewService {
 
     const styles = {
       'vscode-font-family':
-        '-apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", ans-serif',
+        '-apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif',
       'vscode-font-weight': 'normal',
       'vscode-font-size': '13px',
       'vscode-editor-font-family': editorFontFamily,
@@ -280,7 +303,7 @@ export class WebviewServiceImpl implements IWebviewService {
     if (this.appConfig.isElectronRenderer) {
       return this.injector.get(ElectronPlainWebviewWindow, [options, env]);
     }
-    throw new Error('not supported!');
+    throwNonElectronError('WebviewServiceImpl.createWebviewWindow');
   }
 }
 
@@ -414,7 +437,11 @@ export class EditorWebviewComponent<T extends IWebview | IPlainWebview>
     return EDITOR_WEBVIEW_SCHEME + '_' + this.id;
   }
 
-  constructor(public readonly id: string, public webviewFactory: () => T) {
+  constructor(
+    public readonly id: string,
+    public webviewFactory: () => T,
+    public readonly metadata?: Record<string, any>,
+  ) {
     super();
     const componentId = EDITOR_WEBVIEW_SCHEME + '_' + this.id;
     this.addDispose(
@@ -423,6 +450,7 @@ export class EditorWebviewComponent<T extends IWebview | IPlainWebview>
         uid: componentId,
         component: EditorWebviewComponentView,
         renderMode: EditorComponentRenderMode.ONE_PER_WORKBENCH,
+        metadata,
       }),
     );
     this.addDispose(
@@ -431,7 +459,7 @@ export class EditorWebviewComponent<T extends IWebview | IPlainWebview>
         (resource, results) => {
           if (resource.uri.path.toString() === this.id) {
             results.push({
-              type: 'component',
+              type: EditorOpenType.component,
               componentId,
             });
           }

@@ -1,30 +1,29 @@
-import type vscode from 'vscode';
 import { SymbolInformation } from 'vscode-languageserver-types';
 
 import {
-  isString,
-  Uri as URI,
-  IRange,
-  IDisposable,
-  UriComponents,
-  SymbolTag,
   CancellationToken,
   Event,
+  IDisposable,
   IMarkdownString,
+  IRange,
+  SymbolTag,
+  Uri as URI,
+  UriComponents,
+  isString,
 } from '@opensumi/ide-core-common';
 import { ISingleEditOperation } from '@opensumi/ide-editor';
+
+import { IndentAction, SymbolKind } from './ext-types';
+
+import type { editor, languages } from '@opensumi/ide-monaco';
 // eslint-disable-next-line import/no-restricted-paths
 import type { CallHierarchyItem } from '@opensumi/ide-monaco/lib/browser/contrib/callHierarchy';
 // eslint-disable-next-line import/no-restricted-paths
 import type { TypeHierarchyItem } from '@opensumi/ide-monaco/lib/browser/contrib/typeHierarchy';
-import { LanguageFeatureRegistry } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languageFeatureRegistry';
 import type { CompletionItemLabel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
-import type { languages, editor } from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
-
 // 内置的api类型声明
-
-import { IndentAction, SymbolKind } from './ext-types';
-export { IMarkdownString, SymbolTag, CallHierarchyItem, TypeHierarchyItem };
+import type vscode from 'vscode';
+export { CallHierarchyItem, IMarkdownString, SymbolTag, TypeHierarchyItem };
 
 export interface IRawColorInfo {
   color: [number, number, number, number];
@@ -60,6 +59,10 @@ export interface CustomCodeAction {
   command?: VSCommand;
   edit?: IWorkspaceEditDto;
   isPreferred?: boolean;
+}
+
+export interface WorkspaceEditMetadataDto {
+  isRefactoring?: boolean;
 }
 
 /**
@@ -158,12 +161,19 @@ export interface SerializedOnEnterRule {
 
 export type CharacterPair = [string, string];
 
+export interface SerializedAutoClosingPair {
+  open: string;
+  close: string;
+  notIn?: string[];
+}
+
 export interface SerializedLanguageConfiguration {
   comments?: CommentRule;
   brackets?: CharacterPair[];
   wordPattern?: SerializedRegExp;
   indentationRules?: SerializedIndentationRule;
   onEnterRules?: SerializedOnEnterRule[];
+  autoClosingPairs?: SerializedAutoClosingPair[];
 }
 
 /**
@@ -369,6 +379,7 @@ export class IdObject {
 }
 
 export enum CompletionItemInsertTextRule {
+  None = 0,
   /**
    * Adjust whitespace/indentation of multiline insert texts to
    * match the current line indentation.
@@ -817,5 +828,3 @@ export interface FoldingRangeProvider {
     token: CancellationToken,
   ): vscode.ProviderResult<FoldingRange[]>;
 }
-
-export const FoldingRangeProviderRegistry = new LanguageFeatureRegistry<FoldingRangeProvider>();

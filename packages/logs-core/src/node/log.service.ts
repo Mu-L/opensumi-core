@@ -4,20 +4,20 @@ import process from 'process';
 
 import spdlog from 'spdlog';
 
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { RPCService } from '@opensumi/ide-connection';
 
 import {
-  ILogService,
-  ILogServiceOptions,
   BaseLogServiceOptions,
-  LogLevel,
-  SupportLogNamespace,
-  ILogServiceManager,
-  format,
-  ILogServiceForClient,
   DebugLog,
   IBaseLogService,
+  ILogService,
+  ILogServiceForClient,
+  ILogServiceManager,
+  ILogServiceOptions,
+  LogLevel,
+  SupportLogNamespace,
+  format,
 } from '../common/';
 
 export const DEFAULT_LOG_FOLDER = path.join(os.homedir(), '.sumi/logs/');
@@ -120,7 +120,7 @@ export class BaseLogService implements IBaseLogService {
     }
     if (this.logger) {
       this.doLog(this.logger, level, message);
-    } else if (this.getLevel() <= level) {
+    } else {
       this.buffer.push({ level, message });
     }
   }
@@ -331,19 +331,19 @@ export class LogServiceForClient extends RPCService<IRPCLogService> implements I
     logger.sendLog(LogLevel.Critical, message);
   }
 
-  dispose(namespace: SupportLogNamespace) {
+  async disposeLogger(namespace: SupportLogNamespace) {
     this.getLogger(namespace).dispose();
   }
 
-  setGlobalLogLevel(level: LogLevel) {
+  async setGlobalLogLevel(level: LogLevel) {
     this.loggerManager.setGlobalLogLevel(level);
   }
 
-  getGlobalLogLevel() {
-    this.loggerManager.getGlobalLogLevel();
+  async getGlobalLogLevel() {
+    return this.loggerManager.getGlobalLogLevel();
   }
 
-  disposeAll() {
+  async disposeAll() {
     this.loggerManager.dispose();
   }
 

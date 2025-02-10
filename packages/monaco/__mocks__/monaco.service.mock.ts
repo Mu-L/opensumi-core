@@ -1,5 +1,6 @@
 import { Injectable } from '@opensumi/di';
-import { Deferred, Emitter } from '@opensumi/ide-core-common';
+import { IMergeEditorEditor } from '@opensumi/ide-core-browser/lib/monaco/merge-editor-widget';
+import { IDiffEditorConstructionOptions } from '@opensumi/monaco-editor-core/esm/vs/editor/browser/editorBrowser';
 
 import { MonacoService, ServiceNames } from '../src/common';
 
@@ -11,6 +12,13 @@ export class MockedMonacoService implements MonacoService {
 
   constructor() {
     (global as any).monaco = this.mockedMonaco;
+  }
+  public createMergeEditor(
+    monacoContainer: HTMLElement,
+    options?: IDiffEditorConstructionOptions | undefined,
+    overrides?: { [key: string]: any } | undefined,
+  ): IMergeEditorEditor {
+    return this.mockedMonaco.editor.createMergeEditor(monacoContainer, options);
   }
 
   public createCodeEditor(monacoContainer: HTMLElement, options) {

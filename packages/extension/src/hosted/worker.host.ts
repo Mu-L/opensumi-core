@@ -1,25 +1,27 @@
 import { Injector } from '@opensumi/di';
-import { RPCProtocol, ProxyIdentifier } from '@opensumi/ide-connection';
+import { ProxyIdentifier, SumiConnectionMultiplexer, createExtMessageIO } from '@opensumi/ide-connection';
+import { MessagePortConnection } from '@opensumi/ide-connection/lib/common/connection/drivers/message-port';
 import {
-  Emitter,
   Deferred,
+  Emitter,
   IExtensionProps,
-  Uri,
-  IReporterService,
-  ReporterService,
-  REPORT_HOST,
   IReporter,
+  IReporterService,
+  REPORT_HOST,
   REPORT_NAME,
+  ReporterService,
+  Uri,
 } from '@opensumi/ide-core-common';
 
-import { IExtensionWorkerHost, EXTENSION_EXTEND_SERVICE_PREFIX } from '../common';
+import { EXTENSION_EXTEND_SERVICE_PREFIX, IExtensionWorkerHost } from '../common';
 import { ActivatedExtension, ActivatedExtensionJSON } from '../common/activator';
 import {
-  MainThreadAPIIdentifier,
   ExtHostAPIIdentifier,
   ExtensionIdentifier,
+  MainThreadAPIIdentifier,
   SumiWorkerExtensionService,
 } from '../common/vscode';
+import { knownProtocols } from '../common/vscode/protocols';
 
 import { ExtensionContext } from './api/vscode/ext.host.extensions';
 import { ExtHostSecret } from './api/vscode/ext.host.secrets';
@@ -29,21 +31,14 @@ import { ExtensionLogger } from './extension-log';
 import { KTWorkerExtension } from './vscode.extension';
 
 export function initRPCProtocol() {
-  const onMessageEmitter = new Emitter<string>();
   const channel = new MessageChannel();
 
   self.postMessage(channel.port2, [channel.port2]);
 
-  channel.port1.onmessage = (e) => {
-    onMessageEmitter.fire(e.data);
-  };
-  const onMessage = onMessageEmitter.event;
+  const msgPortConnection = new MessagePortConnection(channel.port1);
 
-  const extProtocol = new RPCProtocol({
-    onMessage,
-    send: (data) => {
-      channel.port1.postMessage(data);
-    },
+  const extProtocol = new SumiConnectionMultiplexer(msgPortConnection, {
+    io: createExtMessageIO(knownProtocols),
   });
 
   return extProtocol;
@@ -54,6 +49,7 @@ export class ExtensionWorkerHost implements IExtensionWorkerHost {
 
   private sumiAPIFactory: any;
   private sumiExtAPIImpl: Map<string, any> = new Map();
+
   public logger: ExtensionLogger;
 
   private initDeferred = new Deferred();
@@ -72,7 +68,7 @@ export class ExtensionWorkerHost implements IExtensionWorkerHost {
 
   private reporterService: IReporterService;
 
-  constructor(private rpcProtocol: RPCProtocol, private injector: Injector) {
+  constructor(private rpcProtocol: SumiConnectionMultiplexer, private injector: Injector) {
     const reporter = this.injector.get(IReporter);
     this.logger = new ExtensionLogger(rpcProtocol);
     this.storage = new ExtHostStorage(rpcProtocol);
@@ -161,7 +157,7 @@ export class ExtensionWorkerHost implements IExtensionWorkerHost {
     this._extHostErrorStackTraceExtended = true;
 
     Error.stackTraceLimit = 100;
-    Error.prepareStackTrace = (error: Error, stackTrace: any[]) => {
+    Error.prepareStackTrace = (error: Error, stackTrace: NodeJS.CallSite[]) => {
       let extension: IExtensionProps | undefined;
       let stackTraceMessage = '';
 
@@ -169,7 +165,7 @@ export class ExtensionWorkerHost implements IExtensionWorkerHost {
         stackTraceMessage += `\n\tat ${call.toString()}`;
         if (call.isEval() && !extension) {
           const scriptPath = call.getEvalOrigin();
-          const maybeExtension = this.findExtensionFormScriptPath(scriptPath);
+          const maybeExtension = this.findExtensionFormScriptPath(scriptPath!);
           if (maybeExtension) {
             extension = maybeExtension;
             const columnNumber = call.getColumnNumber();
@@ -209,12 +205,12 @@ export class ExtensionWorkerHost implements IExtensionWorkerHost {
   private getExtendModuleProxy(extension: IExtensionProps) {
     /**
      * @example
-     * "kaitianContributes": {
+     * "sumiContributes": {
      *  "viewsProxies": ["ViewComponentID"],
      * }
      */
-    if (extension.packageJSON.kaitianContributes && extension.packageJSON.kaitianContributes.viewsProxies) {
-      return this.getExtensionViewModuleProxy(extension, extension.packageJSON.kaitianContributes.viewsProxies);
+    if (extension.packageJSON.sumiContributes && extension.packageJSON.sumiContributes.viewsProxies) {
+      return this.getExtensionViewModuleProxy(extension, extension.packageJSON.sumiContributes.viewsProxies);
     } else if (extension.extendConfig && extension.extendConfig.browser && extension.extendConfig.browser.componentId) {
       return this.getExtensionViewModuleProxy(extension, extension.extendConfig.browser.componentId);
     } else {

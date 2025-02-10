@@ -1,27 +1,29 @@
-import { Injectable, Autowired, Injector, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
   IContextKeyService,
   MonacoOverrideServiceRegistry,
   ServiceNames,
-  localize,
   StorageProvider,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { Schemes, URI, CommandRegistry, Emitter, Event, STORAGE_NAMESPACE } from '@opensumi/ide-core-common';
+import { CommandRegistry, Emitter, Event, STORAGE_NAMESPACE, Schemes, URI } from '@opensumi/ide-core-common';
 import { EditorCollectionService, IDecorationApplyOptions } from '@opensumi/ide-editor';
-import { IEditorDocumentModelService, ICodeEditor, getSimpleEditorOptions } from '@opensumi/ide-editor/lib/browser';
+import { ICodeEditor, IEditorDocumentModelService, getSimpleEditorOptions } from '@opensumi/ide-editor/lib/browser';
 import { MonacoCodeService } from '@opensumi/ide-editor/lib/browser/editor.override';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
-import { transparent, editorForeground, IThemeService } from '@opensumi/ide-theme';
+import * as monaco from '@opensumi/ide-monaco';
+import { monaco as monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
+import { IThemeService, editorForeground, transparent } from '@opensumi/ide-theme';
 import { IHistoryNavigationWidget } from '@opensumi/monaco-editor-core/esm/vs/base/browser/history';
 import { HistoryNavigator } from '@opensumi/monaco-editor-core/esm/vs/base/common/history';
 import { ITextModel } from '@opensumi/monaco-editor-core/esm/vs/editor/common/model';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
 
 import {
-  DEBUG_CONSOLE_CONTAINER_ID,
-  IDebugSessionManager,
   CONTEXT_IN_DEBUG_MODE_KEY,
+  DEBUG_CONSOLE_CONTAINER_ID,
   DebugState,
+  IDebugConsoleModelService,
+  IDebugSessionManager,
 } from '../../../common';
 import { DebugSessionManager } from '../../debug-session-manager';
 
@@ -42,12 +44,11 @@ const consoleInputMonacoOptions: monaco.editor.IEditorOptions = {
     handleMouseWheel: true,
   },
   acceptSuggestionOnEnter: 'on',
-  readOnly: true,
 };
 
 @Injectable()
 export class DebugConsoleService implements IHistoryNavigationWidget {
-  @Autowired(DebugConsoleModelService)
+  @Autowired(IDebugConsoleModelService)
   protected readonly debugConsoleModelService: DebugConsoleModelService;
 
   @Autowired(IMainLayoutService)
@@ -99,24 +100,6 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
 
   public static keySet = new Set([CONTEXT_IN_DEBUG_MODE_KEY]);
 
-  constructor() {
-    this.contextKeyService.onDidChangeContext((e) => {
-      if (e.payload.affectsSome(DebugConsoleService.keySet)) {
-        const inDebugMode = this.contextKeyService.match(CONTEXT_IN_DEBUG_MODE_KEY);
-        if (inDebugMode) {
-          this.updateReadOnly(false);
-          this.updateInputDecoration();
-          this.debugContextKey.contextInDdebugMode.set(true);
-        } else {
-          this.updateReadOnly(true);
-          if (this.debugContextKey) {
-            this.debugContextKey.contextInDdebugMode.set(false);
-          }
-        }
-      }
-    });
-  }
-
   // FIXME: 需要实现新增的属性及事件
   element: HTMLElement;
   onDidFocus: Event<void>;
@@ -133,7 +116,7 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     return bottomPanelHandler && bottomPanelHandler.isVisible;
   }
 
-  public get consoleModel(): DebugConsoleModelService {
+  public get consoleModel() {
     return this.debugConsoleModelService;
   }
 
@@ -158,14 +141,41 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     const storage = await this.storageProvider(STORAGE_NAMESPACE.DEBUG);
     this.history = new HistoryNavigator(storage.get(HISTORY_STORAGE_KEY, []), 50);
 
+    if (this.inputEditor?.monacoEditor) {
+      return;
+    }
+
     this._consoleInputElement = e;
     this.inputEditor = this.editorService.createCodeEditor(this._consoleInputElement!, {
       ...consoleInputMonacoOptions,
+      readOnly: !this.contextKeyService.getContextValue(CONTEXT_IN_DEBUG_MODE_KEY),
     });
 
-    this.debugContextKey = this.injector.get(DebugContextKey, [
-      (this.inputEditor.monacoEditor as any)._contextKeyService,
-    ]);
+    this.debugContextKey = this.injector.get(DebugContextKey, [this.inputEditor.monacoEditor.contextKeyService]);
+
+    const inDebugMode = this.contextKeyService.match(CONTEXT_IN_DEBUG_MODE_KEY);
+
+    if (inDebugMode) {
+      this.debugContextKey.contextInDebugMode.set(true);
+    } else {
+      this.debugContextKey.contextInDebugMode.set(false);
+    }
+
+    this.contextKeyService.onDidChangeContext((e) => {
+      if (e.payload.affectsSome(DebugConsoleService.keySet)) {
+        const inDebugMode = this.contextKeyService.match(CONTEXT_IN_DEBUG_MODE_KEY);
+        if (inDebugMode) {
+          this.updateReadOnly(false);
+          this.updateInputDecoration();
+          this.debugContextKey.contextInDebugMode.set(true);
+        } else {
+          this.updateReadOnly(true);
+          if (this.debugContextKey) {
+            this.debugContextKey.contextInDebugMode.set(false);
+          }
+        }
+      }
+    });
 
     this.registerDecorationType();
     await this.createConsoleInput();
@@ -318,7 +328,7 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
     const model = session.currentEditor();
 
     if (model) {
-      this.inputEditor.monacoEditor.getModel()!.setMode(model.getModel()?.getLanguageId()!);
+      this.inputEditor.monacoEditor.getModel()!.setLanguage(model.getModel()?.getLanguageId()!);
     }
   }
 
@@ -345,7 +355,8 @@ export class DebugConsoleService implements IHistoryNavigationWidget {
       return;
     }
 
-    this._updateDisposable = monaco.languages.registerCompletionItemProvider(model.getModel()?.getLanguageId()!, {
+    this._updateDisposable = monacoApi.languages.registerCompletionItemProvider(model.getModel()?.getLanguageId()!, {
+      _debugDisplayName: 'DebugConsoleCompletionProvider',
       triggerCharacters: ['.'],
       provideCompletionItems: async (model, position, ctx) => {
         //  仅在支持自动补全查询的调试器中启用补全逻辑

@@ -1,21 +1,21 @@
 import debounce from 'lodash/debounce';
 
 import {
+  Deferred,
+  DisposableCollection,
   Emitter,
   Event,
-  URI,
-  DisposableCollection,
-  Deferred,
   IDisposable,
   IPosition,
   Mutable,
+  URI,
   canceled,
   localize,
 } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 import {
-  CancellationTokenSource,
   CancellationToken,
+  CancellationTokenSource,
   Disposable,
   Schemes,
   getLanguageId,
@@ -28,22 +28,22 @@ import { ITerminalApiService, TerminalOptions } from '@opensumi/ide-terminal-nex
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
 import {
-  DebugSessionOptions,
-  IDebugSessionDTO,
-  IDebugSession,
-  IDebugSessionManager,
-  DEBUG_REPORT_NAME,
-  DebugState,
-  DebugEventTypes,
-  DebugRequestTypes,
-  DebugExitEvent,
-  IRuntimeBreakpoint,
   BreakpointsChangeEvent,
+  DEBUG_REPORT_NAME,
+  DebugConfiguration,
+  DebugEventTypes,
+  DebugExitEvent,
+  DebugRequestTypes,
+  DebugSessionOptions,
+  DebugState,
   IDebugBreakpoint,
+  IDebugSession,
+  IDebugSessionDTO,
+  IDebugSessionManager,
   IMemoryRegion,
+  IRuntimeBreakpoint,
   prepareCommand,
 } from '../common';
-import { DebugConfiguration } from '../common';
 
 import { DebugEditor } from './../common/debug-editor';
 import { IDebugModel, IDebugModelManager, MemoryRegion } from './../common/debug-model';
@@ -51,7 +51,7 @@ import { BreakpointManager, DebugBreakpoint } from './breakpoint';
 import { DebugSessionConnection } from './debug-session-connection';
 import { DebugSource } from './model/debug-source';
 import { DebugStackFrame } from './model/debug-stack-frame';
-import { StoppedDetails, DebugThread, DebugThreadData } from './model/debug-thread';
+import { DebugThread, DebugThreadData, StoppedDetails } from './model/debug-thread';
 import { ExpressionContainer } from './tree/debug-tree-node.define';
 
 export class DebugSession implements IDebugSession {
@@ -215,6 +215,7 @@ export class DebugSession implements IDebugSession {
         }
 
         this.onStateChange();
+        this.sessionManager.currentSession = this as IDebugSession;
         this._onDidStop.fire(event);
       }),
       this.on('thread', (event: DebugProtocol.ThreadEvent) => {
@@ -288,7 +289,7 @@ export class DebugSession implements IDebugSession {
   }
 
   getMemory(memoryReference: string): IMemoryRegion {
-    return new MemoryRegion(memoryReference, this);
+    return new MemoryRegion(memoryReference, this as IDebugSession);
   }
 
   get configuration(): DebugConfiguration {
@@ -388,12 +389,12 @@ export class DebugSession implements IDebugSession {
 
   protected async configure(): Promise<void> {
     await this.initBreakpoints();
-    // 更新exceptionBreakpoint配置
+    // 更新 exceptionBreakpoint 配置
     this.breakpointManager.setExceptionBreakpoints(this.capabilities.exceptionBreakpointFilters || []);
-    if (this.capabilities.supportsConfigurationDoneRequest) {
-      await this.sendRequest('configurationDone', {});
-    }
     this.initialized = true;
+    if (this.capabilities.supportsConfigurationDoneRequest) {
+      this.sendRequest('configurationDone', {});
+    }
     if (!this.supportsThreadIdCorrespond) {
       await this.updateThreads(undefined);
     }
@@ -891,6 +892,9 @@ export class DebugSession implements IDebugSession {
 
   public terminated = false;
   async terminate(restart?: boolean): Promise<void> {
+    // Some debug task may not support `initialized` request or failed to send `initialized` request
+    // State should not be DebugState.Initializing in this case
+    this.initialized = true;
     this.cancelAllRequests();
     if (this.lifecycleManagedByParent && this.parentSession) {
       await this.parentSession.terminate(restart);
@@ -948,14 +952,14 @@ export class DebugSession implements IDebugSession {
     ]);
   }
 
-  async restart(): Promise<boolean> {
+  async restart(args: DebugProtocol.RestartArguments): Promise<boolean> {
     this.cancelAllRequests();
     if (this.capabilities.supportsRestartRequest) {
       this.terminated = false;
       if (this.lifecycleManagedByParent && this.parentSession) {
-        await this.parentSession.restart();
+        await this.parentSession.restart({ arguments: (this.parentSession as DebugSession).configuration });
       } else {
-        await this.sendRequest('restart', {});
+        await this.sendRequest('restart', args);
       }
       return true;
     }
@@ -976,6 +980,14 @@ export class DebugSession implements IDebugSession {
 
     // 在 VS Code JavaScript Debugger 中，如果一个表达式取值为 `undefined`, 这里将不会返回结果
     const response = await this.sendRequest('evaluate', { expression, frameId, context });
+    return response.body;
+  }
+
+  async variables(
+    variablesReference: number,
+    filter: 'indexed' | 'named' = 'named',
+  ): Promise<DebugProtocol.VariablesResponse['body']> {
+    const response = await this.sendRequest('variables', { variablesReference, filter });
     return response.body;
   }
 
@@ -1080,20 +1092,13 @@ export class DebugSession implements IDebugSession {
     return this.connection.onDidCustomEvent;
   }
 
-  // REPL
-
   hasSeparateRepl(): boolean {
     return !this.parentSession || this.options.repl !== 'mergeWithParent';
   }
 
-  // REPL end
-
-  // report service
   reportTime(name: string, defaults?: any): (msg: string | undefined, extra?: any) => number {
     return this.sessionManager.reportTime(name, defaults);
   }
-
-  // Cancellation
 
   private getNewCancellationToken(threadId: number, token?: CancellationToken): CancellationToken {
     const tokenSource = new CancellationTokenSource(token);
@@ -1120,8 +1125,6 @@ export class DebugSession implements IDebugSession {
       this.cancelAllRequests();
     }
   }
-
-  // Cancellation end
 
   public getDebugProtocolBreakpoint(breakpointId: string): DebugProtocol.Breakpoint | undefined {
     const data = this.breakpointManager.getBreakpoints().find((bp) => bp.id === breakpointId);
@@ -1152,8 +1155,6 @@ export class DebugSession implements IDebugSession {
     return this.modelManager.model;
   }
 
-  // memory
-
   public async readMemory(
     memoryReference: string,
     offset: number,
@@ -1176,6 +1177,4 @@ export class DebugSession implements IDebugSession {
     }
     return Promise.resolve(undefined);
   }
-
-  // memory end
 }

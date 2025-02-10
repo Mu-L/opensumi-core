@@ -1,25 +1,25 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   Deferred,
-  URI,
   ILogger,
   StoragePaths,
   ThrottledDelayer,
   Throttler,
+  URI,
   Uri,
-  path,
   isEmptyObject,
+  path,
 } from '@opensumi/ide-core-common';
-import { IFileServiceClient, FileStat } from '@opensumi/ide-file-service';
+import { FileStat, IFileServiceClient } from '@opensumi/ide-file-service';
 
 import {
-  ExtensionStorageUri,
+  DEFAULT_EXTENSION_STORAGE_DIR_NAME,
   IExtensionStoragePathServer,
   IExtensionStorageServer,
+  IExtensionStorageTask,
+  IExtensionStorageUri,
   KeysToAnyValues,
   KeysToKeysToAnyValue,
-  DEFAULT_EXTENSION_STORAGE_DIR_NAME,
-  IExtensionStorageTask,
 } from '../common/';
 
 const { Path } = path;
@@ -51,7 +51,7 @@ export class ExtensionStorageServer implements IExtensionStorageServer {
     workspace: FileStat | undefined,
     roots: FileStat[],
     extensionStorageDirName?: string,
-  ): Promise<ExtensionStorageUri> {
+  ): Promise<IExtensionStorageUri> {
     this.storageDelayer = new ThrottledDelayer(ExtensionStorageServer.DEFAULT_FLUSH_DELAY);
     return await this.setupDirectories(workspace, roots, extensionStorageDirName || DEFAULT_EXTENSION_STORAGE_DIR_NAME);
   }
@@ -67,7 +67,7 @@ export class ExtensionStorageServer implements IExtensionStorageServer {
     return await this.storageExistPromises.get(storageUri);
   }
 
-  private async setupDirectories(workspace, roots, extensionStorageDirName): Promise<ExtensionStorageUri> {
+  private async setupDirectories(workspace, roots, extensionStorageDirName): Promise<IExtensionStorageUri> {
     const workspaceDataDirPath = await this.extensionStoragePathsServer.getWorkspaceDataDirPath(
       extensionStorageDirName,
     );
@@ -96,9 +96,9 @@ export class ExtensionStorageServer implements IExtensionStorageServer {
 
     // 返回插件storage存储路径信息
     return {
-      logUri: logUri.codeUri || undefined,
-      storageUri: storageUri?.codeUri,
-      globalStorageUri: Uri.parse(this.globalDataPath),
+      logUri: logUri.codeUri,
+      storageUri: storageUri.codeUri,
+      globalStorageUri: Uri.file(this.globalDataPath),
     };
   }
 

@@ -1,7 +1,7 @@
 import { act } from 'react-dom/test-utils';
 
 import { IContextKeyService } from '@opensumi/ide-core-browser';
-import { createBrowserApp, MockClientApp } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockClientApp, createBrowserApp } from '@opensumi/ide-dev-tool/src/injector-helper';
 
 import { OverlayModule } from '../../src/browser';
 import { IDialogService } from '../../src/common';
@@ -62,7 +62,7 @@ describe.skip('packages/overlay/src/browser/dialog.service.ts', () => {
       dialogService.info('hello info');
       dialogService.hide();
     });
-    expect(dialogService.isVisible()).toBe(false);
+    expect(dialogService.visible).toBe(false);
   });
 
   it('get field', () => {
@@ -73,7 +73,7 @@ describe.skip('packages/overlay/src/browser/dialog.service.ts', () => {
     expect($$('.ant-modal')).toHaveLength(1);
     expect($$('.dialog-class-test')).toHaveLength(1);
     expect(dialogService.getMessage()).toBe('hello');
-    expect(dialogService.isVisible()).toBe(true);
+    expect(dialogService.visible).toBe(true);
     expect(dialogService.getIcon()!.className).toBe('info-circle');
     expect(dialogService.getButtons()).toEqual(['btnA', 'btnB']);
     expect(dialogService.getProps()).toEqual({ className: 'dialog-class-test' });

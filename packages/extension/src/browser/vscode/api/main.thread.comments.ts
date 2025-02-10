@@ -1,54 +1,55 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
+  CommentMode,
+  CommentReaction,
+  CommentReactionClick,
+  ICommentsFeatureRegistry,
   ICommentsService,
   ICommentsThread,
-  ICommentsFeatureRegistry,
-  CommentMode,
-  CommentReactionClick,
   IThreadComment,
-  CommentReaction,
 } from '@opensumi/ide-comments';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 import {
-  IRange,
+  CancellationToken,
+  Disposable,
   Emitter,
   Event,
-  URI,
-  CancellationToken,
   IDisposable,
-  positionToRange,
-  isUndefined,
-  Disposable,
-  WithEventBus,
+  IRange,
   OnEvent,
+  URI,
+  WithEventBus,
+  isUndefined,
 } from '@opensumi/ide-core-common';
+import { positionToRange } from '@opensumi/ide-monaco';
+import { transaction } from '@opensumi/ide-monaco/lib/common/observable';
 import {
-  CommentThread,
   CommentInput,
-  CommentReaction as CoreCommentReaction,
-  CommentMode as CoreCommentMode,
+  CommentThread,
   CommentThreadState,
+  CommentMode as CoreCommentMode,
+  CommentReaction as CoreCommentReaction,
 } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 import {
-  IMainThreadComments,
   CommentProviderFeatures,
+  ExtHostAPIIdentifier,
   IExtHostComments,
   IMainThreadCommands,
+  IMainThreadComments,
 } from '../../../common/vscode';
-import { ExtHostAPIIdentifier } from '../../../common/vscode';
 import { MarkdownString } from '../../../common/vscode/converter';
 import { MarkdownString as CodeMarkdownString } from '../../../common/vscode/ext-types';
 import {
-  UriComponents,
+  CommentThreadChanges,
   CommentThreadCollapsibleState,
   Comment as CoreComment,
-  CommentThreadChanges,
+  UriComponents,
 } from '../../../common/vscode/models';
 
 @Injectable({ multiple: true })
-export class MainthreadComments implements IDisposable, IMainThreadComments {
+export class MainThreadComments implements IDisposable, IMainThreadComments {
   @Autowired(ICommentsService)
   private commentsService: ICommentsService;
 
@@ -222,7 +223,7 @@ export class MainthreadComments implements IDisposable, IMainThreadComments {
 }
 
 @Injectable({ multiple: true })
-export class MainThreadCommentThread implements CommentThread {
+export class MainThreadCommentThread extends Disposable implements CommentThread {
   @Autowired(ICommentsService)
   private commentsService: ICommentsService;
 
@@ -242,11 +243,13 @@ export class MainThreadCommentThread implements CommentThread {
   }
 
   get label(): string | undefined {
-    return this._thread.label;
+    return this._thread.label?.get();
   }
 
   set label(label: string | undefined) {
-    this._thread.label = label;
+    transaction((tx) => {
+      this._thread.label?.set(label, tx);
+    });
     this._onDidChangeLabel.fire(label);
   }
 
@@ -270,7 +273,7 @@ export class MainThreadCommentThread implements CommentThread {
       contextValue: comment.contextValue,
       author: {
         name: comment.userName,
-        iconPath: comment.userIconPath,
+        iconPath: new URI(URI.revive(comment.userIconPath)),
       },
       reactions: comment.commentReactions?.map((reaction) => this.convertToCommentReaction(reaction)),
       timestamp: comment.timestamp,
@@ -311,14 +314,14 @@ export class MainThreadCommentThread implements CommentThread {
   }
 
   public get comments(): CoreComment[] | undefined {
-    return this._thread.comments.map((comment) => this.convertToCoreComment(comment));
+    return this._thread.comments.get().map((comment) => this.convertToCoreComment(comment));
   }
 
   public set comments(newComments: CoreComment[] | undefined) {
     if (newComments) {
-      this._thread.comments = newComments.map((comment) => this.convertToIThreadComment(comment));
+      this._thread.updateComments(newComments.map((comment) => this.convertToIThreadComment(comment)));
     } else {
-      this._thread.comments = [];
+      this._thread.updateComments([]);
     }
 
     this._onDidChangeComments.fire(newComments);
@@ -343,12 +346,12 @@ export class MainThreadCommentThread implements CommentThread {
     return this._onDidChangeCanReply.event;
   }
   set canReply(state: boolean) {
-    this._thread.readOnly = !state;
+    this._thread.setReadOnly(!state);
     this._onDidChangeCanReply.fire(state);
   }
 
   get canReply() {
-    return !this._thread.readOnly;
+    return !this._thread.readOnly.get();
   }
 
   private readonly _onDidChangeRange = new Emitter<IRange>();
@@ -356,11 +359,15 @@ export class MainThreadCommentThread implements CommentThread {
 
   private _collapsibleState: CommentThreadCollapsibleState | undefined;
   get collapsibleState() {
-    return this._thread.isCollapsed ? CommentThreadCollapsibleState.Collapsed : CommentThreadCollapsibleState.Expanded;
+    return this._thread.isCollapsed.get()
+      ? CommentThreadCollapsibleState.Collapsed
+      : CommentThreadCollapsibleState.Expanded;
   }
 
   set collapsibleState(newState: CommentThreadCollapsibleState | undefined) {
-    this._thread.isCollapsed = newState === CommentThreadCollapsibleState.Collapsed;
+    transaction((tx) => {
+      this._thread.isCollapsed.set(newState === CommentThreadCollapsibleState.Collapsed, tx);
+    });
     this._onDidChangeCollasibleState.fire(this._collapsibleState);
   }
 
@@ -384,6 +391,7 @@ export class MainThreadCommentThread implements CommentThread {
     _range: IRange,
     _canReply: boolean,
   ) {
+    super();
     // 查找当前位置 的 threads
     // 框架支持同一个位置多个 thread
     const threads = this.commentsService.commentsThreads.filter(
@@ -408,11 +416,25 @@ export class MainThreadCommentThread implements CommentThread {
         readOnly: !_canReply,
       });
     }
+    this.disposables.push(
+      this.onDidChangeComments(() => {
+        this.commentsService.fireThreadCommentChange(this._thread);
+      }),
+      this._onDidChangeCollasibleState,
+      this._onDidChangeComments,
+      this._onDidChangeInput,
+      this._onDidChangeLabel,
+      this._onDidChangeRange,
+    );
     this._isDisposed = false;
   }
+  initialCollapsibleState?: CommentThreadCollapsibleState | undefined;
+  onDidChangeInitialCollapsibleState: Event<CommentThreadCollapsibleState | undefined>;
+
   isDocumentCommentThread(): this is CommentThread<IRange> {
     throw new Error('Method not implemented.');
   }
+
   // FIXME: 实现新增的属性
   state?: CommentThreadState | undefined;
   onDidChangeCollapsibleState: Event<CommentThreadCollapsibleState | undefined>;
@@ -445,12 +467,8 @@ export class MainThreadCommentThread implements CommentThread {
 
   dispose() {
     this._isDisposed = true;
-    this._onDidChangeCollasibleState.dispose();
-    this._onDidChangeComments.dispose();
-    this._onDidChangeInput.dispose();
-    this._onDidChangeLabel.dispose();
-    this._onDidChangeRange.dispose();
     this._thread.dispose();
+    super.dispose();
   }
 
   toJSON(): any {

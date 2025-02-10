@@ -1,7 +1,8 @@
-import type { IDisposable, UriComponents, IThemeColor } from '@opensumi/ide-core-common';
-import { CancellationToken } from '@opensumi/vscode-jsonrpc/lib/common/cancellation';
-
+import { IExtensionDescription } from './extension';
 import { VSCommand } from './model.api';
+
+import type { CancellationToken, IDisposable, Uri, UriComponents } from '@opensumi/ide-core-common';
+import type vscode from 'vscode';
 
 export interface ObjectIdentifier {
   $ident?: number;
@@ -23,12 +24,47 @@ export namespace ObjectIdentifier {
 export type CommandDto = ObjectIdentifier & VSCommand;
 
 export interface SCMProviderFeatures {
+  hasHistoryProvider?: boolean;
   hasQuickDiffProvider?: boolean;
   count?: number;
   commitTemplate?: string;
   acceptInputCommand?: VSCommand;
   actionButton?: SCMActionButtonDto | null;
   statusBarCommands?: CommandDto[];
+}
+
+export interface SCMActionButtonDto {
+  command: CommandDto;
+  secondaryCommands?: CommandDto[][];
+  description?: string;
+  enabled: boolean;
+}
+
+export interface SCMHistoryItemGroupDto {
+  readonly id: string;
+  readonly label: string;
+  readonly upstream?: SCMRemoteHistoryItemGroupDto;
+}
+
+export interface SCMRemoteHistoryItemGroupDto {
+  readonly id: string;
+  readonly label: string;
+}
+
+export interface SCMHistoryItemDto {
+  readonly id: string;
+  readonly parentIds: string[];
+  readonly label: string;
+  readonly description?: string;
+  readonly icon?: UriComponents | { light: UriComponents; dark: UriComponents } | vscode.ThemeIcon;
+  readonly timestamp?: number;
+}
+
+export interface SCMHistoryItemChangeDto {
+  readonly uri: UriComponents;
+  readonly originalUri: UriComponents | undefined;
+  readonly modifiedUri: UriComponents | undefined;
+  readonly renameUri: UriComponents | undefined;
 }
 
 export interface SCMActionButtonDto {
@@ -54,6 +90,12 @@ export type SCMRawResource = [
   CommandDto | undefined /* command*/,
 ];
 
+export interface SCMInputActionButtonDto {
+  command: CommandDto;
+  icon?: UriComponents | { light: UriComponents; dark: UriComponents } | vscode.ThemeIcon;
+  enabled: boolean;
+}
+
 export type SCMRawResourceSplice = [number /* start */, number /* delete count */, SCMRawResource[]];
 
 export type SCMRawResourceSplices = [number /* handle*/, SCMRawResourceSplice[]];
@@ -77,6 +119,35 @@ export interface IExtHostSCMShape {
     cursorPosition: number,
   ): Promise<[string, number] | undefined>;
   $setSelectedSourceControls(selectedSourceControlHandles: number[]): Promise<void>;
+  createSourceControl(
+    extension: IExtensionDescription,
+    id: string,
+    label: string,
+    rootUri: Uri | undefined,
+  ): vscode.SourceControl;
+  getSourceControl(extensionId: string, id: string): vscode.SourceControl[] | undefined;
+  $provideHistoryItems(
+    sourceControlHandle: number,
+    historyItemGroupId: string,
+    options: any,
+    token: CancellationToken,
+  ): Promise<SCMHistoryItemDto[] | undefined>;
+  $provideHistoryItemChanges(
+    sourceControlHandle: number,
+    historyItemId: string,
+    token: CancellationToken,
+  ): Promise<SCMHistoryItemChangeDto[] | undefined>;
+  $resolveHistoryItemGroupBase(
+    sourceControlHandle: number,
+    historyItemGroupId: string,
+    token: CancellationToken,
+  ): Promise<SCMHistoryItemGroupDto | undefined>;
+  $resolveHistoryItemGroupCommonAncestor(
+    sourceControlHandle: number,
+    historyItemGroupId1: string,
+    historyItemGroupId2: string,
+    token: CancellationToken,
+  ): Promise<{ id: string; ahead: number; behind: number } | undefined>;
 }
 
 export interface IMainThreadSCMShape extends IDisposable {
@@ -93,6 +164,15 @@ export interface IMainThreadSCMShape extends IDisposable {
 
   $setInputBoxValue(sourceControlHandle: number, value: string): void;
   $setInputBoxPlaceholder(sourceControlHandle: number, placeholder: string): void;
+  $setInputBoxEnablement(sourceControlHandle: number, enabled: boolean): void;
   $setInputBoxVisibility(sourceControlHandle: number, visible: boolean): void;
   $setValidationProviderIsEnabled(sourceControlHandle: number, enabled: boolean): void;
+
+  $onDidChangeHistoryProviderActionButton(sourceControlHandle: number, actionButton?: SCMActionButtonDto | null): void;
+  $onDidChangeHistoryProviderCurrentHistoryItemGroup(
+    sourceControlHandle: number,
+    historyItemGroup: SCMHistoryItemGroupDto | undefined,
+  ): void;
+
+  $setInputBoxActionButton(sourceControlHandle: number, actionButton?: SCMInputActionButtonDto | null): void;
 }

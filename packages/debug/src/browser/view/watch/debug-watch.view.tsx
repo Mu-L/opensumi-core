@@ -1,27 +1,32 @@
 import cls from 'classnames';
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
 import {
-  INodeRendererProps,
   ClasslistComposite,
-  IRecycleTreeHandle,
-  TreeNodeType,
-  RecycleTree,
+  INodeRendererProps,
   INodeRendererWrapProps,
-  TreeModel,
+  IRecycleTreeHandle,
+  Loading,
   PromptHandle,
+  RecycleTree,
+  TreeModel,
+  TreeNodeType,
 } from '@opensumi/ide-components';
-import { Loading } from '@opensumi/ide-components';
-import { useInjectable, getIcon, DisposableCollection, Disposable } from '@opensumi/ide-core-browser';
-import { ViewState } from '@opensumi/ide-core-browser';
+import {
+  Disposable,
+  DisposableCollection,
+  ViewState,
+  getIcon,
+  useDesignStyles,
+  useInjectable,
+} from '@opensumi/ide-core-browser';
 
 import {
+  DebugVariable,
+  DebugVariableContainer,
+  DebugWatchNode,
   ExpressionContainer,
   ExpressionNode,
-  DebugVariableContainer,
-  DebugVariable,
-  DebugWatchNode,
 } from '../../tree/debug-tree-node.define';
 
 import { DebugWatchModelService, IWatchNode } from './debug-watch-tree.model.service';
@@ -29,15 +34,13 @@ import styles from './debug-watch.module.less';
 
 export const DEBUG_WATCH_TREE_FIELD_NAME = 'DEBUG_WATCH_TREE_FIELD';
 
-export const DebugWatchView = observer(({ viewState }: React.PropsWithChildren<{ viewState: ViewState }>) => {
-  const DEBUG_VARIABLE_ITEM_HEIGHT = 22;
-
-  const { height } = viewState;
-
-  const wrapperRef: React.RefObject<HTMLDivElement> = React.createRef();
-  const [model, setModel] = React.useState<TreeModel>();
-
+export const DebugWatchView = ({ viewState }: React.PropsWithChildren<{ viewState: ViewState }>) => {
   const debugWatchModelService = useInjectable<DebugWatchModelService>(DebugWatchModelService);
+
+  const DEBUG_VARIABLE_ITEM_HEIGHT = 22;
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const [model, setModel] = React.useState<TreeModel>();
+  const { height } = viewState;
 
   React.useEffect(() => initTreeModel(), []);
 
@@ -164,7 +167,7 @@ export const DebugWatchView = observer(({ viewState }: React.PropsWithChildren<{
       {renderContent()}
     </div>
   );
-});
+};
 
 export interface IDebugVariableNodeProps {
   item: any;
@@ -188,6 +191,8 @@ export const DebugWatchRenderedNode: React.FC<IDebugWatchNodeRenderedProps> = ({
   onContextMenu,
   itemType,
 }: IDebugWatchNodeRenderedProps) => {
+  const styles_expansion_toggle = useDesignStyles(styles.expansion_toggle, 'expansion_toggle');
+
   const isRenamePrompt = itemType === TreeNodeType.RenamePrompt;
   const isNewPrompt = itemType === TreeNodeType.NewPrompt;
   const isPrompt = isRenamePrompt || isNewPrompt;
@@ -282,7 +287,7 @@ export const DebugWatchRenderedNode: React.FC<IDebugWatchNodeRenderedProps> = ({
     };
     if (decorations && decorations?.classlist.indexOf(styles.mod_loading) > -1) {
       return (
-        <div className={cls(styles.debug_watch_node_segment, styles.expansion_toggle)}>
+        <div className={cls(styles.debug_watch_node_segment, styles_expansion_toggle)}>
           <Loading />
         </div>
       );
@@ -290,7 +295,7 @@ export const DebugWatchRenderedNode: React.FC<IDebugWatchNodeRenderedProps> = ({
     return (
       <div
         onClick={handleTwiceClick}
-        className={cls(styles.debug_watch_node_segment, styles.expansion_toggle, getIcon('right'), {
+        className={cls(styles.debug_watch_node_segment, styles_expansion_toggle, getIcon('right'), {
           [`${styles.mod_collapsed}`]: !(node as ExpressionContainer).expanded,
         })}
       />

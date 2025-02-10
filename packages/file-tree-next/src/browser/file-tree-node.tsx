@@ -2,18 +2,19 @@ import cls from 'classnames';
 import React from 'react';
 
 import {
-  TreeNode,
+  ClasslistComposite,
   CompositeTreeNode,
   INodeRendererProps,
-  ClasslistComposite,
-  PromptHandle,
-  TreeNodeType,
-  RenamePromptHandle,
+  Loading,
   NewPromptHandle,
+  PromptHandle,
+  RenamePromptHandle,
+  TreeNode,
+  TreeNodeType,
 } from '@opensumi/ide-components';
-import { Loading } from '@opensumi/ide-components';
-import { getIcon, URI, path } from '@opensumi/ide-core-browser';
+import { URI, getIcon, path, transformLabelWithCodicon, useDesignStyles } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
+import { IIconService } from '@opensumi/ide-theme/lib/common/index';
 
 import { Directory, File } from '../common/file-tree-node.define';
 
@@ -28,6 +29,7 @@ export interface IFileTreeNodeProps {
   defaultLeftPadding?: number;
   leftPadding?: number;
   decorationService: FileTreeDecorationService;
+  iconService: IIconService;
   labelService: LabelService;
   decorations?: ClasslistComposite;
   dndService: DragAndDropService;
@@ -76,12 +78,16 @@ export const FileTreeNode: React.FC<FileTreeNodeRenderedProps> = ({
   hasFileIcons,
   hidesExplorerArrows,
   hasPrompt,
+  iconService,
 }: FileTreeNodeRenderedProps) => {
   const [activeIndex, setActiveIndex] = React.useState<number>(-1);
   const isRenamePrompt = itemType === TreeNodeType.RenamePrompt;
   const isNewPrompt = itemType === TreeNodeType.NewPrompt;
   const isPrompt = isRenamePrompt || isNewPrompt;
   const isCompactName = !isPrompt && item.name.indexOf(Path.separator) >= 0;
+
+  const styles_expansion_toggle = useDesignStyles(styles.expansion_toggle, 'expansion_toggle');
+  const styles_file_tree_node = useDesignStyles(styles.file_tree_node, 'file_tree_node');
 
   const decoration = isPrompt ? null : decorationService.getDecoration(item.uri, Directory.is(item));
 
@@ -224,7 +230,7 @@ export const FileTreeNode: React.FC<FileTreeNodeRenderedProps> = ({
       if (isDirectory) {
         return (
           <div
-            className={cls(styles.file_tree_node_segment, styles.expansion_toggle, getIcon('arrow-right'), {
+            className={cls(styles.file_tree_node_segment, styles_expansion_toggle, getIcon('arrow-right'), {
               [`${styles.mod_collapsed}`]:
                 isNewPrompt ||
                 !(
@@ -240,7 +246,7 @@ export const FileTreeNode: React.FC<FileTreeNodeRenderedProps> = ({
       return (
         <div
           onClick={clickHandler}
-          className={cls(styles.file_tree_node_segment, styles.expansion_toggle, getIcon('arrow-right'), {
+          className={cls(styles.file_tree_node_segment, styles_expansion_toggle, getIcon('arrow-right'), {
             [`${styles.mod_collapsed}`]: !(node as Directory).expanded,
           })}
         />
@@ -332,7 +338,6 @@ export const FileTreeNode: React.FC<FileTreeNodeRenderedProps> = ({
         };
 
         const dropHandler = (event: React.DragEvent) => {
-          event.stopPropagation();
           const activeUri: URI = item.parent.uri.resolve(paths.slice(0, index + 1).join(Path.separator));
           dndService.handleDrop(event, item as File, activeUri!);
         };
@@ -375,7 +380,17 @@ export const FileTreeNode: React.FC<FileTreeNodeRenderedProps> = ({
     if (!decoration) {
       return null;
     }
-    return <div className={styles.file_tree_node_status}>{decoration.badge.slice()}</div>;
+    return (
+      <div className={styles.file_tree_node_status}>
+        {transformLabelWithCodicon(
+          decoration.badge.slice(),
+          {
+            color: 'inherit',
+          },
+          iconService.fromString.bind(iconService),
+        )}
+      </div>
+    );
   };
 
   const renderTwice = (item) => {
@@ -409,7 +424,7 @@ export const FileTreeNode: React.FC<FileTreeNodeRenderedProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       title={getItemTooltip()}
-      className={cls(styles.file_tree_node, decorations ? decorations.classlist : null)}
+      className={cls(styles_file_tree_node, decorations ? decorations.classlist : null)}
       style={fileTreeNodeStyle}
       draggable={itemType === TreeNodeType.TreeNode || itemType === TreeNodeType.CompositeTreeNode}
       data-id={item.id}

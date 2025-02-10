@@ -1,37 +1,38 @@
 import { Autowired } from '@opensumi/di';
 import {
-  URI,
-  Domain,
-  getIcon,
   AppConfig,
-  CommandService,
   COMMON_COMMANDS,
-  CommandRegistry,
-  PreferenceService,
+  ClientAppContribution,
   CommandContribution,
-  IPreferenceSettingsService,
-  ILogger,
+  CommandRegistry,
+  CommandService,
+  Domain,
   IClipboardService,
-  TerminalSettingsId,
+  ILogger,
+  IPreferenceSettingsService,
+  PreferenceService,
   TERMINAL_COMMANDS,
+  TerminalSettingsId,
+  URI,
+  getIcon,
 } from '@opensumi/ide-core-browser';
 import { IMainLayoutService } from '@opensumi/ide-main-layout';
 
 import {
-  ITerminalController,
-  ITerminalRestore,
-  ITerminalGroupViewService,
-  ITerminalSearchService,
   ITerminalApiService,
   ITerminalClient,
+  ITerminalController,
+  ITerminalGroupViewService,
+  ITerminalRestore,
+  ITerminalSearchService,
 } from '../../common';
 import { TerminalEnvironmentService } from '../terminal.environment.service';
 import { TerminalKeyBoardInputService } from '../terminal.input';
 
 import { EnvironmentVariableServiceToken } from './../../common/environmentVariable';
 
-@Domain(CommandContribution)
-export class TerminalCommandContribution implements CommandContribution {
+@Domain(CommandContribution, ClientAppContribution)
+export class TerminalCommandContribution implements CommandContribution, ClientAppContribution {
   @Autowired(ITerminalController)
   protected readonly terminalController: ITerminalController;
 
@@ -78,6 +79,11 @@ export class TerminalCommandContribution implements CommandContribution {
     this.terminalController.reconnect();
   }
 
+  onDisposeSideEffects() {
+    // TODO 销毁 Node.js 端的 Terminal Client
+    // 目前的情况下，想要终端重连后正常工作的话，会导致一些内存泄漏
+  }
+
   private setDefaultTerminalType(type: string) {
     this.preference.update(TerminalSettingsId.Type, type);
   }
@@ -91,12 +97,16 @@ export class TerminalCommandContribution implements CommandContribution {
       },
       {
         execute: () => {
+          if (this.search.isVisible) {
+            this.search.close();
+            return;
+          }
           this.search.open();
         },
       },
     );
 
-    // 分屏
+    // 拆分终端
     registry.registerCommand(
       {
         ...TERMINAL_COMMANDS.SPLIT,
@@ -104,7 +114,10 @@ export class TerminalCommandContribution implements CommandContribution {
       },
       {
         execute: () => {
-          const group = this.view.currentGroup;
+          const group = this.view.currentGroup.get();
+          if (!group) {
+            return;
+          }
           const widget = this.view.createWidget(group);
           this.view.selectWidget(widget.id);
         },
@@ -125,9 +138,15 @@ export class TerminalCommandContribution implements CommandContribution {
       },
     });
 
+    registry.registerCommand(TERMINAL_COMMANDS.TOGGLE_TERMINAL, {
+      execute: () => {
+        this.terminalController.toggleTerminalPanel();
+      },
+    });
+
     registry.registerCommand(TERMINAL_COMMANDS.SEARCH_NEXT, {
       execute: () => {
-        if (this.search.show) {
+        if (this.search.isVisible) {
           this.search.search();
         } else {
           this.search.open();
@@ -142,7 +161,7 @@ export class TerminalCommandContribution implements CommandContribution {
       },
       {
         execute: async () => {
-          const widgetId = this.view.currentWidgetId;
+          const widgetId = this.view.currentWidgetId.get();
           if (widgetId) {
             this.view.removeWidget(widgetId);
           }
@@ -174,7 +193,7 @@ export class TerminalCommandContribution implements CommandContribution {
       },
       {
         execute: () => {
-          const widgetId = this.view.currentWidgetId;
+          const widgetId = this.view.currentWidgetId.get();
           const client = this.terminalController.findClientFromWidgetId(widgetId);
           if (client) {
             client.selectAll();
@@ -190,7 +209,7 @@ export class TerminalCommandContribution implements CommandContribution {
       },
       {
         execute: () => {
-          const current = this.view.currentWidgetId;
+          const current = this.view.currentWidgetId.get();
           const client = this.terminalController.findClientFromWidgetId(current);
           if (client) {
             client.clear();
@@ -242,13 +261,13 @@ export class TerminalCommandContribution implements CommandContribution {
 
     registry.registerCommand(TERMINAL_COMMANDS.MORE_SETTINGS, {
       execute: async () => {
-        this.commands.executeCommand(COMMON_COMMANDS.LOCATE_PREFERENCES.id, 'terminal');
+        this.commands.executeCommand(COMMON_COMMANDS.OPEN_PREFERENCES.id, 'terminal');
       },
     });
 
     registry.registerCommand(TERMINAL_COMMANDS.COPY, {
       execute: async () => {
-        const current = this.view.currentWidgetId;
+        const current = this.view.currentWidgetId.get();
         const client = this.terminalController.findClientFromWidgetId(current);
         if (client) {
           await this.clipboardService.writeText(client.getSelection());
@@ -258,7 +277,7 @@ export class TerminalCommandContribution implements CommandContribution {
 
     registry.registerCommand(TERMINAL_COMMANDS.PASTE, {
       execute: async () => {
-        const current = this.view.currentWidgetId;
+        const current = this.view.currentWidgetId.get();
         const client = this.terminalController.findClientFromWidgetId(current);
         if (client) {
           client.paste(await this.clipboardService.readText());
@@ -268,7 +287,7 @@ export class TerminalCommandContribution implements CommandContribution {
 
     registry.registerCommand(TERMINAL_COMMANDS.SELECT_ALL, {
       execute: () => {
-        const current = this.view.currentWidgetId;
+        const current = this.view.currentWidgetId.get();
         const client = this.terminalController.findClientFromWidgetId(current);
         if (client) {
           client.selectAll();
@@ -278,9 +297,10 @@ export class TerminalCommandContribution implements CommandContribution {
 
     registry.registerCommand(TERMINAL_COMMANDS.RE_LAUNCH, {
       execute: () => {
-        const groups = this.view.groups;
+        const groups = this.view.groups.get();
         for (const group of groups) {
-          group.widgets.forEach((widget) => {
+          const widgets = group.widgets.get();
+          widgets.forEach((widget) => {
             const client = this.terminalController.findClientFromWidgetId(widget.id);
             if (client) {
               client.reset();
@@ -299,8 +319,8 @@ export class TerminalCommandContribution implements CommandContribution {
 
     registry.registerCommand(TERMINAL_COMMANDS.FOCUS_NEXT_TERMINAL, {
       execute: () => {
-        const group = this.view.currentGroup;
-        if (group.widgets.length <= 1) {
+        const group = this.view.currentGroup.get();
+        if (group && group.widgets.get().length <= 1) {
           return;
         }
         const client = this.getNextOrPrevTerminalClient('next');
@@ -310,28 +330,50 @@ export class TerminalCommandContribution implements CommandContribution {
 
     registry.registerCommand(TERMINAL_COMMANDS.FOCUS_PREVIOUS_TERMINAL, {
       execute: () => {
-        const group = this.view.currentGroup;
-        if (group.widgets.length <= 1) {
+        const group = this.view.currentGroup.get();
+        if (group && group.widgets.get().length <= 1) {
           return;
         }
         const client = this.getNextOrPrevTerminalClient('prev');
         client?.focus();
       },
     });
+
+    registry.registerCommand(TERMINAL_COMMANDS.KILL_PROCESS, {
+      execute: async () => {
+        const current = this.view.currentWidgetId.get();
+        const client = this.terminalController.findClientFromWidgetId(current);
+        if (client) {
+          const select = client.getSelection();
+          if (select && select.length > 0) {
+            // 有选择内容则复制到剪贴板
+            await this.clipboardService.writeText(client.getSelection());
+          } else {
+            // 没有选择内容则执行结束进程命令
+            await this.terminalApi.sendText(current, '\x03');
+          }
+        }
+      },
+    });
   }
 
   private getNextOrPrevTerminalClient(kind: 'next' | 'prev'): ITerminalClient | undefined {
-    const group = this.view.currentGroup;
-    const currentIdx = group.widgets.findIndex((w) => w.id === this.view.currentWidgetId);
-
-    let index;
-    if (kind === 'next') {
-      index = currentIdx === group.widgets.length - 1 ? 0 : currentIdx + 1;
-    } else {
-      index = currentIdx === 0 ? group.widgets.length - 1 : currentIdx - 1;
+    const group = this.view.currentGroup.get();
+    if (!group) {
+      return;
     }
 
-    const widget = group.widgets[index];
+    const widgets = group.widgets.get();
+    const currentIdx = widgets.findIndex((w) => w.id === this.view.currentWidgetId.get());
+
+    let index: number;
+    if (kind === 'next') {
+      index = currentIdx === widgets.length - 1 ? 0 : currentIdx + 1;
+    } else {
+      index = currentIdx === 0 ? widgets.length - 1 : currentIdx - 1;
+    }
+
+    const widget = widgets[index];
     return this.terminalController.findClientFromWidgetId(widget.id);
   }
 }

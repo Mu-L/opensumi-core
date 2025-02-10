@@ -1,17 +1,23 @@
+const path = require('path');
+
+const rulesDirPlugin = require('eslint-plugin-rulesdir');
+rulesDirPlugin.RULES_DIR = path.join(__dirname, 'scripts', 'eslint-rules', 'rules');
+
 module.exports = {
   env: {
     browser: true,
     es6: true,
     node: true,
+    'jest/globals': true,
   },
   parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint', 'eslint-plugin-import'],
+  plugins: ['@typescript-eslint', 'rulesdir', 'import', 'unused-imports'],
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended',
     // 后续可开启eslint-plugin-import的推荐规则
-    // 'plugin:eslint-plugin-import/recommended',
-    // 'plugin:eslint-plugin-import/typescript',
+    'plugin:eslint-plugin-import/recommended',
+    'plugin:eslint-plugin-import/typescript',
     'prettier',
   ],
   settings: {
@@ -147,11 +153,25 @@ module.exports = {
     'no-prototype-builtins': 'warn',
     'prefer-rest-params': 'warn',
     'no-control-regex': 'warn',
+    '@typescript-eslint/no-non-null-assertion': 'off',
+    'unused-imports/no-unused-imports': 'warn',
+    'import/no-named-as-default-member': 'off',
+    'import/no-unresolved': 'off',
+    'import/export': 'off',
+    'import/namespace': 'off',
+    'import/default': 'off',
+    'import/named': 'off',
+    'sort-imports': [
+      'error',
+      {
+        ignoreDeclarationSort: true,
+      },
+    ],
     // 让 import 中的内部包和外部包分组，看起来更美观
     'import/order': [
       'error',
       {
-        groups: ['builtin', 'external', 'internal', 'parent', 'sibling', 'index', 'object', 'unknown'],
+        groups: ['builtin', 'external', 'internal', 'parent', 'sibling', 'index', 'object', 'type', 'unknown'],
         alphabetize: {
           order: 'asc',
           caseInsensitive: true,
@@ -159,6 +179,7 @@ module.exports = {
         'newlines-between': 'always',
       },
     ],
+    'import/no-relative-packages': 'warn',
     'import/no-restricted-paths': [
       'error',
       {
@@ -166,25 +187,66 @@ module.exports = {
           {
             target: './packages/**/*/!(__tests__)/browser/**/*',
             from: './packages/**/*/node/**/*',
-            message: 'browser 不应该引用 node 下模块',
+            message: '`browser` should not import the `node` modules',
           },
           {
             target: './packages/**/*/!(__tests__)/node/**/*',
             from: './packages/**/*/browser/**/*',
-            message: 'node 不应该引用 browser 下模块',
+            message: '`node` should not import the `browser` modules',
           },
           {
             target: './packages/**/*/!(__tests__)/common/**/*',
             from: './packages/**/*/node/**/*',
-            message: 'common 不应该引用 node 下模块',
+            message: '`common` should not import the `node` modules',
           },
           {
             target: './packages/**/*/!(__tests__)/common/**/*',
             from: './packages/**/*/browser/**/*',
-            message: 'common 不应该引用 browser 下模块',
+            message: '`common` should not import the `browser` modules',
           },
         ],
       },
     ],
+    'rulesdir/classnames-import-rule': ['error'],
+    'no-restricted-imports': [
+      'error',
+      {
+        paths: [
+          {
+            name: '@opensumi/monaco-editor-core/esm/vs/editor/editor.api',
+            message: 'please re-export the reference you want from `monaco-editor` in the `ide-monaco` package.',
+          },
+        ],
+        patterns: [
+          {
+            group: ['@opensumi/*/src/**/*', '!@opensumi/ide-dev-tool/src/**/*'],
+            message: "please import from 'esm' or 'lib' instead of 'src'.",
+          },
+        ],
+      },
+    ],
+    '@typescript-eslint/no-unused-vars': ['warn'],
   },
+  overrides: [
+    {
+      files: ['**/*.test.ts', '**/*.test.tsx'],
+      rules: {
+        'no-restricted-imports': 0,
+      },
+    },
+    {
+      files: ['scripts/**'],
+      rules: {
+        'no-restricted-imports': 0,
+        'no-console': 0,
+        'import/no-relative-packages': 0,
+      },
+    },
+    {
+      files: ['__tests__/**', 'tests/**'],
+      plugins: ['jest'],
+      extends: ['plugin:jest/recommended'],
+      rules: { 'jest/prefer-expect-assertions': 'warn', 'jest/no-done-callback': 'warn' },
+    },
+  ],
 };

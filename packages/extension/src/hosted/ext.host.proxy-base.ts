@@ -1,25 +1,27 @@
-import type { ForkOptions } from 'child_process';
 import net from 'net';
 
-import { RPCService, RPCServiceCenter, getRPCService, IRPCProtocol, RPCProtocol } from '@opensumi/ide-connection';
-import { createSocketConnection } from '@opensumi/ide-connection/lib/node';
-import { Emitter, Disposable, IDisposable, getDebugLogger } from '@opensumi/ide-core-node';
+import { IRPCProtocol, RPCService, SumiConnectionMultiplexer } from '@opensumi/ide-connection';
+import { NetSocketConnection } from '@opensumi/ide-connection/lib/common/connection';
+import { Disposable, Emitter, IDisposable, getDebugLogger } from '@opensumi/ide-core-node';
 
 import { IExtensionHostManager } from '../common';
 import {
-  IExtHostProxyRPCService,
+  EXT_HOST_PROXY_IDENTIFIER,
+  EXT_HOST_PROXY_SERVER_PROT,
+  EXT_SERVER_IDENTIFIER,
   IExtHostProxy,
   IExtHostProxyOptions,
-  EXT_HOST_PROXY_PROTOCOL,
-  EXT_HOST_PROXY_IDENTIFIER,
+  IExtHostProxyRPCService,
   IExtServerProxyRPCService,
-  EXT_SERVER_IDENTIFIER,
-  EXT_HOST_PROXY_SERVER_PROT,
 } from '../common/ext.host.proxy';
 import { ExtensionHostManager } from '../node/extension.host.manager';
 
+import type { ForkOptions } from 'child_process';
+
 class ExtHostProxyRPCService extends RPCService implements IExtHostProxyRPCService {
   private extensionHostManager: IExtensionHostManager;
+
+  LOG_TAG = '[ExtHostProxyRPCService]';
 
   constructor(private extServerProxy: IExtServerProxyRPCService) {
     super();
@@ -83,8 +85,6 @@ class ExtHostProxyRPCService extends RPCService implements IExtHostProxyRPCServi
 export class ExtHostProxy extends Disposable implements IExtHostProxy {
   private socket: net.Socket;
 
-  private readonly clientCenter: RPCServiceCenter;
-
   private protocol: IRPCProtocol;
 
   private options: IExtHostProxyOptions;
@@ -95,11 +95,14 @@ export class ExtHostProxy extends Disposable implements IExtHostProxy {
 
   private previouslyDisposer: IDisposable;
 
-  private connectedEmitter = new Emitter<void>();
+  private connectedEmitter = this.registerDispose(new Emitter<void>());
 
-  private readonly debug = getDebugLogger();
+  private readonly logger = getDebugLogger();
 
   public readonly onConnected = this.connectedEmitter.event;
+
+  LOG_TAG = '[ExtHostProxy]';
+  disposer: Disposable;
 
   constructor(options?: IExtHostProxyOptions) {
     super();
@@ -110,7 +113,6 @@ export class ExtHostProxy extends Disposable implements IExtHostProxy {
       },
       ...options,
     };
-    this.clientCenter = new RPCServiceCenter();
   }
 
   init() {
@@ -121,49 +123,47 @@ export class ExtHostProxy extends Disposable implements IExtHostProxy {
     if (this.previouslyDisposer) {
       this.previouslyDisposer.dispose();
     }
-    const disposer = new Disposable();
-    // 每次断连后重新生成 Socket 实例，否则会触发两次 close
+    this.disposer = new Disposable();
+
+    // 每次断连后重新生成 Socket 实例
     this.socket = new net.Socket();
-    disposer.addDispose(this.bindEvent());
-    disposer.addDispose(this.connect());
-    this.previouslyDisposer = disposer;
+    this.disposer.addDispose(this.bindEvent());
+    this.disposer.addDispose(this.connect());
+
+    this.previouslyDisposer = this.disposer;
     this.addDispose(this.previouslyDisposer);
   }
 
   private setRPCMethods() {
-    const proxyService = getRPCService(EXT_HOST_PROXY_PROTOCOL, this.clientCenter);
-    const onMessageEmitter = new Emitter<string>();
-    proxyService.on('onMessage', (msg: string) => {
-      onMessageEmitter.fire(msg);
-    });
-    const onMessage = onMessageEmitter.event;
-    const send = proxyService.onMessage;
+    const connection = new NetSocketConnection(this.socket);
 
-    this.protocol = new RPCProtocol({
-      onMessage,
-      send,
+    this.protocol = new SumiConnectionMultiplexer(connection, {
+      logger: this.logger,
+      timeout: this.options.rpcMessageTimeout,
     });
+
+    this.disposer.addDispose(connection);
+
     this.extServerProxy = this.protocol.getProxy(EXT_SERVER_IDENTIFIER);
     const extHostProxyRPCService = new ExtHostProxyRPCService(this.extServerProxy);
     this.protocol.set(EXT_HOST_PROXY_IDENTIFIER, extHostProxyRPCService);
-    this.addDispose({
+    this.disposer.addDispose({
       dispose: () => extHostProxyRPCService.$dispose(),
     });
   }
 
   private reconnectOnEvent = () => {
-    global.clearTimeout(this.reconnectingTimer);
-    this.reconnectingTimer = global.setTimeout(() => {
-      this.debug.warn('reconnecting ext host server');
+    clearTimeout(this.reconnectingTimer);
+    this.reconnectingTimer = setTimeout(() => {
+      this.logger.warn(this.LOG_TAG, 'reconnecting ext host server');
       this.createSocket();
     }, this.options.retryTime!);
   };
 
   private connectOnEvent = () => {
-    this.debug.info('connect success');
+    this.logger.info(this.LOG_TAG, 'connect success');
     // this.previouslyConnected = true;
-    global.clearTimeout(this.reconnectingTimer);
-    this.setConnection();
+    clearTimeout(this.reconnectingTimer);
     this.setRPCMethods();
     this.connectedEmitter.fire();
   };
@@ -188,15 +188,6 @@ export class ExtHostProxy extends Disposable implements IExtHostProxy {
         this.socket.off('close', this.reconnectOnEvent);
       },
     };
-  }
-
-  private setConnection() {
-    const connection = createSocketConnection(this.socket);
-    this.clientCenter.setConnection(connection);
-    this.socket.once('close', () => {
-      connection.dispose();
-      this.clientCenter.removeConnection(connection);
-    });
   }
 
   private connect = (): IDisposable => {

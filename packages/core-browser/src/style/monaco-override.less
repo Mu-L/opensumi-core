@@ -1,3 +1,5 @@
+@import './monaco-hover.less';
+
 .kt-output-monaco {
   .margin,
   .monaco-editor-background {
@@ -14,6 +16,9 @@
     }
     .find-widget .button {
       outline: none;
+      &.codicon-widget-close {
+        top: 8px;
+      }
     }
     .rename-box {
       .preview {
@@ -56,8 +61,10 @@
 
     .debug-hover-widget {
       position: absolute;
-      margin-top: -1px;
       z-index: 50;
+      background-color: var(--vscode-editorHoverWidget-background);
+      border: 1px solid var(--vscode-editorHoverWidget-border);
+      color: var(--vscode-editorHoverWidget-foreground);
     }
 
     .decorationsOverviewRuler {

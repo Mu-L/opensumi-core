@@ -1,23 +1,23 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   Emitter,
   Event,
-  URI,
-  isUndefined,
-  StorageProvider,
+  IReporterService,
   IStorage,
   STORAGE_NAMESPACE,
-  IReporterService,
+  StorageProvider,
+  URI,
+  isUndefined,
 } from '@opensumi/ide-core-browser';
 import { Deferred } from '@opensumi/ide-core-common';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import * as monaco from '@opensumi/ide-monaco';
 import { DebugProtocol } from '@opensumi/vscode-debugprotocol';
 
-import { BreakpointsChangeEvent, DEBUG_REPORT_NAME, IDebugBreakpoint } from '../../common';
-import { DebugModel } from '../editor';
-import { MarkerManager, Marker } from '../markers';
+import { BreakpointsChangeEvent, DEBUG_REPORT_NAME, IDebugBreakpoint, IDebugModel } from '../../common';
+import { DebugContextKey } from '../contextkeys/debug-contextkey.service';
+import { Marker, MarkerManager } from '../markers';
 
-import { DebugExceptionBreakpoint, BREAKPOINT_KIND } from './breakpoint-marker';
+import { BREAKPOINT_KIND, DebugExceptionBreakpoint } from './breakpoint-marker';
 
 export interface ExceptionBreakpointsChangeEvent {
   filters: string[];
@@ -25,7 +25,7 @@ export interface ExceptionBreakpointsChangeEvent {
 
 export interface SelectedBreakpoint {
   breakpoint?: IDebugBreakpoint;
-  model: DebugModel;
+  model: IDebugModel;
 }
 
 @Injectable()
@@ -43,6 +43,9 @@ export class BreakpointManager extends MarkerManager<IDebugBreakpoint> {
   @Autowired(IReporterService)
   private readonly reporterService: IReporterService;
 
+  @Autowired(DebugContextKey)
+  protected readonly debugContextKey: DebugContextKey;
+
   getKind(): string {
     return BREAKPOINT_KIND;
   }
@@ -57,6 +60,11 @@ export class BreakpointManager extends MarkerManager<IDebugBreakpoint> {
 
   get affected() {
     return Array.from(this._affected.values());
+  }
+
+  protected whenReadyDeferred: Deferred<void> = new Deferred();
+  get whenReady() {
+    return this.whenReadyDeferred.promise;
   }
 
   protected breakpointsDeffered: Deferred<void> | null = null;
@@ -243,6 +251,7 @@ export class BreakpointManager extends MarkerManager<IDebugBreakpoint> {
         this.fireOnDidChangeMarkers(new URI(uri));
       }
       this.updateBreakpoints(this.getBreakpoints());
+      this.debugContextKey.contextActiveBreakpoints.set(breakpointsEnabled);
     }
   }
 
@@ -254,6 +263,7 @@ export class BreakpointManager extends MarkerManager<IDebugBreakpoint> {
       defaultExceptionFilter: [],
     });
     this._breakpointsEnabled = data!.breakpointsEnabled;
+    this.debugContextKey.contextActiveBreakpoints.set(this._breakpointsEnabled);
     // eslint-disable-next-line guard-for-in
     for (const uri in data!.breakpoints) {
       this.setBreakpoints(
@@ -266,6 +276,7 @@ export class BreakpointManager extends MarkerManager<IDebugBreakpoint> {
     this.defaultExceptionFilter.forEach((item) => {
       this.exceptionFilterValue![item.filter] = !!item.default;
     });
+    this.whenReadyDeferred.resolve();
   }
 
   async save(): Promise<void> {

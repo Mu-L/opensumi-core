@@ -96,6 +96,7 @@ hr {
   box-sizing: content-box; // 1
   height: 0; // 1
   overflow: visible; // 2
+  margin-bottom: 0.5em;
 }
 
 //
@@ -114,17 +115,17 @@ h5,
 h6 {
   margin-top: 0;
   margin-bottom: 0.5em;
-  color: @heading-color;
+  color: inherit;
   font-weight: 500;
 }
 
 // Reset margins on paragraphs
 //
 // Similarly, the top margin on `<p>`s get reset. However, we also reset the
-// bottom margin to use `em` units instead of `em`.
+// bottom margin to use `em` units instead of `px`.
 p {
   margin-top: 0;
-  margin-bottom: 1em;
+  margin-bottom: 0.5em;
 }
 
 // Abbreviations
@@ -439,7 +440,9 @@ progress {
 // Correct the cursor style of incement and decement buttons in Chrome.
 [type='number']::-webkit-inner-spin-button,
 [type='number']::-webkit-outer-spin-button {
-  height: auto;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: 'none';
 }
 
 [type='search'] {
@@ -449,6 +452,7 @@ progress {
   // https://github.com/twbs/bootstrap/issues/11586.
   outline-offset: -2px; // 2. Correct the outline style in Safari.
   -webkit-appearance: none;
+  appearance: 'none';
 }
 
 //

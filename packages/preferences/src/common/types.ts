@@ -1,22 +1,24 @@
 import {
+  IDisposable,
+  IResolvedPreferenceViewDesc,
   ISettingGroup,
   ISettingSection,
-  IDisposable,
-  IPreferenceViewDesc,
   PreferenceScope,
 } from '@opensumi/ide-core-browser';
 
 export const SettingContribution = Symbol('SettingContribution');
+
+export interface ISettingRegistry {
+  registerSettingGroup: (settingGroup: ISettingGroup) => IDisposable;
+  registerSettingSection: (key: string, section: ISettingSection) => IDisposable;
+}
 
 export interface SettingContribution {
   /**
    * 注册 Setting
    * @param registry
    */
-  registerSetting?(registy: {
-    registerSettingGroup: (settingGroup: ISettingGroup) => IDisposable;
-    registerSettingSection: (key: string, section: ISettingSection) => IDisposable;
-  }): void;
+  registerSetting?(registry: ISettingRegistry): void;
 
   /**
    * 最后处理一次 SettingGroup
@@ -38,8 +40,26 @@ export interface IPreferenceTask {
 }
 
 export interface ISectionItemData {
+  /**
+   * 有两种：
+   * - section:${sectionTitle}
+   * - group:${groupId}
+   */
+  id?: string;
   scope: PreferenceScope;
+
   title?: string;
   component?: any;
-  preference?: string | IPreferenceViewDesc;
+  preference?: IResolvedPreferenceViewDesc;
+
+  /**
+   * 该 item 在左侧文件树的路径信息
+   */
+  _path?: string;
+}
+
+export const enum ESectionItemKind {
+  Section = 'section:',
+  Group = 'group:',
+  Preference = 'preference:',
 }

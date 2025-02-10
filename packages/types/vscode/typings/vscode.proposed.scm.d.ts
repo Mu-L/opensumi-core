@@ -1,8 +1,3 @@
-/*---------------------------------------------------------------------------------------------
- *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
- *--------------------------------------------------------------------------------------------*/
-
 /**
  * This is the place for API experiments and proposals.
  * These API are NOT stable and subject to change. They are only available in the Insiders
@@ -15,7 +10,6 @@
  */
 
 declare module 'vscode' {
-
   export interface SourceControl {
 
     /**
@@ -37,7 +31,10 @@ declare module 'vscode' {
    * Represents the input box in the Source Control viewlet.
    */
   export interface SourceControlInputBox {
-
+    /**
+		 * Controls whether the input box is enabled (default is `true`).
+		 */
+		enabled: boolean;
     /**
       * Controls whether the input box is visible (default is `true`).
       */

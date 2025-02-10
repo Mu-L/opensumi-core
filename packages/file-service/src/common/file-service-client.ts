@@ -1,27 +1,35 @@
-import { DidFilesChangedParams, FileChangeEvent } from '@opensumi/ide-core-common';
 import {
-  IFileServiceClient as IFileServiceClientToken,
+  BinaryBuffer,
+  DidFilesChangedParams,
+  Event,
+  FileChangeEvent,
   FileSystemProviderCapabilities,
+  IDisposable,
+  IFileServiceClient as IFileServiceClientToken,
+  URI,
 } from '@opensumi/ide-core-common';
-import { URI, Event, IDisposable, BinaryBuffer } from '@opensumi/ide-core-common';
 
 import {
-  FileStat,
-  FileMoveOptions,
-  FileDeleteOptions,
-  FileSetContentOptions,
-  FileCreateOptions,
   FileCopyOptions,
+  FileCreateOptions,
+  FileDeleteOptions,
+  FileMoveOptions,
+  FileSetContentOptions,
+  FileStat,
   FileSystemProvider,
-  TextDocumentContentChangeEvent,
-  IFileSystemProviderRegistrationEvent,
+  IFileSystemProviderActivationEvent,
   IFileSystemProviderCapabilitiesChangeEvent,
+  IFileSystemProviderRegistrationEvent,
+  TextDocumentContentChangeEvent,
 } from './files';
 import { IFileServiceWatcher } from './watcher';
 
 export const IFileServiceClient = IFileServiceClientToken;
 
 export interface IFileServiceClient {
+  initialize?: () => Promise<void>;
+  shouldWaitProvider(scheme: string): Promise<boolean>;
+
   onFilesChanged: Event<FileChangeEvent>;
 
   onFileProviderChanged: Event<string[]>;
@@ -36,7 +44,7 @@ export interface IFileServiceClient {
    * @param uri The uri of the file.
    * @return An array of bytes or a thenable that resolves to such.
    * @throws [`FileNotFound`](#FileSystemError.FileNotFound) when `uri` doesn't exist.
-   * @throws [`FileIsDirectory`](#FileSystemError.FileIsDirectory) when `uri` is a directory.
+   * @throws [`FileIsADirectory`](#FileSystemError.FileIsADirectory) when `uri` is a directory.
    * @throws [`FileIsNoPermissions`](#FileSystemError.FileIsNoPermissions) when `uri` has no permissions.
    */
   resolveContent(uri: string, options?: FileSetContentOptions): Promise<{ content: string }>;
@@ -99,6 +107,8 @@ export interface IFileServiceClient {
   readonly onDidChangeFileSystemProviderRegistrations: Event<IFileSystemProviderRegistrationEvent>;
 
   readonly onDidChangeFileSystemProviderCapabilities: Event<IFileSystemProviderCapabilitiesChangeEvent>;
+
+  readonly onWillActivateFileSystemProvider: Event<IFileSystemProviderActivationEvent>;
 }
 
 export interface IBrowserFileSystemRegistry {

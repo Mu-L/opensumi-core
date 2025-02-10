@@ -1,12 +1,12 @@
 import { Autowired } from '@opensumi/di';
 import {
-  DIALOG_COMMANDS,
-  Domain,
-  localize,
   CommandContribution,
   CommandRegistry,
+  DIALOG_COMMANDS,
+  Domain,
   KeybindingContribution,
   KeybindingRegistry,
+  localize,
 } from '@opensumi/ide-core-browser';
 import { DialogViewVisibleContext } from '@opensumi/ide-core-browser/lib/contextkey/dialog';
 
@@ -26,8 +26,10 @@ export class DialogContribution implements CommandContribution, KeybindingContri
       {
         execute: () => {
           const buttons = this.dialogService.getButtons();
-          // 默认使用最后一个选项作为返回值
-          this.dialogService.hide(buttons[buttons.length - 1]);
+          if (buttons && buttons.length > 0) {
+            // 默认使用最后一个选项作为返回值
+            this.dialogService.hide(buttons?.[buttons.length - 1]);
+          }
         },
       },
     );

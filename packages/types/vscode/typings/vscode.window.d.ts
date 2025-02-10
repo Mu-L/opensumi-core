@@ -1,5 +1,4 @@
 declare module 'vscode' {
-
   /**
    * Represents the alignment of status bar items.
    */
@@ -107,6 +106,70 @@ declare module 'vscode' {
      * [hide](#StatusBarItem.hide).
      */
     dispose(): void;
+  }
+
+  /**
+   * A channel for containing log output.
+   *
+   * To get an instance of a `LogOutputChannel` use
+   * {@link window.createOutputChannel createOutputChannel}.
+   */
+  export interface LogOutputChannel extends OutputChannel {
+
+    /**
+     * The current log level of the channel. Defaults to {@link env.logLevel editor log level}.
+     */
+    readonly logLevel: LogLevel;
+
+    /**
+     * An {@link Event} which fires when the log level of the channel changes.
+     */
+    readonly onDidChangeLogLevel: Event<LogLevel>;
+
+    /**
+     * Outputs the given trace message to the channel. Use this method to log verbose information.
+     *
+     * The message is only logged if the channel is configured to display {@link LogLevel.Trace trace} log level.
+     *
+     * @param message trace message to log
+     */
+    trace(message: string, ...args: any[]): void;
+
+    /**
+     * Outputs the given debug message to the channel.
+     *
+     * The message is only logged if the channel is configured to display {@link LogLevel.Debug debug} log level or lower.
+     *
+     * @param message debug message to log
+     */
+    debug(message: string, ...args: any[]): void;
+
+    /**
+     * Outputs the given information message to the channel.
+     *
+     * The message is only logged if the channel is configured to display {@link LogLevel.Info info} log level or lower.
+     *
+     * @param message info message to log
+     */
+    info(message: string, ...args: any[]): void;
+
+    /**
+     * Outputs the given warning message to the channel.
+     *
+     * The message is only logged if the channel is configured to display {@link LogLevel.Warning warning} log level or lower.
+     *
+     * @param message warning message to log
+     */
+    warn(message: string, ...args: any[]): void;
+
+    /**
+     * Outputs the given error or error message to the channel.
+     *
+     * The message is only logged if the channel is configured to display {@link LogLevel.Error error} log level or lower.
+     *
+     * @param error Error or error message to log
+     */
+    error(error: string | Error, ...args: any[]): void;
   }
 
   export interface OutputChannel {
@@ -258,7 +321,6 @@ declare module 'vscode' {
      * @param hideAfterTimeout Timeout in milliseconds after which the message will be disposed.
      * @return A disposable which hides the status bar message.
      */
-    // tslint:disable-next-line: unified-signatures
     export function setStatusBarMessage(text: string, hideAfterTimeout: number): Disposable;
 
     /**
@@ -269,7 +331,6 @@ declare module 'vscode' {
      * @param hideWhenDone Thenable on which completion (resolve or reject) the message will be disposed.
      * @return A disposable which hides the status bar message.
      */
-    // tslint:disable-next-line: unified-signatures
     export function setStatusBarMessage(text: string, hideWhenDone: Thenable<any>): Disposable;
 
     /**
@@ -303,12 +364,27 @@ declare module 'vscode' {
      */
     export function createStatusBarItem(id: string, alignment?: StatusBarAlignment, priority?: number): StatusBarItem;
 
+		/**
+		 * Creates a new {@link OutputChannel output channel} with the given name and language id
+		 * If language id is not provided, then **Log** is used as default language id.
+		 *
+		 * You can access the visible or active output channel as a {@link TextDocument text document} from {@link window.visibleTextEditors visible editors} or {@link window.activeTextEditor active editor}
+		 * and use the language id to contribute language features like syntax coloring, code lens etc.,
+		 *
+		 * @param name Human-readable string which will be used to represent the channel in the UI.
+		 * @param languageId The identifier of the language associated with the channel.
+		 * @returns A new output channel.
+		 */
+		export function createOutputChannel(name: string, languageId?: string): OutputChannel;
+
     /**
-     * Creates a new [output channel](#OutputChannel) with the given name.
+     * Creates a new {@link LogOutputChannel log output channel} with the given name.
      *
      * @param name Human-readable string which will be used to represent the channel in the UI.
+     * @param options Options for the log output channel.
+     * @returns A new log output channel.
      */
-    export function createOutputChannel(name: string): OutputChannel;
+    export function createOutputChannel(name: string, options: { /** literal-type defines return type */log: true; languageId?: string }): LogOutputChannel;
 
     /**
      * The currently opened terminals or an empty array.
@@ -343,6 +419,25 @@ declare module 'vscode' {
      * An {@link Event} which fires when a {@link Terminal.state terminal's state} has changed.
      */
     export const onDidChangeTerminalState: Event<Terminal>;
+
+    /**
+     * Fires when shell integration activates or one of its properties changes in a terminal.
+     */
+    export const onDidChangeTerminalShellIntegration: Event<TerminalShellIntegrationChangeEvent>;
+
+    /**
+     * This will be fired when a terminal command is started. This event will fire only when
+     * [shell integration](https://code.visualstudio.com/docs/terminal/shell-integration) is
+     * activated for the terminal.
+     */
+    export const onDidStartTerminalShellExecution: Event<TerminalShellExecutionStartEvent>;
+
+    /**
+     * This will be fired when a terminal command is ended. This event will fire only when
+     * [shell integration](https://code.visualstudio.com/docs/terminal/shell-integration) is
+     * activated for the terminal.
+     */
+    export const onDidEndTerminalShellExecution: Event<TerminalShellExecutionEndEvent>;
 
     /**
      * Represents the current window's state.
@@ -794,6 +889,12 @@ declare module 'vscode' {
     readonly visible: boolean;
 
     /**
+     * The badge to display for this webview view.
+     * To remove the badge, set to undefined.
+     */
+    badge?: ViewBadge | undefined;
+
+    /**
      * Event fired when the visibility of the view changes.
      *
      * Actions that trigger a visibility change:
@@ -893,5 +994,4 @@ declare module 'vscode' {
      */
     readonly kind: ColorThemeKind;
   }
-
 }

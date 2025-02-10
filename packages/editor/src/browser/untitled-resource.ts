@@ -1,35 +1,65 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  Emitter,
-  Event,
-  Schemes,
-  WithEventBus,
-  IEditorDocumentChange,
-  IEditorDocumentModelSaveResult,
   AppConfig,
   CommandService,
-  OperatingSystem,
+  Emitter,
+  Event,
+  FileStat,
   IApplicationService,
-  PreferenceService,
-  getLanguageIdFromMonaco,
-  localize,
-  formatLocalize,
+  IEditorDocumentChange,
+  IEditorDocumentModelSaveResult,
   MessageType,
-  path,
-  isWindows,
+  OperatingSystem,
+  PreferenceService,
   SaveTaskResponseState,
+  Schemes,
+  URI,
+  WithEventBus,
+  formatLocalize,
+  getLanguageIdFromMonaco,
+  isWindows,
+  localize,
+  path,
 } from '@opensumi/ide-core-browser';
 import { EOL } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 import { IDialogService } from '@opensumi/ide-overlay';
+import { IWorkspaceService } from '@opensumi/ide-workspace';
 
 import { AskSaveResult, IResource, IResourceProvider, WorkbenchEditorService } from '../common';
 
-import { IEditorDocumentModelService, IEditorDocumentModelContentProvider } from './doc-model/types';
+import { IEditorDocumentModelContentProvider, IEditorDocumentModelService } from './doc-model/types';
 
 @Injectable()
 export class UntitledDocumentIdCounter {
+  static readonly UNTITLED_FILE_NAME_PREFIX = 'Untitled-';
+
+  @Autowired(IWorkspaceService)
+  protected readonly workspaceService: IWorkspaceService;
+
   private _id = 1;
+
+  async update() {
+    this._id = await this.getLatestUnitiedIndex();
+  }
+
+  async getLatestUnitiedIndex(children?: FileStat[]): Promise<number> {
+    await this.workspaceService.whenReady;
+    const files = children || this.workspaceService.workspace?.children || [];
+    const unitiedFiles = files.filter((file) =>
+      URI.file(file.uri).displayName.startsWith(UntitledDocumentIdCounter.UNTITLED_FILE_NAME_PREFIX),
+    );
+    // 提取文件名中的数字部分并找到最大值
+    const indices = unitiedFiles
+      .map((file) => {
+        const match = URI.file(file.uri).displayName.match(
+          new RegExp(`^${UntitledDocumentIdCounter.UNTITLED_FILE_NAME_PREFIX}(\\d+)`, 'i'),
+        );
+        return match ? parseInt(match[1], 10) : -1; // 如果没有匹配，返回 -1
+      })
+      .filter((index) => index !== -1); // 过滤掉无效的索引
+    // 返回最新的起始下标
+    return indices.length > 0 ? Math.max(...indices) + 1 : 1; // 如果没有文件，返回 1
+  }
 
   get id() {
     return this._id++;
@@ -52,6 +82,9 @@ export class UntitledSchemeDocumentProvider implements IEditorDocumentModelConte
 
   @Autowired(IApplicationService)
   protected readonly applicationService: IApplicationService;
+
+  @Autowired(UntitledDocumentIdCounter)
+  private untitledIndex: UntitledDocumentIdCounter;
 
   private _onDidChangeContent: Emitter<URI> = new Emitter();
 
@@ -171,8 +204,8 @@ export class UntitledSchemeResourceProvider extends WithEventBus implements IRes
   }
 
   async shouldCloseResourceWithoutConfirm(resource: IResource) {
-    const documentModelRef = this.documentModelService.getModelReference(resource.uri, 'close-resource-check');
-    if (documentModelRef && documentModelRef.instance.dirty) {
+    const documentModelRef = this.documentModelService.getModelDescription(resource.uri, 'close-resource-check');
+    if (documentModelRef && documentModelRef.dirty) {
       return true;
     }
     return false;
@@ -195,29 +228,27 @@ export class UntitledSchemeResourceProvider extends WithEventBus implements IRes
       documentModelRef.dispose();
       return false;
     } else {
+      documentModelRef.dispose();
       return true;
     }
   }
 
   async shouldCloseResource(resource: IResource) {
-    const documentModelRef = this.documentModelService.getModelReference(resource.uri, 'close-resource-check');
-    if (!documentModelRef || !documentModelRef.instance.dirty) {
-      if (documentModelRef) {
-        documentModelRef.dispose();
-      }
+    const documentModelRef = this.documentModelService.getModelDescription(resource.uri, 'close-resource-check');
+    if (!documentModelRef || !documentModelRef.dirty) {
       return true;
     }
     // 询问用户是否保存
     const buttons = {
-      [localize('file.prompt.dontSave', '不保存')]: AskSaveResult.REVERT,
-      [localize('file.prompt.save', '保存')]: AskSaveResult.SAVE,
-      [localize('file.prompt.cancel', '取消')]: AskSaveResult.CANCEL,
+      [localize('file.prompt.dontSave', "Don't Save")]: AskSaveResult.REVERT,
+      [localize('file.prompt.save', 'Save')]: AskSaveResult.SAVE,
+      [localize('file.prompt.cancel', 'Cancel')]: AskSaveResult.CANCEL,
     };
-    const selection = await this.dialogService.open(
-      formatLocalize('saveChangesMessage', resource.name),
-      MessageType.Info,
-      Object.keys(buttons),
-    );
+    const selection = await this.dialogService.open({
+      message: formatLocalize('saveChangesMessage', resource.name),
+      type: MessageType.Info,
+      buttons: Object.keys(buttons),
+    });
     return await this.close(resource, buttons[selection!]);
   }
 }

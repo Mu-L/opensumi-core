@@ -1,4 +1,4 @@
-import { strings, CaseInsensitiveMap } from '@opensumi/ide-utils';
+import { CaseInsensitiveMap, strings } from '@opensumi/ide-utils';
 
 const { format, mnemonicButtonLabel } = strings;
 
@@ -6,7 +6,7 @@ export type ILocalizationKey = string; // ts不支持symbol作为key
 
 let _currentLanguageId = 'zh-CN';
 
-const localizationRegistryMap = new CaseInsensitiveMap<string, LocalizationRegistry>();
+export const localizationRegistryMap = new CaseInsensitiveMap<string, LocalizationRegistry>();
 
 export function localize(
   symbol: ILocalizationKey,
@@ -107,11 +107,10 @@ class LocalizationRegistry implements ILocalizationRegistry {
 }
 
 /**
- * 获取当前语言别名，默认为中文
- * TODO 临时通过 href 获取
- * @returns 当前语言别名
+ * 获取当前语言 ID，默认为中文
+ * @returns 当前语言 ID
  */
-export function getLanguageId(scope = 'host'): string {
+export function getLanguageId(): string {
   return _currentLanguageId;
 }
 
@@ -200,4 +199,44 @@ export function replaceNlsField(
     }
   }
   return label;
+}
+
+export interface ILocalizedStr {
+  raw: string;
+  localized: string;
+  /**
+   * The value is usually in English.
+   * which is used so that users can search for commands in English even in non-English environments.
+   *
+   * Alert: before using this value, you should check if `alias === localized`.
+   */
+  alias: string;
+}
+
+export function createLocalizedStr(
+  raw: string,
+  scope?: string,
+  fallback?: string,
+  language?: string,
+  defaultLanguageId = 'en-US',
+): ILocalizedStr {
+  const localized = replaceNlsField(raw, scope, fallback, language) || raw;
+  const alias = replaceNlsField(raw, scope, undefined, defaultLanguageId);
+  return {
+    raw,
+    localized,
+    alias: alias || localized,
+  };
+}
+
+export function createFormatLocalizedStr(raw: ILocalizationKey, ...args: any): ILocalizedStr {
+  const defaultLanguageId = 'en-US';
+  const localized = format(localize(raw, raw, undefined), ...args) || raw;
+  const alias = format(localize(raw, raw, undefined, defaultLanguageId), ...args);
+
+  return {
+    raw,
+    localized,
+    alias: alias || localized,
+  };
 }

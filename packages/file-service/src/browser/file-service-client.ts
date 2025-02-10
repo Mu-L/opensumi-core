@@ -1,51 +1,51 @@
 import { TextDocument } from 'vscode-languageserver-types';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  URI,
+  AppConfig,
+  BinaryBuffer,
+  Deferred,
+  DisposableCollection,
   Emitter,
   Event,
-  FileUri,
-  DisposableCollection,
-  IDisposable,
-  BinaryBuffer,
-  parseGlob,
-  ParsedPattern,
-  Deferred,
-  Uri,
-  FilesChangeEvent,
   ExtensionActivateEvent,
-  AppConfig,
+  FileUri,
+  FilesChangeEvent,
+  IDisposable,
+  ParsedPattern,
+  URI,
+  Uri,
+  parseGlob,
 } from '@opensumi/ide-core-browser';
 import { CorePreferences } from '@opensumi/ide-core-browser/lib/core-preferences';
-import { FileSystemProviderCapabilities, IEventBus, Schemes } from '@opensumi/ide-core-common';
+import { FileSystemProviderCapabilities, IEventBus, Schemes, isUndefined } from '@opensumi/ide-core-common';
 import { IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
+import { IApplicationService } from '@opensumi/ide-core-common/lib/types/application';
 import { Iterable } from '@opensumi/monaco-editor-core/esm/vs/base/common/iterator';
 
 import {
-  FileStat,
+  DidFilesChangedParams,
+  FileAccess,
+  FileChange,
+  FileChangeEvent,
+  FileCopyOptions,
+  FileCreateOptions,
   FileDeleteOptions,
   FileMoveOptions,
-  IBrowserFileSystemRegistry,
-  IFileSystemProvider,
-  FileSystemProvider,
-  FileSystemError,
-  FileAccess,
-  IDiskFileProvider,
-  containsExtraFileMethod,
-  IFileSystemProviderRegistrationEvent,
-  IFileSystemProviderCapabilitiesChangeEvent,
-} from '../common';
-import {
-  FileChangeEvent,
-  DidFilesChangedParams,
-  FileChange,
-  IFileServiceClient,
   FileSetContentOptions,
-  FileCreateOptions,
-  FileCopyOptions,
+  FileStat,
+  FileSystemError,
+  FileSystemProvider,
+  IBrowserFileSystemRegistry,
+  IDiskFileProvider,
+  IFileServiceClient,
   IFileServiceWatcher,
+  IFileSystemProvider,
+  IFileSystemProviderActivationEvent,
+  IFileSystemProviderCapabilitiesChangeEvent,
+  IFileSystemProviderRegistrationEvent,
   TextDocumentContentChangeEvent,
+  containsExtraFileMethod,
 } from '../common';
 
 import { FileSystemWatcher } from './watcher';
@@ -65,7 +65,7 @@ export class BrowserFileSystemRegistryImpl implements IBrowserFileSystemRegistry
 }
 
 @Injectable()
-export class FileServiceClient implements IFileServiceClient {
+export class FileServiceClient implements IFileServiceClient, IDisposable {
   protected readonly watcherWithSchemaMap = new Map<string, number[]>();
   protected readonly watcherDisposerMap = new Map<number, IDisposable>();
   protected readonly onFileChangedEmitter = new Emitter<FileChangeEvent>();
@@ -79,6 +79,9 @@ export class FileServiceClient implements IFileServiceClient {
 
   protected readonly _onDidChangeFileSystemProviderRegistrations = new Emitter<IFileSystemProviderRegistrationEvent>();
   readonly onDidChangeFileSystemProviderRegistrations = this._onDidChangeFileSystemProviderRegistrations.event;
+
+  private readonly _onWillActivateFileSystemProvider = new Emitter<IFileSystemProviderActivationEvent>();
+  readonly onWillActivateFileSystemProvider = this._onWillActivateFileSystemProvider.event;
 
   private readonly _onDidChangeFileSystemProviderCapabilities =
     new Emitter<IFileSystemProviderCapabilitiesChangeEvent>();
@@ -110,6 +113,13 @@ export class FileServiceClient implements IFileServiceClient {
   @Autowired(AppConfig)
   private readonly appConfig: AppConfig;
 
+  @Autowired(IApplicationService)
+  protected readonly applicationService: IApplicationService;
+
+  private get clientId() {
+    return this.applicationService.clientId;
+  }
+
   private userHomeDeferred: Deferred<FileStat | undefined> = new Deferred();
 
   public options = {
@@ -128,6 +138,13 @@ export class FileServiceClient implements IFileServiceClient {
         }
       }),
     );
+  }
+
+  async initialize() {
+    const provider = await this.getProvider(Schemes.file);
+    if (provider.initialize) {
+      await provider.initialize(this.clientId, this.appConfig.recursiveWatcherBackend);
+    }
   }
 
   private async doGetCurrentUserHome() {
@@ -169,6 +186,12 @@ export class FileServiceClient implements IFileServiceClient {
     return { content: buffer };
   }
 
+  async readFileStream(uri: string) {
+    const _uri = this.convertUri(uri);
+    const provider = await this.getProvider(_uri.scheme);
+    return await provider.readFileStream!(_uri.codeUri);
+  }
+
   async getFileStat(uri: string, withChildren = true) {
     const _uri = this.convertUri(uri);
     const provider = await this.getProvider(_uri.scheme);
@@ -194,10 +217,10 @@ export class FileServiceClient implements IFileServiceClient {
       throw FileSystemError.FileNotFound(file.uri, 'File not found.');
     }
     if (stat.isDirectory) {
-      throw FileSystemError.FileIsDirectory(file.uri, 'Cannot set the content.');
+      throw FileSystemError.FileIsADirectory(file.uri, 'Cannot set the content.');
     }
     if (!(await this.isInSync(file, stat))) {
-      throw this.createOutOfSyncError(file, stat);
+      throw this.createOutOfSyncError(file);
     }
     await provider.writeFile(
       _uri.codeUri,
@@ -220,10 +243,10 @@ export class FileServiceClient implements IFileServiceClient {
       throw FileSystemError.FileNotFound(file.uri, 'File not found.');
     }
     if (stat.isDirectory) {
-      throw FileSystemError.FileIsDirectory(file.uri, 'Cannot set the content.');
+      throw FileSystemError.FileIsADirectory(file.uri, 'Cannot set the content.');
     }
     if (!this.checkInSync(file, stat)) {
-      throw this.createOutOfSyncError(file, stat);
+      throw this.createOutOfSyncError(file);
     }
     if (contentChanges.length === 0) {
       return stat;
@@ -331,9 +354,18 @@ export class FileServiceClient implements IFileServiceClient {
 
   // 添加监听文件
   async watchFileChanges(uri: URI, excludes?: string[]): Promise<IFileServiceWatcher> {
+    const pollingWatcherDirectories = this.appConfig.pollingWatcherDirectories || [];
+    const pollingWatch = pollingWatcherDirectories.some((dir) => uri.path.toString().startsWith(dir));
+
     const _uri = this.convertUri(uri.toString());
-    if (this.uriWatcherMap.has(_uri.toString())) {
-      return this.uriWatcherMap.get(_uri.toString())!;
+    const originWatcher = this.uriWatcherMap.get(_uri.toString());
+    if (originWatcher) {
+      // 这里兼容重连逻辑，重连时 watcher 会 disposed，需要重新生成
+      if (!originWatcher.isDisposed()) {
+        return originWatcher;
+      } else {
+        this.uriWatcherMap.delete(_uri.toString());
+      }
     }
 
     const id = this.watcherId++;
@@ -342,6 +374,7 @@ export class FileServiceClient implements IFileServiceClient {
 
     const watcherId = await provider.watch(_uri.codeUri, {
       excludes,
+      pollingWatch,
     });
 
     this.watcherDisposerMap.set(id, {
@@ -396,7 +429,7 @@ export class FileServiceClient implements IFileServiceClient {
   }
 
   async delete(uriString: string, options?: FileDeleteOptions) {
-    if (this.appConfig.isElectronRenderer && options && options.moveToTrash) {
+    if (this.appConfig.isElectronRenderer && options?.moveToTrash !== false) {
       const uri = new URI(uriString);
       if (uri.scheme === Schemes.file) {
         return (this.injector.get(IElectronMainUIService) as IElectronMainUIService).moveToTrash(uri.codeUri.fsPath);
@@ -426,7 +459,7 @@ export class FileServiceClient implements IFileServiceClient {
 
   registerProvider(scheme: string, provider: FileSystemProvider): IDisposable {
     if (this.fsProviders.has(scheme)) {
-      throw new Error(`'${scheme}' 的文件系统 provider 已存在`);
+      throw new Error(`The file system provider for \`${scheme}\` already registered`);
     }
 
     const disposables: IDisposable[] = [];
@@ -513,7 +546,7 @@ export class FileServiceClient implements IFileServiceClient {
     const _uri = new URI(uri);
 
     if (!_uri.scheme) {
-      throw new Error(`没有设置 scheme: ${uri}`);
+      throw new Error(`Unsupported convert Uri with non-scheme Uri: ${uri}`);
     }
 
     return _uri;
@@ -531,6 +564,26 @@ export class FileServiceClient implements IFileServiceClient {
         this.filesExcludesMatcherList.push(parseGlob(str));
       }
     });
+  }
+
+  public async shouldWaitProvider(scheme: string): Promise<boolean> {
+    const activateSchema = await this._onWillActivateFileSystemProvider.fireAndAwait<string[]>({
+      scheme,
+    });
+
+    const { result } = activateSchema[0];
+
+    if (result && result.includes(scheme)) {
+      const providerSchema = await Event.toPromise(
+        Event.filter(this.onFileProviderChanged, (schema: string[]) => schema.includes(scheme)),
+      );
+
+      if (!isUndefined(providerSchema)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async getProvider<T extends string>(
@@ -629,8 +682,8 @@ export class FileServiceClient implements IFileServiceClient {
     return stat.lastModification === file.lastModification && stat.size === file.size;
   }
 
-  protected createOutOfSyncError(file: FileStat, stat: FileStat): Error {
-    return FileSystemError.FileIsOutOfSync(file, stat);
+  protected createOutOfSyncError(file: FileStat): Error {
+    return FileSystemError.FileIsOutOfSync(file.uri);
   }
 
   protected async doGetEncoding(option?: { encoding?: string }): Promise<string> {

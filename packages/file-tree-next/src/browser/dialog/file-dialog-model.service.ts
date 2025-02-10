@@ -1,17 +1,17 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  DecorationsManager,
   Decoration,
+  DecorationsManager,
   IRecycleTreeHandle,
-  TreeNodeType,
   PromptValidateMessage,
-  TreeNodeEvent,
   Tree,
+  TreeNodeEvent,
+  TreeNodeType,
 } from '@opensumi/ide-components';
-import { URI, DisposableCollection, Emitter, CorePreferences, Event } from '@opensumi/ide-core-browser';
+import { CorePreferences, DisposableCollection, Emitter, Event, URI } from '@opensumi/ide-core-browser';
 import { LabelService } from '@opensumi/ide-core-browser/lib/services';
 
-import { PasteTypes, IFileDialogTreeService, IFileDialogModel } from '../../common';
+import { IFileDialogModel, IFileDialogTreeService, PasteTypes } from '../../common';
 import { Directory, File } from '../../common/file-tree-node.define';
 import { FileTreeModel } from '../file-tree-model';
 import styles from '../file-tree-node.module.less';
@@ -24,7 +24,7 @@ export interface IParseStore {
 }
 
 export interface IFileTreeHandle extends IRecycleTreeHandle {
-  hasDirectFocus: () => boolean;
+  hasDirectFocus?: () => boolean;
 }
 
 export interface FileTreeValidateMessage extends PromptValidateMessage {
@@ -152,23 +152,6 @@ export class FileTreeDialogModel implements IFileDialogModel {
     this.disposableCollection.push(
       this.treeModel.root.watcher.on(TreeNodeEvent.DidResolveChildren, (target) => {
         this.loadingDecoration.removeTarget(target);
-      }),
-    );
-    this.disposableCollection.push(
-      this.treeModel!.onWillUpdate(() => {
-        // 更新树前更新下选中节点
-        if (this.focusedFile) {
-          const node = this.treeModel?.root.getTreeNodeByPath(this.focusedFile.path);
-          if (node) {
-            this.activeFileDecoration(node as File, false);
-          }
-        } else if (this.selectedFiles.length !== 0) {
-          // 仅处理一下单选情况
-          const node = this.treeModel?.root.getTreeNodeByPath(this.selectedFiles[0].path);
-          if (node) {
-            this.selectFileDecoration(node as File, false);
-          }
-        }
       }),
     );
   }

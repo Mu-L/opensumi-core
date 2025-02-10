@@ -1,13 +1,13 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import { AppConfig } from '@opensumi/ide-core-browser';
-import { isWindows, URI, Deferred, StoragePaths, path, Schemes } from '@opensumi/ide-core-common';
+import { Deferred, Schemes, StoragePaths, URI, isWindows, path } from '@opensumi/ide-core-common';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
-import { IFileServiceClient, FileStat } from '@opensumi/ide-file-service';
+import { FileStat, IFileServiceClient } from '@opensumi/ide-file-service';
 import { ILoggerManagerClient } from '@opensumi/ide-logs';
 import {
   DEFAULT_WORKSPACE_SUFFIX_NAME,
-  WORKSPACE_USER_STORAGE_FOLDER_NAME,
   UNTITLED_WORKSPACE,
+  WORKSPACE_USER_STORAGE_FOLDER_NAME,
 } from '@opensumi/ide-workspace';
 
 import { IExtensionStoragePathServer } from '../common';
@@ -65,10 +65,11 @@ export class ExtensionStoragePathServer implements IExtensionStoragePathServer {
     workspace: FileStat | undefined,
     roots: FileStat[],
     extensionStorageDirName: string,
-  ): Promise<URI | undefined> {
+  ): Promise<URI> {
     const parentStorageDir = await this.getWorkspaceStorageDirPath(extensionStorageDirName);
 
     if (!parentStorageDir) {
+      // ? 这里应该没有理由会抛出异常
       throw new Error('Unable to get parent storage directory');
     }
 

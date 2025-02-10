@@ -1,20 +1,19 @@
-import { observer } from 'mobx-react-lite';
 import React from 'react';
 
 import {
-  ComponentRenderer,
+  AppConfig,
   ComponentRegistry,
+  ComponentRenderer,
+  IClientApp,
   SlotLocation,
   useInjectable,
-  AppConfig,
-  IClientApp,
 } from '@opensumi/ide-core-browser';
 
 import { CtxMenu } from './ctx-menu/ctx-menu.view';
 import { Dialog } from './dialog.view';
 import './styles.module.less';
 
-export const Overlay = observer(() => {
+export const Overlay = () => {
   const componentRegistry: ComponentRegistry = useInjectable(ComponentRegistry);
   const clientApp = useInjectable(IClientApp);
   const [extraComponents, setExtra] = React.useState<React.ComponentType[]>([]);
@@ -46,4 +45,4 @@ export const Overlay = observer(() => {
       <ComponentRenderer Component={extraComponents} />
     </div>
   );
-});
+};

@@ -1,53 +1,42 @@
-import path from 'path';
-
 import { Injector } from '@opensumi/di';
-import { RPCProtocol, ProxyIdentifier } from '@opensumi/ide-connection';
+import { ProxyIdentifier, SumiConnectionMultiplexer } from '@opensumi/ide-connection';
 import {
-  getDebugLogger,
   Emitter,
+  IExtensionLogger,
+  IExtensionProps,
+  IReporter,
   IReporterService,
   REPORT_HOST,
   REPORT_NAME,
-  IExtensionProps,
-  Uri,
-  timeout,
   ReporterService,
-  IReporter,
-  IExtensionLogger,
+  Uri,
   arrays,
+  timeout,
 } from '@opensumi/ide-core-common';
-import { AppConfig } from '@opensumi/ide-core-node/lib/types';
+import { join } from '@opensumi/ide-utils/lib/path';
 
-import { EXTENSION_EXTEND_SERVICE_PREFIX, IExtensionHostService, IExtendProxy, getExtensionId } from '../common';
-import { ActivatedExtension, ExtensionsActivator, ActivatedExtensionJSON } from '../common/activator';
+import { EXTENSION_EXTEND_SERVICE_PREFIX, IExtendProxy, IExtensionHostService, getExtensionId } from '../common';
+import { ActivatedExtension, ActivatedExtensionJSON, ExtensionsActivator } from '../common/activator';
+import { ExtHostAppConfig } from '../common/ext.process';
+import { getNodeRequire } from '../common/utils';
 import {
   ExtHostAPIIdentifier,
-  MainThreadAPIIdentifier,
-  VSCodeExtensionService,
-  IExtensionDescription,
   ExtensionIdentifier,
+  IExtHostLocalization,
+  IExtensionDescription,
+  MainThreadAPIIdentifier,
 } from '../common/vscode';
 
 import { createAPIFactory as createSumiAPIFactory } from './api/sumi/ext.host.api.impl';
 import { createAPIFactory as createTelemetryAPIFactory } from './api/telemetry/ext.host.api.impl';
 import { createApiFactory as createVSCodeAPIFactory } from './api/vscode/ext.host.api.impl';
 import { ExtensionContext } from './api/vscode/ext.host.extensions';
+import { ExtHostLocalization } from './api/vscode/ext.host.localization';
 import { ExtHostSecret } from './api/vscode/ext.host.secrets';
 import { ExtHostStorage } from './api/vscode/ext.host.storage';
 import { KTExtension } from './vscode.extension';
 
 const { enumValueToArray } = arrays;
-
-/**
- * 在Electron中，会将kaitian中的extension-host使用webpack打成一个，所以需要其他方法来获取原始的require
- */
-declare let __webpack_require__: any;
-declare let __non_webpack_require__: any;
-
-// https://github.com/webpack/webpack/issues/4175#issuecomment-342931035
-export function getNodeRequire() {
-  return typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;
-}
 
 enum EInternalModule {
   VSCODE = 'vscode',
@@ -57,17 +46,26 @@ enum EInternalModule {
 }
 
 const __interceptModule = enumValueToArray(EInternalModule);
+const __interceptModuleSet = new Set<string>(__interceptModule);
 
 abstract class ApiImplFactory {
   private apiFactory: any;
   private extAPIImpl: Map<string, any>;
 
-  constructor(readonly rpcProtocol: RPCProtocol, readonly extHost: IExtensionHostService, readonly injector: Injector) {
+  constructor(
+    readonly rpcProtocol: SumiConnectionMultiplexer,
+    readonly extHost: IExtensionHostService,
+    readonly injector: Injector,
+  ) {
     this.apiFactory = this.createAPIFactory(rpcProtocol, extHost, injector);
     this.extAPIImpl = new Map();
   }
 
-  abstract createAPIFactory(rpcProtocol: RPCProtocol, extHost: IExtensionHostService, injector: Injector): any;
+  abstract createAPIFactory(
+    rpcProtocol: SumiConnectionMultiplexer,
+    extHost: IExtensionHostService,
+    injector: Injector,
+  ): any;
 
   public load(extension: IExtensionDescription | undefined, addonImpl?: any) {
     if (!extension) {
@@ -93,35 +91,40 @@ abstract class ApiImplFactory {
 }
 
 class VSCodeAPIImpl extends ApiImplFactory {
-  override createAPIFactory(rpcProtocol: RPCProtocol, extHost: IExtensionHostService, injector: Injector) {
-    return createVSCodeAPIFactory(
-      rpcProtocol,
-      extHost,
-      rpcProtocol.getProxy<VSCodeExtensionService>(MainThreadAPIIdentifier.MainThreadExtensionService),
-      injector.get(AppConfig),
-    );
+  override createAPIFactory(
+    rpcProtocol: SumiConnectionMultiplexer,
+    extHost: IExtensionHostService,
+    injector: Injector,
+  ) {
+    return createVSCodeAPIFactory(rpcProtocol, extHost, injector.get(ExtHostAppConfig));
   }
 }
 
 class OpenSumiAPIImpl extends ApiImplFactory {
-  override createAPIFactory(rpcProtocol: RPCProtocol, extHost: IExtensionHostService, injector: Injector) {
-    return createSumiAPIFactory(rpcProtocol, extHost, 'node', injector.get(IReporter));
+  override createAPIFactory(
+    rpcProtocol: SumiConnectionMultiplexer,
+    extHost: IExtensionHostService,
+    injector: Injector,
+  ) {
+    const appConfig: ExtHostAppConfig = injector.get(ExtHostAppConfig);
+    return createSumiAPIFactory(rpcProtocol, extHost, 'node', injector.get(IReporter), appConfig.sumiApiExtenders);
   }
 }
 
 class TelemetryAPIImpl extends ApiImplFactory {
-  override createAPIFactory(rpcProtocol: RPCProtocol, extHost: IExtensionHostService, injector: Injector) {
+  override createAPIFactory(rpcProtocol: SumiConnectionMultiplexer, extHost: IExtensionHostService) {
     return createTelemetryAPIFactory(rpcProtocol, extHost, 'node');
   }
 }
 
 export default class ExtensionHostServiceImpl implements IExtensionHostService {
   private extensions: IExtensionDescription[];
-  private rpcProtocol: RPCProtocol;
+  private rpcProtocol: SumiConnectionMultiplexer;
 
   public extensionsActivator: ExtensionsActivator;
   public storage: ExtHostStorage;
   public secret: ExtHostSecret;
+  public localization: ExtHostLocalization;
 
   readonly extensionsChangeEmitter: Emitter<void> = new Emitter<void>();
 
@@ -133,7 +136,7 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
 
   private extensionErrors = new WeakMap<Error, IExtensionDescription | undefined>();
 
-  constructor(rpcProtocol: RPCProtocol, public logger: IExtensionLogger, private injector: Injector) {
+  constructor(rpcProtocol: SumiConnectionMultiplexer, public logger: IExtensionLogger, injector: Injector) {
     this.rpcProtocol = rpcProtocol;
     this.storage = new ExtHostStorage(rpcProtocol);
     this.secret = new ExtHostSecret(rpcProtocol);
@@ -143,11 +146,10 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
     this.openSumiAPIImpl = new OpenSumiAPIImpl(rpcProtocol, this, injector);
     this.telemetryAPIImpl = new TelemetryAPIImpl(rpcProtocol, this, injector);
 
+    this.localization = rpcProtocol.get<IExtHostLocalization>(ExtHostAPIIdentifier.ExtHostLocalization);
     this.reporterService = new ReporterService(reporter, {
       host: REPORT_HOST.EXTENSION,
     });
-
-    Error.stackTraceLimit = 100;
   }
 
   /**
@@ -231,6 +233,7 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
     // node 层 extension 实例和 vscode 保持一致，并继承 IExtensionProps
     this.extensions = extensions.map((item) => ({
       ...item,
+      l10n: item.packageJSON?.l10n,
       displayName: item.displayName || item.packageJSON.displayName,
       isUnderDevelopment: !!item.isDevelopment,
       publisher: item.packageJSON?.publisher,
@@ -301,17 +304,15 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
 
     const that = this;
     module._load = function load(request: string, parent: any, isMain: any) {
-      if (!__interceptModule.some((m) => m === request)) {
+      if (!__interceptModuleSet.has(request)) {
         return originalLoad.apply(this, arguments);
       }
 
-      //
       // 可能存在开发插件时通过 npm link 的方式安装的依赖
       // 只通过 parent.filename 查找插件无法兼容这种情况
       // 因为 parent.filename 拿到的路径并不在同一个目录下
       // 往上递归遍历依赖的模块是否在插件目录下
       // 最多只查找 3 层，因为不太可能存在更长的依赖关系
-      //
       const extension = that.lookup(parent, 0);
       if (!extension) {
         return;
@@ -320,7 +321,8 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
         case EInternalModule.VSCODE:
           return that.vscodeAPIImpl.load(extension);
 
-        case EInternalModule.KAITIAN || EInternalModule.SUMI:
+        case EInternalModule.SUMI:
+        case EInternalModule.KAITIAN:
           return that.openSumiAPIImpl.load(extension, that.vscodeAPIImpl.load(extension));
 
         case EInternalModule.TELEMETRY:
@@ -347,7 +349,7 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
   }
 
   private containsSumiContributes(extension: IExtensionDescription): boolean {
-    if (extension.packageJSON.kaitianContributes) {
+    if (extension.packageJSON.sumiContributes) {
       return true;
     }
     return false;
@@ -370,19 +372,18 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
         version: extension.packageJSON?.version,
       });
 
-      this.logger.error(err.message);
+      this.logger.error(`extension ${extension.id} throw error`, err.message);
     }
   }
 
   public async activateExtension(id: string) {
-    this.logger.debug('exthost $activateExtension', id);
-
     const extension: IExtensionDescription | undefined = this.extensions.find((ext) => ext.id === id);
 
     if (!extension) {
       this.logger.error(`extension ${id} not found`);
       return;
     }
+    await this.localization.initializeLocalizedMessages(extension);
 
     if (this.extensionsActivator.get(id)) {
       this.logger.warn(`extension ${id} is already activated.`);
@@ -392,9 +393,8 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
     const isSumiContributes = this.containsSumiContributes(extension);
 
     const modulePath: string = extension.path;
-    this.logger.debug(`${extension.name} - ${modulePath}`);
-
-    this.logger.debug('exthost $activateExtension path', modulePath);
+    this.logger.debug(`active ${extension.name} from ${modulePath}`);
+    this.logger.debug(`active extension host process by ${modulePath}`);
     const extendProxy = this.getExtendModuleProxy(extension, isSumiContributes);
 
     const context = await this.loadExtensionContext(extension, modulePath, this.storage, this.secret, extendProxy);
@@ -411,10 +411,10 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
       try {
         extensionModule = getNodeRequire()(modulePath);
         reportTimer.timeEnd(extension.id);
-      } catch (err) {
+      } catch (error) {
         activationFailed = true;
-        activationFailedError = err;
-        this.logger.error(`[Extension-Host][Activate Exception] ${extension.id}: `, err);
+        activationFailedError = error;
+        this.logger.error(`active extension ${extension.id} failure by\n${error}`);
       }
 
       if (extensionModule.activate) {
@@ -427,29 +427,29 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
             version: extension.packageJSON.version,
           });
           exportsData = extensionExports;
-        } catch (e) {
+        } catch (error) {
           activationFailed = true;
-          activationFailedError = e;
-          this.logger.error(`[Extension-Host][Activate Exception] ${extension.id}: `, e);
+          activationFailedError = error;
+          this.logger.error(`active extension ${extension.id} failure by\n${error}`);
         }
       }
     }
 
-    if (extension.packageJSON.kaitianContributes && extension.packageJSON.kaitianContributes.nodeMain) {
+    if (extension.packageJSON.sumiContributes && extension.packageJSON.sumiContributes.nodeMain) {
       try {
         const reportTimer = this.reporterService.time(REPORT_NAME.ACTIVE_EXTENSION);
-        extendModule = getNodeRequire()(path.join(extension.path, extension.packageJSON.kaitianContributes.nodeMain));
+        extendModule = getNodeRequire()(join(extension.path, extension.packageJSON.sumiContributes.nodeMain));
         reportTimer.timeEnd(extension.id, {
           version: extension.packageJSON.version,
         });
-      } catch (err) {
+      } catch (error) {
         activationFailed = true;
-        activationFailedError = err;
-        this.reportRuntimeError(err, extension, err.stack);
-        this.logger.error(`[Extension-Host][Activate Exception] ${extension.id}: `, err);
+        activationFailedError = error;
+        this.reportRuntimeError(error, extension, error.stack);
+        this.logger.error(`active extension ${extension.id} failure by\n${error}`);
       }
     } else if (extension.extendConfig && extension.extendConfig.node && extension.extendConfig.node.main) {
-      extendModule = getNodeRequire()(path.join(extension.path, extension.extendConfig.node.main));
+      extendModule = getNodeRequire()(join(extension.path, extension.extendConfig.node.main));
       if (!extendModule) {
         this.logger.warn(`Can not find extendModule ${extension.id}`);
       }
@@ -459,14 +459,11 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
       try {
         const extendModuleExportsData = await extendModule.activate(context);
         extendExports = extendModuleExportsData;
-      } catch (e) {
+      } catch (error) {
         activationFailed = true;
-        activationFailedError = e;
-        this.reportRuntimeError(e, extension, e.stack);
-        this.logger.log('activateExtension extension.extendConfig error ');
-        this.logger.log(e);
-        getDebugLogger().error(`${extension.id}`);
-        getDebugLogger().error(e);
+        activationFailedError = error;
+        this.reportRuntimeError(error, extension, error.stack);
+        this.logger.error(`active extension extend module failure by\n${error}`);
       }
     }
     this.extensionsActivator.set(
@@ -511,19 +508,19 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
     }, {});
   }
 
+  /**
+   * @example
+   * "sumiContributes": {
+   *  "viewsProxies": ["ViewComponentID"],
+   * }
+   */
   private getExtendModuleProxy(extension: IExtensionDescription, isSumiContributes: boolean) {
-    /**
-     * @example
-     * "kaitianContributes": {
-     *  "viewsProxies": ["ViewComponentID"],
-     * }
-     */
     if (
       isSumiContributes &&
-      extension.packageJSON.kaitianContributes &&
-      extension.packageJSON.kaitianContributes.viewsProxies
+      extension.packageJSON.sumiContributes &&
+      extension.packageJSON.sumiContributes.viewsProxies
     ) {
-      return this.getExtensionViewModuleProxy(extension, extension.packageJSON.kaitianContributes.viewsProxies);
+      return this.getExtensionViewModuleProxy(extension, extension.packageJSON.sumiContributes.viewsProxies);
     } else if (extension.extendConfig && extension.extendConfig.browser && extension.extendConfig.browser.componentId) {
       return this.getExtensionViewModuleProxy(extension, extension.extendConfig.browser.componentId);
     } else {
@@ -534,6 +531,7 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
   private registerExtendModuleService(exportsData, extension: IExtensionDescription) {
     const service = {};
     for (const key in exportsData) {
+      // eslint-disable-next-line no-prototype-builtins
       if (exportsData.hasOwnProperty(key)) {
         if (typeof exportsData[key] === 'function') {
           service[`$${key}`] = exportsData[key];
@@ -542,10 +540,7 @@ export default class ExtensionHostServiceImpl implements IExtensionHostService {
     }
 
     this.logger.debug('extension extend service', extension.id, 'service', service);
-    this.rpcProtocol.set(
-      { serviceId: `${EXTENSION_EXTEND_SERVICE_PREFIX}:${extension.id}` } as ProxyIdentifier<any>,
-      service,
-    );
+    this.rpcProtocol.set(new ProxyIdentifier<any>(`${EXTENSION_EXTEND_SERVICE_PREFIX}:${extension.id}`), service);
   }
 
   public async $activateExtension(id: string) {

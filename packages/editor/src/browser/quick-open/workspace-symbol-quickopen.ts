@@ -1,36 +1,36 @@
-import type { SymbolInformation, Range } from 'vscode-languageserver-types';
-
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  QuickOpenHandler,
-  QuickOpenModel,
-  CancellationTokenSource,
-  QuickOpenItem,
   CancellationToken,
-  URI,
+  CancellationTokenSource,
+  QuickOpenHandler,
+  QuickOpenItem,
   QuickOpenMode,
-  getSymbolIcon,
+  QuickOpenModel,
+  URI,
   getIcon,
+  getSymbolIcon,
 } from '@opensumi/ide-core-browser';
-import { ILogger, localize, IReporterService, REPORT_NAME } from '@opensumi/ide-core-common';
-import { QuickOpenBaseAction, QuickOpenActionProvider } from '@opensumi/ide-quick-open';
+import { ILogger, IReporterService, REPORT_NAME, localize } from '@opensumi/ide-core-common';
+import { QuickOpenActionProvider, QuickOpenBaseAction } from '@opensumi/ide-quick-open';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { SymbolKind as SymbolKindEnum } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
 import {
-  WorkspaceSymbolProvider,
-  ILanguageService,
-  WorkspaceSymbolParams,
-  WorkbenchEditorService,
   EditorGroupSplitAction,
+  ILanguageService,
+  WorkbenchEditorService,
+  WorkspaceSymbolParams,
+  WorkspaceSymbolProvider,
 } from '../../common';
+
+import type { Range, SymbolInformation } from 'vscode-languageserver-types';
 
 @Injectable()
 class WorkspaceSymbolOpenSideAction extends QuickOpenBaseAction {
   constructor() {
     super({
       id: 'workspace-symbol:splitToRight',
-      tooltip: localize('quickOpen.openSide'),
+      tooltip: localize('quickOpen.openOnTheRightSide'),
       class: getIcon('embed'),
     });
   }
@@ -137,14 +137,13 @@ export class WorkspaceSymbolQuickOpenHandler implements QuickOpenHandler {
             if (symbols && symbols.length && !newCancellationSource.token.isCancellationRequested) {
               const quickOpenItems = await Promise.all(
                 symbols.map(async (symbol) => {
-                  const relativePath =
-                    (await this.workspaceService.asRelativePath(new URI(symbol.location.uri).parent)) || '';
+                  const relative = await this.workspaceService.asRelativePath(new URI(symbol.location.uri).parent);
                   return new SymbolInformationQuickOpenItem(
                     symbol,
                     provider,
                     this.workbenchEditorService,
                     newCancellationSource.token,
-                    relativePath,
+                    relative?.path || '',
                   );
                 }),
               );
@@ -222,7 +221,7 @@ export class SymbolInformationQuickOpenItem extends QuickOpenItem {
   }
 
   getIconClass() {
-    return getSymbolIcon(this.symbol.kind);
+    return getSymbolIcon(this.symbol.kind as SymbolKindEnum);
   }
 
   getDescription() {

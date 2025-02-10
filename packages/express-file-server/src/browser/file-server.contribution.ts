@@ -1,9 +1,9 @@
 import { Autowired } from '@opensumi/di';
-import { Domain, URI, AppConfig, Schemes } from '@opensumi/ide-core-browser';
+import { AppConfig, Domain, Schemes, URI } from '@opensumi/ide-core-browser';
 import {
   StaticResourceContribution,
   StaticResourceService,
-} from '@opensumi/ide-static-resource/lib/browser/static.definition';
+} from '@opensumi/ide-core-browser/lib/static-resource/static.definition';
 
 import { EXPRESS_SERVER_PATH } from '../common';
 

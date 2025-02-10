@@ -4,7 +4,7 @@ import { OpenSumiApp } from './app';
 import { OpenSumiContextMenu } from './context-menu';
 import { OpenSumiEditor } from './editor';
 import { OpenSumiTreeNode } from './tree-node';
-import { keypressWithCmdCtrl } from './utils';
+import { keypressWithCmdCtrl, keypressWithCmdCtrlAndShift } from './utils';
 
 abstract class ViewsModel {
   constructor(readonly page: Page) {}
@@ -37,12 +37,51 @@ class GlyphMarginModel extends ViewsModel {
     }
   }
 
+  /**
+   * monaco 0.45 版本将断点 dom 放在了 glyph-margin-widgets 的 dom 里
+   */
+  async getGlyphMarginWidgets(lineNumber: number) {
+    const margin = await this.getElement();
+    const widgets = await margin?.$$('.glyph-margin-widgets > div');
+    if (!widgets) {
+      return;
+    }
+
+    for (const node of widgets) {
+      const styles = await node.getAttribute('style');
+
+      const tops = styles?.match(/top: [0-9]*px;/g) || ['0'];
+      const topNums = tops[0].match(/\d+/g);
+
+      const height = styles?.match(/height: [0-9]*px;/g) || ['0'];
+      const heightNums = height[0].match(/\d+/g);
+      if (Array.isArray(topNums) && topNums.length > 0 && Array.isArray(heightNums) && heightNums.length > 0) {
+        let topNum: number | string = topNums[0];
+        topNum = Number(topNum);
+
+        let heightNum: number | string = heightNums[0];
+        heightNum = Number(heightNum);
+
+        const line = topNum / heightNum + 1;
+        if (line === lineNumber) {
+          return node;
+        }
+      } else {
+        return;
+      }
+    }
+  }
+
   async hasBreakpoint(node: ElementHandle<SVGElement | HTMLElement>): Promise<boolean> {
-    return !!(await node.$('.sumi-debug-breakpoint'));
+    const className = await node.getProperty('className');
+    const classValue = await className.jsonValue();
+    return classValue.includes('sumi-debug-breakpoint');
   }
 
   async hasTopStackFrame(node: ElementHandle<SVGElement | HTMLElement>): Promise<boolean> {
-    return !!(await node.$('.sumi-debug-top-stack-frame'));
+    const className = await node.getProperty('className');
+    const classValue = await className.jsonValue();
+    return classValue.includes('sumi-debug-top-stack-frame');
   }
 
   async hasTopStackFrameLine(node: ElementHandle<SVGElement | HTMLElement>): Promise<boolean> {
@@ -132,6 +171,22 @@ export class OpenSumiTextEditor extends OpenSumiEditor {
     await this.page.keyboard.press('Enter');
   }
 
+  async typeText(text: string): Promise<void> {
+    await this.page.keyboard.type(text);
+  }
+  async saveByKeyboard(): Promise<void> {
+    await this.page.keyboard.press(keypressWithCmdCtrl('s'));
+    await this.waitForEditorDone();
+  }
+  async undoByKeyboard(): Promise<void> {
+    await this.page.keyboard.press(keypressWithCmdCtrl('z'));
+    await this.waitForEditorDone();
+  }
+  async redoByKeyboard(): Promise<void> {
+    await this.page.keyboard.press(keypressWithCmdCtrlAndShift('z'));
+    await this.waitForEditorDone();
+  }
+
   async selectLineWithLineNumber(lineNumber: number): Promise<ElementHandle<SVGElement | HTMLElement> | undefined> {
     await this.activate();
     const lineElement = await this.lineByLineNumber(lineNumber);
@@ -204,7 +259,6 @@ export class OpenSumiTextEditor extends OpenSumiEditor {
     if (!lineNode) {
       throw new Error(`Couldn't retrieve lines of text editor ${this.tabSelector}`);
     }
-
     return lineNode.asElement();
   }
 
@@ -271,7 +325,7 @@ export class OpenSumiTextEditor extends OpenSumiEditor {
     await lineElement?.click({ clickCount: 3 });
   }
 
-  protected async placeCursorInLine(
+  async placeCursorInLine(
     lineElement: ElementHandle<SVGElement | HTMLElement> | undefined,
     point: 'start' | 'end' = 'end',
   ): Promise<void> {

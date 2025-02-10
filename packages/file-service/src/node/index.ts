@@ -2,17 +2,19 @@ import { Injectable, Injector } from '@opensumi/di';
 import { NodeModule } from '@opensumi/ide-core-node';
 
 import {
-  IFileService,
-  IDiskFileProvider,
-  ShadowFileServicePath,
-  FileServicePath,
-  IShadowFileProvider,
-  FileSystemProvider,
   DiskFileServicePath,
+  FileServicePath,
+  FileSystemProvider,
+  IDiskFileProvider,
+  IFileService,
+  IShadowFileProvider,
+  ShadowFileServicePath,
 } from '../common';
+import { DiskFileServiceProtocol } from '../common/protocols/disk-file-service';
 
 import { DiskFileSystemProvider } from './disk-file-system.provider';
 import { getSafeFileservice } from './file-service';
+import { WatcherProcessManagerImpl, WatcherProcessManagerToken } from './watcher-process-manager';
 
 export * from './file-service';
 
@@ -31,12 +33,14 @@ export class FileServiceModule extends NodeModule {
   providers = [
     { token: IFileService, useFactory: (injector: Injector) => getSafeFileservice(injector) },
     { token: IDiskFileProvider, useFactory: (injector: Injector) => getFileservice(injector, DiskFileSystemProvider) },
+    { token: WatcherProcessManagerToken, useClass: WatcherProcessManagerImpl },
   ];
 
   backServices = [
     {
       servicePath: DiskFileServicePath,
       token: IDiskFileProvider,
+      protocol: DiskFileServiceProtocol,
     },
     {
       servicePath: ShadowFileServicePath,

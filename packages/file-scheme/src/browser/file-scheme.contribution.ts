@@ -1,15 +1,16 @@
 import { Autowired } from '@opensumi/di';
-import { URI, Domain, localize, LRUMap, Schemes, PreferenceService } from '@opensumi/ide-core-browser';
+import { Domain, LRUMap, PreferenceService, Schemes, URI, localize } from '@opensumi/ide-core-browser';
 import { getLanguageIdFromMonaco } from '@opensumi/ide-core-browser/lib/services';
-import { ResourceService, IResource, IEditorOpenType } from '@opensumi/ide-editor';
+import { IEditorOpenType, IResource, ResourceService } from '@opensumi/ide-editor';
 import {
-  EditorComponentRegistry,
   BrowserEditorContribution,
+  EditorComponentRegistry,
+  EditorOpenType,
   IEditorDocumentModelContentRegistry,
 } from '@opensumi/ide-editor/lib/browser';
 import {
-  UntitledSchemeResourceProvider,
   UntitledSchemeDocumentProvider,
+  UntitledSchemeResourceProvider,
 } from '@opensumi/ide-editor/lib/browser/untitled-resource';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 
@@ -107,48 +108,59 @@ export class FileSystemEditorComponentContribution implements BrowserEditorContr
       (resource: IResource<any>, results: IEditorOpenType[]) => {
         if (results.length === 0) {
           results.push({
-            type: 'component',
+            type: EditorOpenType.component,
             componentId: EXTERNAL_OPEN_COMPONENT_ID,
           });
         }
       },
     );
 
-    // 图片文件
     editorComponentRegistry.registerEditorComponentResolver(
       (scheme: string) => (scheme === Schemes.file || this.fileServiceClient.handlesScheme(scheme) ? 10 : -1),
       async (resource: IResource<any>, results: IEditorOpenType[]) => {
         const type = await this.getFileType(resource.uri.toString());
 
-        if (type === 'image') {
-          results.push({
-            type: 'component',
-            componentId: IMAGE_PREVIEW_COMPONENT_ID,
-          });
-        }
-
-        if (type === 'video') {
-          results.push({
-            type: 'component',
-            componentId: VIDEO_PREVIEW_COMPONENT_ID,
-          });
-        }
-
-        if (type === 'text') {
-          const { metadata, uri } = resource as { uri: URI; metadata: any };
-          const stat = await this.fileServiceClient.getFileStat(uri.toString());
-          const maxSize = this.preference.get<number>('editor.largeFile') || 20000;
-
-          if (stat && (stat.size || 0) > maxSize && !(metadata || {}).noPrevent) {
+        switch (type) {
+          case 'image': {
             results.push({
-              type: 'component',
-              componentId: LARGE_FILE_PREVENT_COMPONENT_ID,
+              type: EditorOpenType.component,
+              componentId: IMAGE_PREVIEW_COMPONENT_ID,
             });
-          } else {
+            break;
+          }
+          case 'video': {
             results.push({
-              type: 'code',
-              title: localize('editorOpenType.code'),
+              type: EditorOpenType.component,
+              componentId: VIDEO_PREVIEW_COMPONENT_ID,
             });
+            break;
+          }
+          case 'binary':
+          case 'text': {
+            const { metadata: _metadata, uri } = resource;
+            const metadata = _metadata || {};
+
+            // 二进制文件不支持打开
+            if (type === 'binary' && !metadata.skipPreventBinary) {
+              break;
+            }
+
+            const stat = await this.fileServiceClient.getFileStat(uri.toString());
+            await this.preference.ready;
+            const maxSize = this.preference.getValid<number>('editor.largeFile', 4 * 1024 * 1024 * 1024);
+
+            if (stat && (stat.size || 0) > maxSize && !metadata.skipPreventTooLarge) {
+              results.push({
+                type: EditorOpenType.component,
+                componentId: LARGE_FILE_PREVENT_COMPONENT_ID,
+              });
+            } else {
+              results.push({
+                type: EditorOpenType.code,
+                title: localize('editorOpenType.code'),
+              });
+            }
+            break;
           }
         }
       },
@@ -160,7 +172,7 @@ export class FileSystemEditorComponentContribution implements BrowserEditorContr
       (_resource: IResource<any>, _results: IEditorOpenType[], resolve: (results: IEditorOpenType[]) => void) => {
         resolve([
           {
-            type: 'code',
+            type: EditorOpenType.code,
             priority: 'default',
           },
         ]);

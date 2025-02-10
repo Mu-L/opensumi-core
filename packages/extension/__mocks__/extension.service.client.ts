@@ -7,6 +7,12 @@ import { mockExtensionProps } from './extensions';
 
 @Injectable()
 export class MockExtNodeClientService implements IExtensionNodeClientService {
+  async pid(): Promise<number | null> {
+    return 1;
+  }
+  async setupNLSConfig(languageId: string, storagePath: string): Promise<void> {
+    // void
+  }
   getOpenVSXRegistry(): Promise<string> {
     return Promise.resolve('');
   }
@@ -41,5 +47,8 @@ export class MockExtNodeClientService implements IExtensionNodeClientService {
   updateLanguagePack(languageId: string, languagePackPath: string): Promise<void> {
     process.env['TEST_KAITIAN_LANGUAGE_ID'] = languageId;
     return Promise.resolve();
+  }
+  getLanguagePack(languageId: string) {
+    return Promise.resolve(undefined);
   }
 }

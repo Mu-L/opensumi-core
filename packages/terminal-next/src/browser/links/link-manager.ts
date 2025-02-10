@@ -1,25 +1,30 @@
-import { Terminal, ILinkProvider, IViewportRange } from 'xterm';
+import { ILinkProvider, IViewportRange, Terminal } from '@xterm/xterm';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import { IOpenerService, PreferenceService } from '@opensumi/ide-core-browser';
 import {
-  URI,
   Disposable,
-  IDisposable,
   DisposableCollection,
-  isOSX,
   FileUri,
+  IDisposable,
+  OperatingSystem,
+  Schemes,
+  URI,
+  isMacintosh,
+  isOSX,
+  isWindows,
   localize,
   path,
-  OperatingSystem,
-  isWindows,
-  isMacintosh,
-  Schemes,
 } from '@opensumi/ide-core-common';
 import { WorkbenchEditorService } from '@opensumi/ide-editor/lib/common';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
 
-import { ITerminalClient, ITerminalExternalLinkProvider, ITerminalHoverManagerService } from '../../common';
+import {
+  ITerminalClient,
+  ITerminalExternalLinkProvider,
+  ITerminalHoverManagerService,
+  ITerminalService,
+} from '../../common';
 import { XTermCore } from '../../common/xterm-private';
 import { TerminalClient } from '../terminal.client';
 
@@ -29,13 +34,14 @@ import { TerminalProtocolLinkProvider } from './protocol-link-provider';
 import {
   TerminalValidatedLocalLinkProvider,
   lineAndColumnClause,
+  lineAndColumnClauseGroupCount,
+  unixLineAndColumnMatchIndex,
   unixLocalLinkClause,
-  winLocalLinkClause,
   winDrivePrefix,
   winLineAndColumnMatchIndex,
-  unixLineAndColumnMatchIndex,
-  lineAndColumnClauseGroupCount,
+  winLocalLinkClause,
 } from './validated-local-link-provider';
+import { TerminalWordLinkProvider } from './word-link-provider';
 
 const { posix, win32 } = path;
 
@@ -84,6 +90,9 @@ export class TerminalLinkManager extends Disposable {
   @Autowired(INJECTOR_TOKEN)
   private readonly injector: Injector;
 
+  @Autowired(ITerminalService)
+  private readonly terminalService: ITerminalService;
+
   @Autowired()
   private readonly _editorService: WorkbenchEditorService;
 
@@ -128,11 +137,24 @@ export class TerminalLinkManager extends Disposable {
     ]);
     this._standardLinkProviders.push(validatedProvider);
 
+    const wordLinkProvider = this.injector.get(TerminalWordLinkProvider, [
+      this._xterm,
+      async (link, cb) => cb(await this._resolvePath(link)),
+      wrappedTextLinkActivateCallback,
+    ]);
+    this._standardLinkProviders.push(wordLinkProvider);
+
     this._registerStandardLinkProviders();
   }
 
   public set processCwd(processCwd: string) {
     this._processCwd = processCwd;
+  }
+
+  // user may change the terminal cwd, so we need to get it from the service
+  async getTerminalCwd() {
+    const cwd = await this.terminalService.getCwd(this._client.id);
+    return cwd || this._processCwd;
   }
 
   private _registerStandardLinkProviders(): void {
@@ -151,8 +173,8 @@ export class TerminalLinkManager extends Disposable {
   ) {
     const core = (this._xterm as any)._core as XTermCore;
     const cellDimensions = {
-      width: core._renderService.dimensions.actualCellWidth,
-      height: core._renderService.dimensions.actualCellHeight,
+      width: core._renderService.dimensions.css.cell.width,
+      height: core._renderService.dimensions.css.cell.height,
     };
     const terminalDimensions = {
       width: this._xterm.cols,
@@ -328,25 +350,26 @@ export class TerminalLinkManager extends Disposable {
       }
       link = this.osPath.join(userHome, link.substring(1));
     } else if (link.charAt(0) !== '/' && link.charAt(0) !== '~') {
+      const cwd = await this.getTerminalCwd();
       // Resolve workspace path . | .. | <relative_path> -> <path>/. | <path>/.. | <path>/<relative_path>
       if (this._client.os === OperatingSystem.Windows) {
         if (!link.match('^' + winDrivePrefix) && !link.startsWith('\\\\?\\')) {
-          if (!this._processCwd) {
+          if (!cwd) {
             // Abort if no workspace is open
             return null;
           }
-          link = this.osPath.join(this._processCwd, link);
+          link = this.osPath.join(cwd, link);
         } else {
           // Remove \\?\ from paths so that they share the same underlying
           // uri and don't open multiple tabs for the same file
           link = link.replace(/^\\\\\?\\/, '');
         }
       } else {
-        if (!this._processCwd) {
+        if (!cwd) {
           // Abort if no workspace is open
           return null;
         }
-        link = this.osPath.join(this._processCwd, link);
+        link = this.osPath.join(cwd, link);
       }
     }
     link = this.osPath.normalize(link);
@@ -360,13 +383,8 @@ export class TerminalLinkManager extends Disposable {
       return undefined;
     }
 
-    const linkUrl = this.extractLinkUrl(preprocessedLink);
-    if (!linkUrl) {
-      return undefined;
-    }
-
     try {
-      const uri = URI.file(linkUrl);
+      const uri = URI.file(preprocessedLink);
       const stat = await this._fileService.getFileStat(uri.toString());
       if (stat) {
         return { uri, isDirectory: stat.isDirectory };

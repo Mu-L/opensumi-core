@@ -1,18 +1,21 @@
 import http from 'http';
 
-import ws from 'ws';
+import WebSocket from 'ws';
 
-import { Deferred, Emitter, Uri } from '@opensumi/ide-core-common';
+import { furySerializer, wrapSerializer } from '@opensumi/ide-connection/lib/common/serializer';
+import { WSWebSocketConnection } from '@opensumi/ide-connection/src/common/connection';
+import { SumiConnection } from '@opensumi/ide-connection/src/common/rpc/connection';
+import { Deferred } from '@opensumi/ide-core-common';
 
 import { RPCService } from '../../src';
-import { RPCServiceCenter, initRPCService, RPCMessageConnection } from '../../src/common';
-import { createWebSocketConnection } from '../../src/common/message';
-import { RPCProtocol, createMainContextProxyIdentifier } from '../../src/common/rpcProtocol';
-import { parse } from '../../src/common/utils';
+import { RPCServiceCenter, initRPCService } from '../../src/common';
+import { CommonChannelPathHandler } from '../../src/common/server-handler';
 import { WSChannel } from '../../src/common/ws-channel';
-import { WebSocketServerRoute, CommonChannelHandler, commonChannelPathHandler } from '../../src/node';
+import { CommonChannelHandler, WebSocketServerRoute } from '../../src/node';
 
-const WebSocket = ws;
+const commonChannelPathHandler = new CommonChannelPathHandler();
+
+const wssPort = 7788;
 
 class MockFileService extends RPCService {
   getContent(filePath) {
@@ -31,13 +34,13 @@ describe('connection', () => {
   it('websocket connection route', async () => {
     const server = http.createServer();
     const socketRoute = new WebSocketServerRoute(server, console);
-    const channelHandler = new CommonChannelHandler('/service', console);
+    const channelHandler = new CommonChannelHandler('/service', commonChannelPathHandler, console);
     socketRoute.registerHandler(channelHandler);
     socketRoute.init();
 
     await new Promise<void>((resolve) => {
-      server.listen(7788, () => {
-        resolve(undefined);
+      server.listen(wssPort, () => {
+        resolve();
       });
     });
 
@@ -47,35 +50,35 @@ describe('connection', () => {
       dispose: () => {},
     });
 
-    const connection = new WebSocket('ws://0.0.0.0:7788/service');
+    const connection = new WebSocket(`ws://0.0.0.0:${wssPort}/service`);
 
     connection.on('error', () => {
       connection.close();
     });
     await new Promise<void>((resolve) => {
       connection.on('open', () => {
-        resolve(undefined);
+        resolve();
       });
     });
-
-    const channelSend = (content) => {
-      connection.send(content, (err) => {});
-    };
-    const channel = new WSChannel(channelSend, 'TEST_CHANNEL_ID');
-    connection.on('message', (msg) => {
-      const msgObj = parse(msg as string);
-      if (msgObj.kind === 'ready') {
+    const clientId = 'TEST_CLIENT';
+    const wsConnection = new WSWebSocketConnection(connection);
+    const channel = new WSChannel(wrapSerializer(wsConnection, furySerializer), {
+      id: 'TEST_CHANNEL_ID',
+    });
+    connection.on('message', (msg: Uint8Array) => {
+      const msgObj = furySerializer.deserialize(msg);
+      if (msgObj.kind === 'server-ready') {
         if (msgObj.id === 'TEST_CHANNEL_ID') {
-          channel.handleMessage(msgObj);
+          channel.dispatch(msgObj);
         }
       }
     });
 
     await new Promise<void>((resolve) => {
       channel.onOpen(() => {
-        resolve(undefined);
+        resolve();
       });
-      channel.open('TEST_CHANNEL');
+      channel.open('TEST_CHANNEL', clientId);
     });
     expect(mockHandler.mock.calls.length).toBe(1);
 
@@ -93,7 +96,7 @@ describe('connection', () => {
     const server = http.createServer();
     const deferred = new Deferred();
     const socketRoute = new WebSocketServerRoute(server, console);
-    const channelHandler = new CommonChannelHandler('/service', console, {
+    const channelHandler = new CommonChannelHandler('/service', commonChannelPathHandler, console, {
       wsServerOptions: {
         verifyClient: () => false,
       },
@@ -102,8 +105,8 @@ describe('connection', () => {
     socketRoute.init();
 
     await new Promise<void>((resolve) => {
-      server.listen(7788, () => {
-        resolve(undefined);
+      server.listen(wssPort, () => {
+        resolve();
       });
     });
 
@@ -113,7 +116,7 @@ describe('connection', () => {
       dispose: () => {},
     });
 
-    const connection = new WebSocket('ws://0.0.0.0:7788/service');
+    const connection = new WebSocket(`ws://0.0.0.0:${wssPort}/service`);
 
     connection.on('error', (e) => {
       deferred.reject(e);
@@ -124,32 +127,31 @@ describe('connection', () => {
   });
 
   it('RPCService', async () => {
-    const wss = new WebSocket.Server({ port: 7788 });
+    const wss = new WebSocket.Server({ port: wssPort });
     const notificationMock = jest.fn();
 
-    let serviceCenter;
-    let clientConnection;
+    let serviceCenter: RPCServiceCenter;
+    let clientConnection: WebSocket;
 
     await Promise.all([
       new Promise<void>((resolve) => {
         wss.on('connection', (connection) => {
           serviceCenter = new RPCServiceCenter();
-          const serverConnection = createWebSocketConnection(connection);
-          serviceCenter.setConnection(serverConnection);
-
-          resolve(undefined);
+          const sumiConnection = SumiConnection.forWSWebSocket(connection, {});
+          serviceCenter.setSumiConnection(sumiConnection);
+          resolve();
         });
       }),
 
       new Promise<void>((resolve) => {
-        clientConnection = new WebSocket('ws://0.0.0.0:7788/service');
+        clientConnection = new WebSocket(`ws://0.0.0.0:${wssPort}/service`);
         clientConnection.on('open', () => {
-          resolve(undefined);
+          resolve();
         });
       }),
     ]);
 
-    const { createRPCService } = initRPCService(serviceCenter);
+    const { createRPCService } = initRPCService(serviceCenter!);
     createRPCService('MockFileServicePath', mockFileService);
 
     createRPCService('MockNotificationService', {
@@ -159,8 +161,12 @@ describe('connection', () => {
     });
 
     const clientCenter = new RPCServiceCenter();
-    clientCenter.setConnection(createWebSocketConnection(clientConnection) as RPCMessageConnection);
 
+    const connection = SumiConnection.forWSWebSocket(clientConnection!);
+    const toDispose = clientCenter.setSumiConnection(connection);
+    clientConnection!.once('close', () => {
+      toDispose.dispose();
+    });
     const { getRPCService } = initRPCService<
       MockFileService & {
         onFileChange: (k: any) => void;
@@ -193,47 +199,6 @@ describe('connection', () => {
     expect(notificationMock.mock.calls.length).toBe(2);
 
     wss.close();
-  });
-
-  it('RPCProtocol', async () => {
-    const emitterA = new Emitter<string>();
-    const emitterB = new Emitter<string>();
-
-    const mockClientB = {
-      onMessage: emitterB.event,
-      send: (msg) => emitterA.fire(msg),
-    };
-    const mockClientA = {
-      send: (msg) => emitterB.fire(msg),
-      onMessage: emitterA.event,
-    };
-
-    const aProtocol = new RPCProtocol(mockClientA);
-    const bProtocol = new RPCProtocol(mockClientB);
-
-    const testMainIdentifier = createMainContextProxyIdentifier('testIendifier');
-    const mockMainIndetifierMethod = jest.fn();
-    const mockUriTestFn = jest.fn((uri) => uri);
-    const mockErrorFn = jest.fn(() => {
-      throw new Error('custom error');
-    });
-
-    aProtocol.set(testMainIdentifier, {
-      $test: mockMainIndetifierMethod,
-      $getUri: mockUriTestFn,
-      $errorFunction: mockErrorFn,
-    });
-
-    function errorFunction() {
-      return bProtocol.getProxy(testMainIdentifier).$errorFunction();
-    }
-
-    const testUri = Uri.file('/Users/franklife/work/ide/ac4/ide-framework/README.md');
-    await bProtocol.getProxy(testMainIdentifier).$test();
-    await bProtocol.getProxy(testMainIdentifier).$getUri(testUri);
-    expect(mockMainIndetifierMethod.mock.calls.length).toBe(1);
-    expect(mockUriTestFn.mock.results[0].value).toBeInstanceOf(Uri);
-    expect(mockUriTestFn.mock.results[0].value.toString()).toBe(testUri.toString());
-    await expect(errorFunction()).rejects.toThrow(new Error('custom error'));
+    clientConnection!.close();
   });
 });

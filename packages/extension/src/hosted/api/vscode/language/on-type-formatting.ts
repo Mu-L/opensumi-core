@@ -14,17 +14,17 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
- // Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/plugin-ext/src/plugin/languages/on-type-formatting.ts
-
-import type vscode from 'vscode';
+// Some code copied and modified from https://github.com/eclipse-theia/theia/tree/v1.14.0/packages/plugin-ext/src/plugin/languages/on-type-formatting.ts
 
 import { Uri as URI } from '@opensumi/ide-core-common';
 
 import { ExtensionDocumentDataManager } from '../../../../common/vscode';
 import * as Converter from '../../../../common/vscode/converter';
-import { FormattingOptions, SingleEditOperation, Position } from '../../../../common/vscode/model.api';
+import { FormattingOptions, Position, SingleEditOperation } from '../../../../common/vscode/model.api';
 
 import { createToken } from './util';
+
+import type vscode from 'vscode';
 
 export class OnTypeFormattingAdapter {
   constructor(
@@ -46,7 +46,6 @@ export class OnTypeFormattingAdapter {
     const doc = document.document;
     const pos = Converter.toPosition(position);
 
-    // tslint:disable-next-line:no-any
     return Promise.resolve(
       this.provider.provideOnTypeFormattingEdits(doc, pos, ch, options as any, createToken()),
     ).then((value) => {

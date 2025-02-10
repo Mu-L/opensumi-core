@@ -1,14 +1,14 @@
-import { PreferenceService, FILES_DEFAULTS, IClientApp, IWindowService } from '@opensumi/ide-core-browser';
+import { FILES_DEFAULTS, IClientApp, IWindowService, PreferenceService } from '@opensumi/ide-core-browser';
 import { MockedStorageProvider } from '@opensumi/ide-core-browser/__mocks__/storage';
-import { URI, StorageProvider, Disposable } from '@opensumi/ide-core-common';
-import { FileStat, DiskFileServicePath } from '@opensumi/ide-file-service';
+import { Disposable, StorageProvider, URI } from '@opensumi/ide-core-common';
+import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
+import { MockInjector } from '@opensumi/ide-dev-tool/src/mock-injector';
+import { DiskFileServicePath, FileStat } from '@opensumi/ide-file-service';
 import { MockFsProvider } from '@opensumi/ide-file-service/__mocks__/file-system-provider';
 import { IFileServiceClient } from '@opensumi/ide-file-service/lib/common';
 import { IWorkspaceService } from '@opensumi/ide-workspace';
 import { WorkspaceService } from '@opensumi/ide-workspace/lib/browser/workspace-service';
 
-import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
-import { MockInjector } from '../../../../tools/dev-tool/src/mock-injector';
 import { WorkspaceModule } from '../../src/browser';
 import { WorkspacePreferences } from '../../src/browser/workspace-preferences';
 
@@ -51,6 +51,15 @@ describe('WorkspaceService should be work while workspace was a single directory
       } else if (preferenceName === 'files.exclude') {
         return FILES_DEFAULTS.filesExclude;
       }
+    },
+    getValid: (preferenceName: string, defaultValue) => {
+      if (preferenceName === 'files.watcherExclude') {
+        return FILES_DEFAULTS.filesWatcherExclude;
+      } else if (preferenceName === 'files.exclude') {
+        return FILES_DEFAULTS.filesExclude;
+      }
+
+      return defaultValue;
     },
     inspect: jest.fn(),
   };
@@ -168,9 +177,9 @@ describe('WorkspaceService should be work while workspace was a single directory
       lastModification: new Date().getTime(),
     } as never);
     await workspaceService.open(newWorkspaceUri, { preserveWindow: true });
-    expect(mockClientApp.fireOnReload).toBeCalledWith(true);
+    expect(mockClientApp.fireOnReload).toHaveBeenCalledWith(true);
     await workspaceService.open(newWorkspaceUri);
-    expect(mockWindowService.openNewWindow).toBeCalledTimes(1);
+    expect(mockWindowService.openNewWindow).toHaveBeenCalledTimes(1);
   });
 
   it('addRoot method should be work', async () => {
@@ -203,7 +212,7 @@ describe('WorkspaceService should be work while workspace was a single directory
     });
     mockFileSystem.setContent.mockImplementation((stat) => stat);
     await workspaceService.addRoot(newWorkspaceUri);
-    expect(mockFileSystem.setContent).toBeCalledTimes(2);
+    expect(mockFileSystem.setContent).toHaveBeenCalledTimes(2);
   });
 
   it('removeRoots method should be work', async () => {
@@ -227,7 +236,7 @@ describe('WorkspaceService should be work while workspace was a single directory
       }),
     });
     await workspaceService.removeRoots([newWorkspaceUri]);
-    expect(mockFileSystem.setContent).toBeCalledTimes(1);
+    expect(mockFileSystem.setContent).toHaveBeenCalledTimes(1);
   });
 
   it('containsSome method should be work', async () => {
@@ -259,9 +268,9 @@ describe('WorkspaceService should be work while workspace was a single directory
       },
     ]);
     const result = await workspaceService.asRelativePath(newWorkspaceUri);
-    expect(result).toBe('new_folder');
-    expect(await workspaceService.asRelativePath(newWorkspaceUri.codeUri.fsPath)).toBe('new_folder');
+    expect(result?.path).toBe('new_folder');
+    expect(await (await workspaceService.asRelativePath(newWorkspaceUri.codeUri.fsPath)).path).toBe('new_folder');
     const outWorkspacePath = '/other/test.js';
-    expect(await workspaceService.asRelativePath(outWorkspacePath)).toBe(outWorkspacePath);
+    expect(await (await workspaceService.asRelativePath(outWorkspacePath)).path).toBe(outWorkspacePath);
   });
 });

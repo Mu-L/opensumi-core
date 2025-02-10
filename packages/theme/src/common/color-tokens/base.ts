@@ -1,8 +1,6 @@
 import { localize } from '@opensumi/ide-core-common';
 
-import { transparent, registerColor } from '../utils';
-
-import { hcBorderColor } from './basic-color';
+import { registerColor, transparent } from '../utils';
 
 // base colors
 export const foreground = registerColor(

@@ -1,26 +1,29 @@
-import classnames from 'classnames';
+import cls from 'classnames';
+import debounce from 'lodash/debounce';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { Autowired, Injectable } from '@opensumi/di';
 import { Button, CheckBox, Input, Option, Select, ValidateInput, ValidateMessage } from '@opensumi/ide-components';
+import { DefaultMarkedRenderer, Markdown, linkify } from '@opensumi/ide-components/lib/markdown/index';
 import {
   DisposableCollection,
-  getIcon,
+  ILogger,
+  IOpenerService,
   IPreferenceSettingsService,
-  localize,
+  IResolvedPreferenceViewDesc,
   PreferenceItem,
   PreferenceProvider,
   PreferenceSchemaProvider,
   PreferenceScope,
   PreferenceService,
+  formatLocalize,
+  getIcon,
+  localize,
   replaceLocalizePlaceholder,
   useInjectable,
-  formatLocalize,
-  ILogger,
-  IOpenerService,
-  toMarkdown,
 } from '@opensumi/ide-core-browser';
 
-import { toPreferenceReadableName, getPreferenceItemLabel } from '../common';
+import { getPreferenceItemLabel, knownPrefIdMappings } from '../common';
 
 import { PreferenceSettingsService } from './preference-settings.service';
 import styles from './preferences.module.less';
@@ -28,9 +31,18 @@ import styles from './preferences.module.less';
 interface IPreferenceItemProps {
   preferenceName: string;
   localizedName?: string;
+  localizedDescription?: {
+    description: string | undefined;
+    markdownDescription: string | undefined;
+  };
+  /**
+   * 自动处理了 markdown 和纯文本模式的选项
+   */
+  renderedDescription?: JSX.Element;
   currentValue: any;
   defaultValue: any;
   schema: PreferenceItem;
+  labels: Record<string, string>;
   scope: PreferenceScope;
   effectingScope: PreferenceScope;
   hasValueInScope: boolean;
@@ -53,11 +65,13 @@ const NONE_SELECT_OPTION = 'none';
  *    暂不支持
  */
 export const NextPreferenceItem = ({
-  preferenceName,
+  preferenceId,
   localizedName,
+  preference,
   scope,
 }: {
-  preferenceName: string;
+  preferenceId: string;
+  preference: IResolvedPreferenceViewDesc;
   localizedName?: string;
   scope: PreferenceScope;
 }) => {
@@ -68,25 +82,26 @@ export const NextPreferenceItem = ({
   const preferenceProvider: PreferenceProvider = preferenceService.getProvider(scope)!;
 
   // 获得这个设置项的当前值
-  const { value: inherited, effectingScope } = settingsService.getPreference(preferenceName, scope);
+  const { value: inherited, effectingScope } = settingsService.getPreference(preferenceId, scope);
   const [value, setValue] = useState<boolean | string | string[] | undefined>(
-    preferenceProvider.get<boolean | string | string[]>(preferenceName),
+    preferenceProvider.get<boolean | string | string[]>(preferenceId),
   );
   const [schema, setSchema] = useState<PreferenceItem>();
+  const [labels, setLabels] = useState(() => settingsService.getEnumLabels(preferenceId));
 
   // 当这个设置项被外部变更时，更新局部值
   useEffect(() => {
     // 获得当前的schema
-    const schemas = schemaProvider.getPreferenceProperty(preferenceName);
+    const schemas = schemaProvider.getPreferenceProperty(preferenceId);
     setSchema(schemas);
 
     const disposableCollection = new DisposableCollection();
     // 监听配置变化
     disposableCollection.push(
       preferenceProvider.onDidPreferencesChanged((e) => {
-        if (e.default && Object.prototype.hasOwnProperty.call(e.default, preferenceName)) {
-          if (e.default[preferenceName].scope === scope) {
-            const newValue = e.default[preferenceName].newValue;
+        if (e.default && Object.prototype.hasOwnProperty.call(e.default, preferenceId)) {
+          if (e.default[preferenceId].scope === scope) {
+            const newValue = e.default[preferenceId].newValue;
             setValue(newValue);
           }
         }
@@ -94,10 +109,12 @@ export const NextPreferenceItem = ({
     );
 
     disposableCollection.push(
-      settingsService.onDidEnumLabelsChange(() => {
-        const schemas = schemaProvider.getPreferenceProperty(preferenceName);
-        setSchema(schemas);
-      }),
+      settingsService.onDidEnumLabelsChange(preferenceId)(
+        debounce(() => {
+          setSchema(schemaProvider.getPreferenceProperty(preferenceId));
+          setLabels(settingsService.getEnumLabels(preferenceId));
+        }, PreferenceSettingsService.DEFAULT_CHANGE_DELAY),
+      ),
     );
 
     return () => {
@@ -105,30 +122,26 @@ export const NextPreferenceItem = ({
     };
   }, []);
 
-  if (!localizedName) {
-    localizedName = toPreferenceReadableName(preferenceName);
-  }
-
   let renderSchema = schema;
   if (!renderSchema) {
     // 渲染阶段可能存在还没获取到 schema 的情况
-    renderSchema = schemaProvider.getPreferenceProperty(preferenceName);
+    renderSchema = schemaProvider.getPreferenceProperty(preferenceId);
   }
 
   if (!renderSchema) {
     return (
       <div
-        className={classnames({
+        className={cls({
           [styles.preference_item]: true,
         })}
       >
-        {preferenceName} schema not found.
+        {preferenceId} schema not found.
       </div>
     );
   }
 
   const defaultValue =
-    preferenceService.resolve(preferenceName, undefined, undefined, undefined, PreferenceScope.Default).value ??
+    preferenceService.resolve(preferenceId, undefined, undefined, undefined, PreferenceScope.Default).value ??
     renderSchema.default;
 
   // 目前还没法对 input 的数字值进行 === 校验，先全部转为 String
@@ -137,16 +150,26 @@ export const NextPreferenceItem = ({
   const renderPreferenceItem = () => {
     if (renderSchema) {
       const props = {
-        preferenceName,
+        preferenceName: preferenceId,
         scope,
         effectingScope,
         schema: renderSchema,
+        labels,
         currentValue: value === undefined ? inherited : value,
         defaultValue,
         localizedName,
+        localizedDescription: {
+          description: preference.description,
+          markdownDescription: preference.markdownDescription,
+        },
+        renderedDescription: renderDescription({
+          name: localizedName,
+          description: preference.description,
+          markdownDescription: preference.markdownDescription,
+        }),
         hasValueInScope: value !== undefined,
         isModified,
-      };
+      } as IPreferenceItemProps;
 
       switch (renderSchema.type) {
         case 'boolean':
@@ -178,10 +201,11 @@ export const NextPreferenceItem = ({
 
   return (
     <div
-      className={classnames({
+      className={cls({
         [styles.preference_item]: true,
         [styles.modified]: isModified,
       })}
+      data-id={preferenceId}
     >
       {renderPreferenceItem()}
     </div>
@@ -193,42 +217,95 @@ const renderDescriptionExpression = (description: string) => {
   if (!description) {
     return null;
   }
-  const match = DESCRIPTION_EXPRESSION_REGEXP.exec(description!);
+  const match = description.match(DESCRIPTION_EXPRESSION_REGEXP);
   if (!match) {
     return description;
   }
-  const { 0: expression, 1: preferenceId } = match;
-  const preference = preferenceSettingService.getSectionByPreferenceId(preferenceId);
-  if (preference) {
-    const preferenceTitle = getPreferenceItemLabel(preference);
-    const others: any[] = description
-      .split(expression)
-      .map((des: string, index: number) => <span key={`${preferenceId}-${index}`}>{des}</span>);
-    const search = () => {
-      preferenceSettingService.search(preferenceTitle);
-    };
-    const link = (
-      <a onClick={search} key={preferenceId}>
-        {preferenceTitle}
-      </a>
-    );
-    others.splice(1, 0, link);
-    return others;
-  } else {
-    return description;
+  let tmp = description;
+  const result = [] as JSX.Element[];
+  for (const expression of match) {
+    if (!tmp) {
+      continue;
+    }
+    const _preferenceId = expression.slice(2, expression.length - 2);
+    const preferenceId = knownPrefIdMappings[_preferenceId] ?? _preferenceId;
+
+    const preference = preferenceSettingService.getPreferenceViewDesc(preferenceId);
+    if (preference) {
+      const preferenceTitle = getPreferenceItemLabel(preference);
+      const [prev, next] = tmp.split(expression, 2);
+      prev && result.push(<span key={result.length}>{prev}</span>);
+      tmp = next;
+      const link = (
+        <a
+          onClick={() => {
+            preferenceSettingService.search(preferenceTitle);
+          }}
+          key={preferenceId}
+        >
+          {preferenceTitle}
+        </a>
+      );
+      result.push(link);
+    }
   }
+  tmp && result.push(<span key={result.length}>{tmp}</span>);
+  return result;
 };
 
-const renderDescription = (data: { description?: string; markdownDescription?: string }) => {
+@Injectable()
+class PreferenceMarkedRender extends DefaultMarkedRenderer {
+  static openerScheme = 'prefTitle://';
+  @Autowired(IPreferenceSettingsService)
+  preferenceSettingService: PreferenceSettingsService;
+
+  codespan(text: string): string {
+    if (text.startsWith('#') && text.endsWith('#')) {
+      const _prefId = text.slice(1, text.length - 1);
+      const prefId = knownPrefIdMappings[_prefId] ?? _prefId;
+      const preference = this.preferenceSettingService.getPreferenceViewDesc(prefId);
+      if (preference) {
+        const preferenceTitle = getPreferenceItemLabel(preference);
+        return linkify(`${PreferenceMarkedRender.openerScheme}${preferenceTitle}`, prefId, preferenceTitle);
+      }
+      return super.codespan(prefId);
+    }
+    return super.codespan(text);
+  }
+}
+
+const renderMarkdownDescription = (message: string) => {
+  const openerService: IOpenerService = useInjectable(IOpenerService);
+  const renderer = useInjectable(PreferenceMarkedRender) as PreferenceMarkedRender;
+  const preferenceSettingService: PreferenceSettingsService = useInjectable(IPreferenceSettingsService);
+
+  return (
+    <Markdown
+      opener={{
+        open(uri: string) {
+          if (uri.startsWith(PreferenceMarkedRender.openerScheme)) {
+            const prefTitle = uri.slice(PreferenceMarkedRender.openerScheme.length);
+            preferenceSettingService.search(prefTitle);
+            return true;
+          }
+          return openerService.open(uri);
+        },
+      }}
+      value={message}
+      renderer={renderer}
+    />
+  );
+};
+
+const renderDescription = (data: { name?: string; description?: string; markdownDescription?: string }) => {
   const description = replaceLocalizePlaceholder(data.description ?? data.markdownDescription);
   if (!description) {
-    return null;
+    return <div className={styles.desc}>{data.name}</div>;
   }
-  const openerService: IOpenerService = useInjectable(IOpenerService);
 
   return (
     <div className={styles.desc}>
-      {data.markdownDescription ? toMarkdown(description, openerService) : renderDescriptionExpression(description)}
+      {data.markdownDescription ? renderMarkdownDescription(description) : renderDescriptionExpression(description)}
     </div>
   );
 };
@@ -248,14 +325,30 @@ const SettingStatus = ({
   return (
     <span className={styles.preference_status}>
       {effectingScope === PreferenceScope.Workspace && scope === PreferenceScope.User ? (
-        <span className={styles.preference_overwritten}>{localize('preference.overwrittenInWorkspace')}</span>
+        <span
+          onClick={() => {
+            settingsService.selectScope(PreferenceScope.Workspace);
+            settingsService.scrollToPreference(preferenceName);
+          }}
+          className={styles.preference_overwritten}
+        >
+          {localize('preference.overwrittenInWorkspace')}
+        </span>
       ) : undefined}
       {effectingScope === PreferenceScope.User && scope === PreferenceScope.Workspace ? (
-        <span className={styles.preference_overwritten}>{localize('preference.overwrittenInUser')}</span>
+        <span
+          onClick={() => {
+            settingsService.selectScope(PreferenceScope.User);
+            settingsService.scrollToPreference(preferenceName);
+          }}
+          className={styles.preference_overwritten}
+        >
+          {localize('preference.overwrittenInUser')}
+        </span>
       ) : undefined}
       {showReset ? (
         <span
-          className={classnames(styles.preference_reset, getIcon('rollback'))}
+          className={cls(styles.preference_reset, getIcon('rollback'))}
           onClick={() => {
             settingsService.reset(preferenceName, scope);
           }}
@@ -269,7 +362,7 @@ function InputPreferenceItem({
   preferenceName,
   localizedName,
   currentValue,
-  schema,
+  renderedDescription,
   isNumber,
   effectingScope,
   scope,
@@ -304,8 +397,8 @@ function InputPreferenceItem({
   }
 
   return (
-    <div className={styles.preference_line}>
-      <div className={styles.key}>
+    <>
+      <div className={cls(styles.key, styles.item)}>
         {localizedName}{' '}
         <SettingStatus
           preferenceName={preferenceName}
@@ -314,7 +407,7 @@ function InputPreferenceItem({
           showReset={isModified}
         />
       </div>
-      {renderDescription(schema)}
+      {renderedDescription}
       <div className={styles.control_wrap}>
         <div className={styles.text_control}>
           <ValidateInput
@@ -330,20 +423,19 @@ function InputPreferenceItem({
           />
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
 function CheckboxPreferenceItem({
   preferenceName,
   localizedName,
+  renderedDescription,
   currentValue,
-  schema,
   effectingScope,
   scope,
   isModified,
 }: IPreferenceItemProps) {
-  const description = schema && schema.description && replaceLocalizePlaceholder(schema.description);
   const preferenceService: PreferenceService = useInjectable(PreferenceService);
 
   const [value, setValue] = useState<boolean>();
@@ -358,15 +450,9 @@ function CheckboxPreferenceItem({
   };
 
   return (
-    <div className={styles.preference_line}>
-      <div className={classnames(styles.check, styles.key)}>
-        <CheckBox
-          label={localizedName}
-          checked={value}
-          onChange={(event) => {
-            handleValueChange((event.target as HTMLInputElement).checked);
-          }}
-        />
+    <>
+      <div className={cls(styles.key)}>
+        {localizedName}{' '}
         <SettingStatus
           preferenceName={preferenceName}
           scope={scope}
@@ -374,23 +460,32 @@ function CheckboxPreferenceItem({
           showReset={isModified}
         />
       </div>
-      {renderDescription(schema)}
-    </div>
+      <div className={styles.check}>
+        <CheckBox
+          checked={value}
+          onChange={(event) => {
+            handleValueChange((event.target as HTMLInputElement).checked);
+          }}
+        />
+        {renderedDescription}
+      </div>
+    </>
   );
 }
 
 function SelectPreferenceItem({
-  preferenceName,
+  preferenceName: preferenceId,
   localizedName,
+  renderedDescription,
   currentValue,
   defaultValue,
   schema,
+  labels,
   effectingScope,
   scope,
   isModified,
 }: IPreferenceItemProps) {
   const preferenceService: PreferenceService = useInjectable(PreferenceService);
-  const settingsService: PreferenceSettingsService = useInjectable(IPreferenceSettingsService);
   const logger: ILogger = useInjectable(ILogger);
   const value = currentValue ?? defaultValue;
 
@@ -405,38 +500,32 @@ function SelectPreferenceItem({
 
   const handleValueChange = useCallback(
     (val) => {
-      preferenceService.set(preferenceName, val, scope);
+      preferenceService.set(preferenceId, val, scope);
     },
     [preferenceService],
   );
 
-  // enum 本身为 string[] | number[]
-  const labels = settingsService.getEnumLabels(preferenceName);
   const renderEnumOptions = useCallback(() => {
     const enums = schema.enum ? [...schema.enum] : [];
-    if (!enums.includes(defaultValue)) {
-      logger.warn(`default value(${defaultValue}) of ${preferenceName} not found in its enum field`);
+    if (defaultValue && !enums.includes(defaultValue)) {
+      logger.warn(`default value(${defaultValue}) of ${preferenceId} not found in its enum field`);
+      enums.push(defaultValue);
     }
     return enums.map((item, idx) => {
       if (typeof item === 'boolean') {
         item = String(item);
       }
-
+      const localized = replaceLocalizePlaceholder(String(labels[item] || item));
       return (
-        <Option
-          value={item}
-          label={replaceLocalizePlaceholder((labels[item] || item).toString())}
-          key={`${idx} - ${item}`}
-          className={styles.select_option}
-        >
-          {replaceLocalizePlaceholder((labels[item] || item).toString())}
-          {item === String(defaultValue) && (
+        <Option value={item} label={localized} key={`${idx}-${localized}`} className={styles.select_option}>
+          {localized}
+          {String(item) === String(defaultValue) && (
             <div className={styles.select_default_option_tips}>{localize('preference.enum.default')}</div>
           )}
         </Option>
       );
     });
-  }, [schema.enum]);
+  }, [schema.enum, labels]);
 
   const renderNoneOptions = () => (
     <Option
@@ -468,17 +557,17 @@ function SelectPreferenceItem({
   );
 
   return (
-    <div className={styles.preference_line}>
+    <>
       <div className={styles.key}>
         {localizedName}{' '}
         <SettingStatus
-          preferenceName={preferenceName}
+          preferenceName={preferenceId}
           scope={scope}
           effectingScope={effectingScope}
           showReset={isModified}
         />
       </div>
-      {renderDescription(schema)}
+      {renderedDescription}
       <div className={styles.control_wrap}>
         <Select
           dropdownRenderType='absolute'
@@ -493,14 +582,14 @@ function SelectPreferenceItem({
           {options}
         </Select>
       </div>
-    </div>
+    </>
   );
 }
 
 function EditInSettingsJsonPreferenceItem({
   preferenceName,
   localizedName,
-  schema,
+  renderedDescription,
   effectingScope,
   scope,
   hasValueInScope,
@@ -512,7 +601,7 @@ function EditInSettingsJsonPreferenceItem({
   };
 
   return (
-    <div className={styles.preference_line}>
+    <>
       <div className={styles.key}>
         {localizedName}{' '}
         <SettingStatus
@@ -522,11 +611,11 @@ function EditInSettingsJsonPreferenceItem({
           showReset={hasValueInScope}
         />
       </div>
-      {renderDescription(schema)}
+      {renderedDescription}
       <div className={styles.control_wrap}>
         <a onClick={editSettingsJson}>{localize('preference.editSettingsJson')}</a>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -534,7 +623,7 @@ function StringArrayPreferenceItem({
   preferenceName,
   localizedName,
   currentValue,
-  schema,
+  renderedDescription,
   effectingScope,
   scope,
   isModified,
@@ -593,12 +682,13 @@ function StringArrayPreferenceItem({
   };
 
   const items = value.map((item, idx) => {
+    const stringified = JSON.stringify(item);
     if (currentEditIndex >= 0 && currentEditIndex === idx) {
-      return <li className={styles.array_items} key={`${idx} - ${JSON.stringify(item)}`}></li>;
+      return <li className={styles.array_items} key={`${idx}-${stringified}`}></li>;
     } else {
       return (
-        <li className={styles.array_items} key={`${idx} - ${JSON.stringify(item)}`}>
-          <div className={styles.array_item}>{typeof item === 'string' ? item : JSON.stringify(item)}</div>
+        <li className={styles.array_items} key={`${idx}-${stringified}`}>
+          <div className={styles.array_item}>{typeof item === 'string' ? item : stringified}</div>
           <div className={styles.operate}>
             <Button
               type='icon'
@@ -606,7 +696,7 @@ function StringArrayPreferenceItem({
               onClick={() => {
                 editItem(idx);
               }}
-              className={classnames(getIcon('edit'), styles.array_item)}
+              className={cls(getIcon('edit'), styles.array_item)}
             ></Button>
             <Button
               type='icon'
@@ -614,7 +704,7 @@ function StringArrayPreferenceItem({
               onClick={() => {
                 removeItem(idx);
               }}
-              className={classnames(getIcon('delete'), styles.array_item)}
+              className={cls(getIcon('delete'), styles.array_item)}
             ></Button>
           </div>
         </li>
@@ -626,7 +716,7 @@ function StringArrayPreferenceItem({
     const commit = () => {
       const newValue = value.slice(0);
       if (editValue) {
-        newValue[currentEditIndex] = editValue!;
+        newValue[currentEditIndex] = editValue;
       } else {
         newValue.splice(currentEditIndex, 1);
       }
@@ -663,7 +753,7 @@ function StringArrayPreferenceItem({
   };
 
   return (
-    <div className={styles.preference_line}>
+    <>
       <div className={styles.key}>
         {localizedName}{' '}
         <SettingStatus
@@ -673,7 +763,7 @@ function StringArrayPreferenceItem({
           showReset={isModified}
         />
       </div>
-      {renderDescription(schema)}
+      {renderedDescription}
       <div className={styles.control_wrap}>
         <ul className={styles.array_items_wrapper}>
           {items}
@@ -687,10 +777,10 @@ function StringArrayPreferenceItem({
             onValueChange={handleInputValueChange}
           />
           <Button className={styles.add_button} onClick={addItem}>
-            {localize('preference.array.additem', '添加')}
+            {localize('preference.array.additem', 'Add')}
           </Button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

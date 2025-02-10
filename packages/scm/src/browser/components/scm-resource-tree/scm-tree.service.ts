@@ -1,24 +1,28 @@
 import { Autowired, Injectable } from '@opensumi/di';
-import { Tree, ITreeNodeOrCompositeTreeNode } from '@opensumi/ide-components';
-import { PreferenceService } from '@opensumi/ide-core-browser';
-import { Emitter, Event } from '@opensumi/ide-core-browser';
-import { PreferenceScope } from '@opensumi/ide-core-common';
+import { ITreeNodeOrCompositeTreeNode, Tree } from '@opensumi/ide-components';
+import { Emitter, Event, PreferenceService } from '@opensumi/ide-core-browser';
+import { PreferenceScope, URI } from '@opensumi/ide-core-common';
 
 import { ISCMResource, ISCMResourceGroup, SCMViewModelMode } from '../../../common';
 
-import { SCMTreeAPI, ISCMTreeNodeDescription } from './scm-tree-api';
+import { ISCMTreeNodeDescription, SCMTreeAPI } from './scm-tree-api';
 import {
-  SCMResourceRoot,
-  SCMResourceGroup,
   SCMResourceFile,
   SCMResourceFolder,
-  SCMResourceNotRoot,
-  SCMResourceNotFile,
+  SCMResourceGroup,
   SCMResourceItem,
+  SCMResourceNotFile,
+  SCMResourceRoot,
 } from './scm-tree-node';
 
 /**
- * 应为单例
+ * 默认的 scm list 的结构是拍平的
+ * 但是有个特征是
+ * [
+ *  mergedChangesGroup, ...mergedChangesGroupResources, (当子元素为空时则不存在(git 插件内部逻辑))
+ *  stagedChangesGroup, ...stagedChangesGroupResources, (当子元素为空时则不存在(git 插件内部逻辑))
+ *  changesGroup, ...changesGroupResources,
+ * ]
  */
 @Injectable()
 export class SCMTreeService extends Tree {
@@ -41,25 +45,6 @@ export class SCMTreeService extends Tree {
   public get onDidTreeModeChange(): Event<boolean> {
     return this.onDidTreeModeChangeEmitter.event;
   }
-
-  // cache related starts
-  private cachedTreeNodeMap: Map<string, SCMResourceNotRoot> = new Map();
-  private cachedListNodeMap: Map<string, SCMResourceNotRoot> = new Map();
-
-  public getCachedNodeItem(uid: string) {
-    return this.isTreeMode ? this.cachedTreeNodeMap.get(uid) : this.cachedListNodeMap.get(uid);
-  }
-
-  // tslint:disable-next-line:no-unused-variable
-  private clearCachedNodeItem() {
-    this.cachedListNodeMap.clear();
-    this.cachedTreeNodeMap.clear();
-  }
-
-  private cacheNodeItem(uriStr: string, node: SCMResourceNotRoot) {
-    return this.isTreeMode ? this.cachedTreeNodeMap.set(uriStr, node) : this.cachedListNodeMap.set(uriStr, node);
-  }
-  // cache related ends
 
   constructor() {
     super();
@@ -104,7 +89,6 @@ export class SCMTreeService extends Tree {
           return node;
         }),
       );
-      this.cacheNodes(children as SCMResourceNotRoot[]);
     } else {
       if (parent.raw) {
         // 这里针对 children 做一个排序
@@ -115,17 +99,9 @@ export class SCMTreeService extends Tree {
             return node;
           }),
         );
-        this.cacheNodes(children as SCMResourceNotRoot[]);
       }
     }
     return children;
-  }
-
-  private cacheNodes(nodes: SCMResourceNotRoot[]) {
-    nodes.forEach((node) => {
-      // 利用唯一 Key 进行缓存
-      this.cacheNodeItem(node.raw.id, node);
-    });
   }
 
   private toNode(child: ISCMTreeNodeDescription, parent: SCMResourceNotFile, isTree: boolean) {
@@ -138,7 +114,7 @@ export class SCMTreeService extends Tree {
     if (child.type === 'file') {
       return new SCMResourceFile(this, parent, c, c.resource, isTree);
     } else {
-      return new SCMResourceFolder(this, parent, c, c.resource);
+      return new SCMResourceFolder(this, parent, c, c.resource, isTree);
     }
   }
 
@@ -157,13 +133,8 @@ export class SCMTreeService extends Tree {
     return super.sortComparator(a, b);
   }
 
-  /**
-   * 默认的 scm list 的结构是拍平的
-   * 但是有个特征是
-   * [
-   *  mergedChangesGroup, ...mergedChangesGroupResources, (当子元素为空时则不存在(git 插件内部逻辑))
-   *  stagedChangesGroup, ...stagedChangesGroupResources, (当子元素为空时则不存在(git 插件内部逻辑))
-   *  changesGroup, ...changesGroupResources,
-   * ]
-   */
+  dispose(): void {
+    super.dispose();
+    this.onDidTreeModeChangeEmitter.dispose();
+  }
 }

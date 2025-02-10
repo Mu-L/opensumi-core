@@ -1,18 +1,21 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  Domain,
-  localize,
-  Deferred,
-  CommandService,
-  EDITOR_COMMANDS,
   CommandContribution,
   CommandRegistry,
+  CommandService,
+  DIFF_EDITOR_COMMANDS,
+  Deferred,
+  Domain,
+  EDITOR_COMMANDS,
+  PreferenceScope,
+  PreferenceService,
+  URI,
+  getIcon,
+  localize,
 } from '@opensumi/ide-core-browser';
-import { getIcon } from '@opensumi/ide-core-browser';
-import { MenuContribution, IMenuRegistry, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
+import { IMenuRegistry, MenuContribution, MenuId } from '@opensumi/ide-core-browser/lib/menu/next';
 
-import { ICompareService, CompareResult } from '../types';
+import { CompareResult, DIFF_SCHEME, ICompareService } from '../types';
 
 @Injectable()
 export class CompareService implements ICompareService {
@@ -23,7 +26,7 @@ export class CompareService implements ICompareService {
 
   compare(original: URI, modified: URI, name: string): Promise<CompareResult> {
     const compareUri = URI.from({
-      scheme: 'diff',
+      scheme: DIFF_SCHEME,
       query: URI.stringifyQuery({
         name,
         original,
@@ -47,13 +50,16 @@ export class CompareService implements ICompareService {
 @Domain(MenuContribution, CommandContribution)
 export class CompareEditorContribution implements MenuContribution, CommandContribution {
   @Autowired(ICompareService)
-  compareService: CompareService;
+  private compareService: CompareService;
+
+  @Autowired(PreferenceService)
+  private preferenceService: PreferenceService;
 
   registerMenus(menu: IMenuRegistry) {
     menu.registerMenuItems(MenuId.EditorTitle, [
       {
         command: {
-          id: 'editor.diff.accept',
+          id: DIFF_EDITOR_COMMANDS.ACCEPT.id,
           label: localize('editor.action.accept'),
         },
         iconClass: getIcon('check'),
@@ -64,7 +70,7 @@ export class CompareEditorContribution implements MenuContribution, CommandContr
     menu.registerMenuItems(MenuId.EditorTitle, [
       {
         command: {
-          id: 'editor.diff.revert',
+          id: DIFF_EDITOR_COMMANDS.REVERT.id,
           label: localize('editor.action.revert'),
         },
         iconClass: getIcon('rollback'),
@@ -72,28 +78,40 @@ export class CompareEditorContribution implements MenuContribution, CommandContr
         when: 'isInDiffEditor && diffResource =~ /%26comparing%3Dtrue$/',
       },
     ]);
+    menu.registerMenuItems(MenuId.EditorTitle, [
+      {
+        command: {
+          id: DIFF_EDITOR_COMMANDS.TOGGLE_COLLAPSE_UNCHANGED_REGIONS.id,
+          label: localize('diffEditor.action.toggleCollapseUnchangedRegions'),
+        },
+        toggledWhen: 'config.diffEditor.hideUnchangedRegions.enabled',
+        iconClass: 'codicon codicon-map',
+        group: 'navigation',
+        when: 'isInDiffEditor',
+      },
+    ]);
   }
 
   registerCommands(commands: CommandRegistry) {
-    commands.registerCommand(
-      { id: 'editor.diff.accept' },
-      {
-        execute: (uri: URI) => {
-          if (uri && this.compareService.comparing.has(uri.toString())) {
-            this.compareService.comparing.get(uri.toString())!.resolve(CompareResult.accept);
-          }
-        },
+    commands.registerCommand(DIFF_EDITOR_COMMANDS.ACCEPT, {
+      execute: (uri: URI) => {
+        if (uri && this.compareService.comparing.has(uri.toString())) {
+          this.compareService.comparing.get(uri.toString())!.resolve(CompareResult.accept);
+        }
       },
-    );
-    commands.registerCommand(
-      { id: 'editor.diff.revert' },
-      {
-        execute: (uri: URI) => {
-          if (uri && this.compareService.comparing.has(uri.toString())) {
-            this.compareService.comparing.get(uri.toString())!.resolve(CompareResult.revert);
-          }
-        },
+    });
+    commands.registerCommand(DIFF_EDITOR_COMMANDS.REVERT, {
+      execute: (uri: URI) => {
+        if (uri && this.compareService.comparing.has(uri.toString())) {
+          this.compareService.comparing.get(uri.toString())!.resolve(CompareResult.revert);
+        }
       },
-    );
+    });
+    commands.registerCommand(DIFF_EDITOR_COMMANDS.TOGGLE_COLLAPSE_UNCHANGED_REGIONS, {
+      execute: () => {
+        const enabled = this.preferenceService.get('diffEditor.hideUnchangedRegions.enabled');
+        this.preferenceService.set('diffEditor.hideUnchangedRegions.enabled', !enabled, PreferenceScope.User);
+      },
+    });
   }
 }

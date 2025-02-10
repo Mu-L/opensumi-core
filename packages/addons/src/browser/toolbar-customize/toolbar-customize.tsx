@@ -1,13 +1,13 @@
 import React from 'react';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { CheckBox, Select, Button } from '@opensumi/ide-components';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Button, CheckBox, Select } from '@opensumi/ide-components';
 import {
-  useInjectable,
-  PreferenceService,
-  PreferenceScope,
   IToolbarRegistry,
+  PreferenceScope,
+  PreferenceService,
   localize,
+  useInjectable,
 } from '@opensumi/ide-core-browser';
 
 import styles from './style.module.less';
@@ -28,7 +28,7 @@ export class ToolbarCustomizeViewService {
   }
 
   async toggleActionVisibility(location: string, actionId: string, visible: boolean) {
-    const prev: { [key: string]: string[] } = this.preferenceService.get('toolbar.ignoreActions') || {};
+    const prev: { [key: string]: string[] } = this.preferenceService.getValid('toolbar.ignoreActions', {});
     if (!prev[location]) {
       prev[location] = [];
     }

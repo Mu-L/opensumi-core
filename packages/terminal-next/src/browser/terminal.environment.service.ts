@@ -2,8 +2,8 @@ import debounce from 'lodash/debounce';
 import throttle from 'lodash/throttle';
 import React from 'react';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { getIcon, StatusBarAlignment, StatusBarEntryAccessor, TERMINAL_COMMANDS } from '@opensumi/ide-core-browser';
+import { Autowired, Injectable } from '@opensumi/di';
+import { StatusBarAlignment, StatusBarEntryAccessor, TERMINAL_COMMANDS, getIcon } from '@opensumi/ide-core-browser';
 import {
   CommandService,
   Emitter,
@@ -19,12 +19,12 @@ import { IWorkspaceStorageService } from '@opensumi/ide-workspace/lib/common';
 
 import { ITerminalProcessPath, ITerminalProcessService } from '../common';
 import {
-  deserializeEnvironmentVariableCollection,
   IEnvironmentVariableCollectionWithPersistence,
   IEnvironmentVariableService,
   IMergedEnvironmentVariableCollection,
   IMergedEnvironmentVariableCollectionDiff,
   ISerializableEnvironmentVariableCollection,
+  deserializeEnvironmentVariableCollection,
   mutatorTypeLabel,
   serializeEnvironmentVariableCollection,
 } from '../common/environmentVariable';
@@ -154,7 +154,7 @@ export class TerminalEnvironmentService implements IEnvironmentVariableService {
     });
 
     this.statusBarEntryAccessor = this.statusbarService.addElement(ENVIRONMENT_VARIABLE_CHANGED_STATUS, {
-      iconClass: getIcon('warning-circle-fill'),
+      iconClass: getIcon('warning-circle'),
       color: 'orange',
       alignment: StatusBarAlignment.RIGHT,
       tooltip: toMarkdownString(localize('terminal.environment.changed') + '\n\n```\n' + changes.join('\n') + '\n```'),

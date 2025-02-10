@@ -1,13 +1,20 @@
 import { Injector } from '@opensumi/di';
-import { URI, IContextKeyService, Disposable } from '@opensumi/ide-core-browser';
-import { ICtxMenuRenderer, AbstractMenuService } from '@opensumi/ide-core-browser/lib/menu/next';
+import { Disposable, IContextKeyService, URI } from '@opensumi/ide-core-browser';
+import { AbstractMenuService, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
 import { IDebugModel, IDebugSessionManager } from '@opensumi/ide-debug';
 import { BreakpointManager, DebugBreakpoint } from '@opensumi/ide-debug/lib/browser/breakpoint';
 import { createBrowserInjector } from '@opensumi/ide-dev-tool/src/injector-helper';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { IEditorDocumentModelService } from '@opensumi/ide-editor/lib/browser';
+import { EditorDocumentModelServiceImpl } from '@opensumi/ide-editor/lib/browser/doc-model/editor-document-model-service';
+import { IFileServiceClient } from '@opensumi/ide-file-service';
+import { FileServiceClient } from '@opensumi/ide-file-service/lib/browser/file-service-client';
+import * as monaco from '@opensumi/ide-monaco';
+import { monacoBrowser } from '@opensumi/ide-monaco/lib/browser';
+import { IWorkspaceService } from '@opensumi/ide-workspace';
+import { WorkspaceService } from '@opensumi/ide-workspace/lib/browser/workspace-service';
 
 import { createMockedMonaco } from '../../../../monaco/__mocks__/monaco';
-import { DebugModel, DebugHoverWidget, DebugBreakpointWidget } from '../../../src/browser/editor';
+import { DebugBreakpointWidget, DebugHoverWidget, DebugModel } from '../../../src/browser/editor';
 
 describe('Debug Model', () => {
   const mockInjector = createBrowserInjector([]);
@@ -39,6 +46,7 @@ describe('Debug Model', () => {
         }),
         getLineFirstNonWhitespaceColumn: () => 1,
         getLineLastNonWhitespaceColumn: () => 10,
+        getLineCount: () => 10,
         onDidLayoutChange: jest.fn(() => Disposable.create(() => {})),
         onDidChangeContent: jest.fn(() => Disposable.create(() => {})),
       })),
@@ -53,6 +61,7 @@ describe('Debug Model', () => {
     };
 
     mockBreakpointManager = {
+      whenReady: Promise.resolve(),
       onDidChange: jest.fn(() => Disposable.create(() => {})),
       delBreakpoint: jest.fn(() => Disposable.create(() => {})),
       addBreakpoint: jest.fn(() => Disposable.create(() => {})),
@@ -107,7 +116,9 @@ describe('Debug Model', () => {
 
     mockInjector.overrideProviders({
       token: IContextKeyService,
-      useValue: {},
+      useValue: {
+        getContextValue: jest.fn(),
+      },
     });
 
     childInjector = DebugModel.createContainer(mockInjector, mockEditor as any);
@@ -121,13 +132,29 @@ describe('Debug Model', () => {
       token: DebugBreakpointWidget,
       useValue: mockBreakpointWidget,
     });
+
+    childInjector.overrideProviders({
+      token: IWorkspaceService,
+      useClass: WorkspaceService,
+    });
+
+    childInjector.overrideProviders({
+      token: IEditorDocumentModelService,
+      useClass: EditorDocumentModelServiceImpl,
+    });
+
+    childInjector.overrideProviders({
+      token: IFileServiceClient,
+      useClass: FileServiceClient,
+    });
+
     debugModel = childInjector.get(IDebugModel);
   });
 
   it('debugModel should be init success', () => {
-    expect(mockEditor.onKeyDown).toBeCalledTimes(1);
-    expect(mockEditor.getModel).toBeCalledTimes(4);
-    expect(mockBreakpointManager.onDidChange).toBeCalledTimes(1);
+    expect(mockEditor.onKeyDown).toHaveBeenCalledTimes(1);
+    expect(mockEditor.getModel).toHaveBeenCalledTimes(4);
+    expect(mockBreakpointManager.onDidChange).toHaveBeenCalledTimes(1);
   });
 
   it('should have enough API', () => {
@@ -152,55 +179,55 @@ describe('Debug Model', () => {
   it('focusStackFrame should be work', () => {
     mockEditor.deltaDecorations.mockClear();
     debugModel.focusStackFrame();
-    expect(mockEditor.deltaDecorations).toBeCalledTimes(0);
+    expect(mockEditor.deltaDecorations).toHaveBeenCalledTimes(0);
   });
 
-  it('renderBreakpoints should be work', () => {
+  it('renderBreakpoints should be work', async () => {
     mockEditor.deltaDecorations.mockClear();
-    debugModel.renderBreakpoints();
-    expect(mockEditor.deltaDecorations).toBeCalledTimes(2);
+    await debugModel.renderBreakpoints();
+    expect(mockEditor.deltaDecorations).toHaveBeenCalledTimes(3);
   });
 
-  it('render should be work', () => {
+  it('render should be work', async () => {
     mockEditor.deltaDecorations.mockClear();
-    debugModel.render();
-    expect(mockEditor.deltaDecorations).toBeCalledTimes(2);
+    await debugModel.render();
+    expect(mockEditor.deltaDecorations).toHaveBeenCalledTimes(3);
   });
 
   it('toggleBreakpoint should be work', () => {
     mockBreakpointManager.getBreakpoints.mockClear();
     debugModel.toggleBreakpoint({ lineNumber: 1, column: 2 } as monaco.Position);
-    expect(mockBreakpointManager.getBreakpoints).toBeCalledTimes(1);
-    expect(mockBreakpointManager.delBreakpoint).toBeCalledTimes(1);
+    expect(mockBreakpointManager.getBreakpoints).toHaveBeenCalledTimes(1);
+    expect(mockBreakpointManager.delBreakpoint).toHaveBeenCalledTimes(1);
     mockBreakpointManager.getBreakpoints.mockReturnValueOnce([] as any);
     debugModel.toggleBreakpoint({ lineNumber: 1, column: 2 } as monaco.Position);
-    expect(mockBreakpointManager.addBreakpoint).toBeCalledTimes(1);
+    expect(mockBreakpointManager.addBreakpoint).toHaveBeenCalledTimes(1);
   });
 
   it('openBreakpointView should be work', () => {
     debugModel.openBreakpointView({ lineNumber: 1, column: 1 } as monaco.Position);
-    expect(mockBreakpointWidget.show).toBeCalledTimes(1);
+    expect(mockBreakpointWidget.show).toHaveBeenCalledTimes(1);
   });
 
   it('closeBreakpointView should be work', () => {
     debugModel.closeBreakpointView();
-    expect(mockBreakpointWidget.hide).toBeCalledTimes(1);
+    expect(mockBreakpointWidget.hide).toHaveBeenCalledTimes(1);
   });
 
   it('acceptBreakpoint should be work', () => {
     debugModel.acceptBreakpoint();
-    expect(mockBreakpointManager.updateBreakpoint).toBeCalledTimes(1);
-    expect(mockBreakpointWidget.hide).toBeCalledTimes(1);
+    expect(mockBreakpointManager.updateBreakpoint).toHaveBeenCalledTimes(1);
+    expect(mockBreakpointWidget.hide).toHaveBeenCalledTimes(1);
     mockBreakpointManager.getBreakpoint.mockReturnValueOnce(null as any);
     debugModel.acceptBreakpoint();
-    expect(mockBreakpointManager.addBreakpoint).toBeCalledTimes(1);
-    expect(mockBreakpointWidget.hide).toBeCalledTimes(2);
+    expect(mockBreakpointManager.addBreakpoint).toHaveBeenCalledTimes(1);
+    expect(mockBreakpointWidget.hide).toHaveBeenCalledTimes(2);
   });
 
   it('onContextMenu should be work', () => {
     const mockEvent = {
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
         position: {
           lineNumber: 1,
         },
@@ -210,13 +237,13 @@ describe('Debug Model', () => {
       },
     };
     debugModel.onContextMenu(mockEvent as monaco.editor.IEditorMouseEvent);
-    expect(mockCtxMenuRenderer.show).toBeCalledTimes(1);
+    expect(mockCtxMenuRenderer.show).toHaveBeenCalledTimes(1);
   });
 
   it('onMouseDown should be work', () => {
     const mockEvent = {
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
         position: {
           lineNumber: 1,
         },
@@ -226,13 +253,13 @@ describe('Debug Model', () => {
       },
     };
     debugModel.onMouseDown(mockEvent as monaco.editor.IEditorMouseEvent);
-    expect(mockEditor.focus).toBeCalledTimes(1);
+    expect(mockEditor.focus).toHaveBeenCalledTimes(1);
   });
 
   it('onMouseMove should be work', () => {
     debugModel.onMouseMove({
       target: {
-        type: monaco.editor.MouseTargetType.CONTENT_TEXT,
+        type: monacoBrowser.editor.MouseTargetType.CONTENT_TEXT,
         position: {
           lineNumber: 1,
         },
@@ -241,10 +268,10 @@ describe('Debug Model', () => {
         altKey: false,
       },
     } as monaco.editor.IEditorMouseEvent);
-    expect(mockDebugHoverWidget.show).toBeCalledTimes(1);
+    expect(mockDebugHoverWidget.show).toHaveBeenCalledTimes(1);
     debugModel.onMouseMove({
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
         position: {
           lineNumber: 1,
         },
@@ -253,13 +280,13 @@ describe('Debug Model', () => {
         altKey: false,
       },
     } as monaco.editor.IEditorMouseEvent);
-    expect(mockDebugHoverWidget.hide).toBeCalledTimes(1);
+    expect(mockDebugHoverWidget.hide).toHaveBeenCalledTimes(1);
   });
 
   it('onMouseLeave should be work', () => {
     const mockEvent = {
       target: {
-        type: monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
+        type: monacoBrowser.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,
         position: {
           lineNumber: 1,
         },
@@ -275,7 +302,7 @@ describe('Debug Model', () => {
       getBoundingClientRect,
     });
     debugModel.onMouseLeave(mockEvent as monaco.editor.IEditorMouseEvent);
-    expect(getBoundingClientRect).toBeCalledTimes(1);
-    expect(mockDebugHoverWidget.hide).toBeCalledTimes(1);
+    expect(getBoundingClientRect).toHaveBeenCalledTimes(1);
+    expect(mockDebugHoverWidget.hide).toHaveBeenCalledTimes(1);
   });
 });

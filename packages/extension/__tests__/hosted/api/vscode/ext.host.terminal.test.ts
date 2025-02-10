@@ -1,6 +1,5 @@
-import { RPCProtocol } from '@opensumi/ide-connection';
 import { PreferenceService } from '@opensumi/ide-core-browser';
-import { Emitter, Disposable, ILogger, OperatingSystem, Deferred } from '@opensumi/ide-core-common';
+import { Deferred, Disposable, Emitter, ILogger, OperatingSystem } from '@opensumi/ide-core-common';
 import { IExtension } from '@opensumi/ide-extension';
 import {
   ITerminalApiService,
@@ -19,8 +18,9 @@ import {
   MockProfileService,
   MockTerminalProfileInternalService,
 } from '../../../../../terminal-next/__tests__/browser/mock.service';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
 import { MainThreadTerminal } from '../../../../src/browser/vscode/api/main.thread.terminal';
-import { MainThreadAPIIdentifier, ExtHostAPIIdentifier } from '../../../../src/common/vscode';
+import { ExtHostAPIIdentifier, MainThreadAPIIdentifier } from '../../../../src/common/vscode';
 import {
   EnvironmentVariableCollection,
   ExtHostTerminal,
@@ -28,20 +28,7 @@ import {
 } from '../../../../src/hosted/api/vscode/ext.host.terminal';
 import { MockEnvironmentVariableService } from '../../__mocks__/environmentVariableService';
 
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHost: ExtHostTerminal;
 let mainThread: MainThreadTerminal;
@@ -140,7 +127,7 @@ describe('ext host terminal test', () => {
     });
 
     await mainThread['proxy'].$onDidCloseTerminal({ id: 'test-id', code: -1 });
-    expect(proxyFn).toBeCalled();
+    expect(proxyFn).toHaveBeenCalled();
     await defered.promise;
   });
 
@@ -201,9 +188,9 @@ describe('ext host terminal test', () => {
       rows: 30,
     });
 
-    expect(mockCreateTerminal).toBeCalled();
+    expect(mockCreateTerminal).toHaveBeenCalled();
 
-    const mockSetStatus = jest.spyOn(terminal4, 'setExitCode');
+    const mockSetStatus = jest.spyOn(terminal4, 'setExitStatus');
 
     // 要等待前台创建完 terminal 示例后，pty 事件绑定完再 fire
     setTimeout(() => {
@@ -211,8 +198,8 @@ describe('ext host terminal test', () => {
 
       // 要等待事件 fire 后能监听到
       setTimeout(() => {
-        expect(mockTerminalExit).toBeCalledWith(terminalId, 2);
-        expect(mockSetStatus).toBeCalled();
+        expect(mockTerminalExit).toHaveBeenCalledWith(terminalId, 2);
+        expect(mockSetStatus).toHaveBeenCalled();
         expect(terminal4.exitStatus).toBeDefined();
         expect(terminal4.exitStatus?.code).toBe(2);
         defered.resolve();
@@ -258,7 +245,7 @@ describe('ext host terminal test', () => {
   const mockExtension = {
     id: 'test-terminal-env',
   };
-  const collection = extHost.getEnviromentVariableCollection(mockExtension as unknown as IExtension);
+  const collection = extHost.getEnvironmentVariableCollection(mockExtension as unknown as IExtension);
   // @ts-ignore
   const mocksyncEnvironmentVariableCollection = jest.spyOn(extHost, 'syncEnvironmentVariableCollection');
 
@@ -270,34 +257,61 @@ describe('ext host terminal test', () => {
 
   it('EnvironmentVariableCollection#append', () => {
     collection.append('FOO', 'BAR');
-    const serialized = [['FOO', { value: 'BAR', type: 2 /** EnvironmentVariableMutatorType.Append */ }]];
+    const serialized = [
+      [
+        'FOO',
+        {
+          value: 'BAR',
+          type: 2 /** EnvironmentVariableMutatorType.Append */,
+          options: { applyAtProcessCreation: true },
+        },
+      ],
+    ];
 
-    expect(mocksyncEnvironmentVariableCollection).toBeCalled();
-    expect(mocksyncEnvironmentVariableCollection).toBeCalledWith(mockExtension.id, collection);
+    expect(mocksyncEnvironmentVariableCollection).toHaveBeenCalled();
+    expect(mocksyncEnvironmentVariableCollection).toHaveBeenCalledWith(mockExtension.id, collection);
     expect([...collection.map.entries()]).toEqual(serialized);
   });
 
   it('EnvironmentVariableCollection#replace', () => {
     collection.replace('FOO', 'BAR2');
-    const serialized = [['FOO', { value: 'BAR2', type: 1 /** EnvironmentVariableMutatorType.Replace */ }]];
+    const serialized = [
+      [
+        'FOO',
+        {
+          value: 'BAR2',
+          type: 1 /** EnvironmentVariableMutatorType.Replace */,
+          options: { applyAtProcessCreation: true },
+        },
+      ],
+    ];
 
-    expect(mocksyncEnvironmentVariableCollection).toBeCalled();
-    expect(mocksyncEnvironmentVariableCollection).toBeCalledWith(mockExtension.id, collection);
+    expect(mocksyncEnvironmentVariableCollection).toHaveBeenCalled();
+    expect(mocksyncEnvironmentVariableCollection).toHaveBeenCalledWith(mockExtension.id, collection);
     expect([...collection.map.entries()]).toEqual(serialized);
   });
 
   it('EnvironmentVariableCollection#prepend', () => {
     collection.prepend('FOO', 'BAR3');
-    const serialized = [['FOO', { value: 'BAR3', type: 3 /** EnvironmentVariableMutatorType.Prepend */ }]];
+    const serialized = [
+      [
+        'FOO',
+        {
+          value: 'BAR3',
+          type: 3 /** EnvironmentVariableMutatorType.Prepend */,
+          options: { applyAtProcessCreation: true },
+        },
+      ],
+    ];
 
-    expect(mocksyncEnvironmentVariableCollection).toBeCalled();
-    expect(mocksyncEnvironmentVariableCollection).toBeCalledWith(mockExtension.id, collection);
+    expect(mocksyncEnvironmentVariableCollection).toHaveBeenCalled();
+    expect(mocksyncEnvironmentVariableCollection).toHaveBeenCalledWith(mockExtension.id, collection);
     expect([...collection.map.entries()]).toEqual(serialized);
   });
 
   it('EnvironmentVariableCollection#get', () => {
     const value = collection.get('FOO');
-    expect(value).toEqual({ value: 'BAR3', type: 3 });
+    expect(value).toEqual({ value: 'BAR3', type: 3, options: { applyAtProcessCreation: true } });
   });
 
   it('EnvironmentVariableCollection#forEach', async () => {

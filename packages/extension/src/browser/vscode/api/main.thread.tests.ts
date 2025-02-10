@@ -1,5 +1,5 @@
 // eslint-disable no-console
-import { Injectable, Optional, Autowired } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { Logger } from '@opensumi/ide-core-browser';
 import { CancellationToken, Disposable, DisposableStore, IDisposable, URI } from '@opensumi/ide-core-common';
@@ -13,16 +13,16 @@ import {
   TestResultServiceToken,
 } from '@opensumi/ide-testing/lib/common/test-result';
 import {
-  ITestRunProfile,
-  ResolvedTestRunRequest,
-  TestResultState,
-  SerializedTestMessage,
-  ILocationDto,
-  ITestRunTask,
   ExtensionRunTestsRequest,
-  TestsDiff,
+  ILocationDto,
   ITestItem,
+  ITestRunProfile,
+  ITestRunTask,
+  ResolvedTestRunRequest,
+  SerializedTestMessage,
   TestDiffOpType,
+  TestResultState,
+  TestsDiff,
 } from '@opensumi/ide-testing/lib/common/testCollection';
 import { Range } from '@opensumi/monaco-editor-core/esm/vs/editor/common/core/range';
 
@@ -190,10 +190,6 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
     this.withTestResult(runId, (r) => r.appendOutput(output, taskId, location, testId));
   }
 
-  $signalCoverageAvailable(runId: string, taskId: string): void {
-    this.logger.warn('$signalCoverageAvailable', runId, taskId);
-  }
-
   $startedTestRunTask(runId: string, task: ITestRunTask): void {
     this.withTestResult(runId, (r) => r.addTask(task));
   }
@@ -208,6 +204,10 @@ export class MainThreadTestsImpl extends Disposable implements IMainThreadTestin
 
   $finishedExtensionTestRun(runId: string): void {
     this.withTestResult(runId, (r) => r.markComplete());
+  }
+
+  $markTestRetired(testIds: string[] | undefined): void {
+    this.logger.warn('Method not implemented.');
   }
 
   private withTestResult<T>(runId: string, fn: (run: ITestResult) => T): T | undefined {

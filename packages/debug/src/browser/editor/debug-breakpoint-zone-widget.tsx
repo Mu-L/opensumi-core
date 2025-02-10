@@ -1,14 +1,15 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
+import ReactDOM from 'react-dom/client';
 
-import { Injectable, Autowired } from '@opensumi/di';
-import { Select, Option } from '@opensumi/ide-components';
-import { localize, Emitter, Event } from '@opensumi/ide-core-common';
+import { Autowired, Injectable } from '@opensumi/di';
+import { Option, Select } from '@opensumi/ide-components';
+import { PreferenceService } from '@opensumi/ide-core-browser';
+import { Emitter, Event, localize } from '@opensumi/ide-core-common';
 import { ICodeEditor } from '@opensumi/ide-editor';
+import * as monaco from '@opensumi/ide-monaco';
 import { ZoneWidget } from '@opensumi/ide-monaco-enhance';
 import { ICSSStyleService } from '@opensumi/ide-theme';
-import * as monacoLanguages from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { EditorOption } from '@opensumi/monaco-editor-core/esm/vs/editor/common/config/editorOptions';
 
 import {
   BreakpointChangeData,
@@ -29,12 +30,16 @@ export class DebugBreakpointZoneWidget extends ZoneWidget {
   @Autowired(DebugBreakpointsService)
   protected debugBreakpointsService: DebugBreakpointsService;
 
+  @Autowired(PreferenceService)
+  protected preferenceService: PreferenceService;
+
   @Autowired(ICSSStyleService)
   protected readonly cssManager: ICSSStyleService;
 
   private _wrapper: HTMLDivElement;
   private _selection: HTMLDivElement;
   private _input: HTMLDivElement;
+  private cssRenderDisposable: monaco.IDisposable | undefined;
 
   protected readonly _onDidChangeBreakpoint = new Emitter<BreakpointChangeData>();
   readonly onDidChangeBreakpoint: Event<BreakpointChangeData> = this._onDidChangeBreakpoint.event;
@@ -73,7 +78,7 @@ export class DebugBreakpointZoneWidget extends ZoneWidget {
     this._wrapper.appendChild(this._selection);
     this._wrapper.appendChild(this._input);
 
-    ReactDOM.render(<></>, this._input);
+    ReactDOM.createRoot(this._input).render(<></>);
   }
 
   public hide(): void {
@@ -179,7 +184,7 @@ export class DebugBreakpointZoneWidget extends ZoneWidget {
     const languageIdentifier = this.editor.getModel()?.getLanguageId();
     const model = this.input?.monacoEditor.getModel();
     if (model && languageIdentifier) {
-      model.setMode(this.context === 'logMessage' ? 'plaintext' : languageIdentifier);
+      model.setLanguage(this.context === 'logMessage' ? 'plaintext' : languageIdentifier);
     }
   }
 
@@ -191,7 +196,7 @@ export class DebugBreakpointZoneWidget extends ZoneWidget {
     this.clearPlaceholder();
 
     const content = `'${this.placeholder}' !important`;
-    this.cssManager.addClass(DebugBreakpointZoneWidget.INPUT_PLACEHOLDER_AFTER, { content });
+    this.cssRenderDisposable = this.cssManager.addClass(DebugBreakpointZoneWidget.INPUT_PLACEHOLDER_AFTER, { content });
   }
 
   private ensureRenderPlaceholder() {
@@ -212,19 +217,33 @@ export class DebugBreakpointZoneWidget extends ZoneWidget {
   }
 
   private clearPlaceholder() {
-    this.cssManager.removeClass(DebugBreakpointZoneWidget.INPUT_PLACEHOLDER_AFTER);
+    if (this.cssRenderDisposable) {
+      this.cssRenderDisposable.dispose();
+      this.cssRenderDisposable = undefined;
+    }
   }
 
   applyClass() {
     this._wrapper.className = styles.debug_breakpoint_wrapper;
     this._selection.className = styles.debug_breakpoint_selected;
     this._input.className = styles.debug_breakpoint_input;
+
+    const model = this.editor.getModel();
+
+    if (!model) {
+      return;
+    }
+
+    const lineHeight = this.editor.getOption(EditorOption.lineHeight);
+    const fontSize = this.editor.getOption(EditorOption.fontSize);
+    const newTopMargin = lineHeight - fontSize;
+    this._input.style.marginTop = newTopMargin + 'px';
   }
 
   applyStyle() {
     this.syncPreContent();
 
-    ReactDOM.render(
+    ReactDOM.createRoot(this._selection).render(
       <Select
         value={this.context}
         selectedRenderer={() => <span className='kt-select-option'>{this.getContextToLocalize(this.context)}</span>}
@@ -234,7 +253,6 @@ export class DebugBreakpointZoneWidget extends ZoneWidget {
         {this.renderOption('hitCondition', this.getContextToLocalize('hitCondition'))}
         {this.renderOption('logMessage', this.getContextToLocalize('logMessage'))}
       </Select>,
-      this._selection,
     );
   }
 

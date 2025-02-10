@@ -1,19 +1,22 @@
 import { createHash } from 'crypto';
 
 import address from 'address';
-import type vscode from 'vscode';
 
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import { Event, uuid } from '@opensumi/ide-core-common';
 
 import {
-  IExtensionDescription,
   IExtHostEnv,
   IExtHostTerminal,
+  IExtensionDescription,
   IMainThreadEnv,
   MainThreadAPIIdentifier,
 } from '../../../../common/vscode';
 import { LogLevel } from '../../worker/worker.ext-types';
+
+import { TelemetryExtImpl } from './telemetry-ext';
+
+import type vscode from 'vscode';
 
 export class Env {
   private macMachineId: string;
@@ -37,6 +40,7 @@ export class Env {
 }
 
 export const envValue = new Env();
+const telemetryExt = new TelemetryExtImpl();
 
 export function createEnvApiFactory(
   rpcProtocol: IRPCProtocol,
@@ -77,8 +81,14 @@ export function createEnvApiFactory(
     get onDidChangeLogLevel(): Event<LogLevel> {
       return envHost.logLevelChangeEmitter.event;
     },
-    get environmentVariableCollection(): vscode.EnvironmentVariableCollection {
-      return exthostTerminal.getEnviromentVariableCollection(extension);
+    get environmentVariableCollection(): vscode.GlobalEnvironmentVariableCollection {
+      return exthostTerminal.getEnvironmentVariableCollection(extension);
+    },
+    createTelemetryLogger(
+      sender: vscode.TelemetrySender,
+      options?: vscode.TelemetryLoggerOptions,
+    ): vscode.TelemetryLogger {
+      return telemetryExt.createTelemetryLogger(sender, options);
     },
     get isNewAppInstall() {
       const { firstSessionDate } = values;
@@ -95,13 +105,17 @@ export function createEnvApiFactory(
      * 兼容 vscode api 用，该 api 主要与用户个人数据收集相关：https://privacy.microsoft.com/zh-cn/privacystatement
      */
     get isTelemetryEnabled() {
-      return false;
+      return telemetryExt.isTelemetryEnabled;
     },
     /**
      * 同 isTelemetryEnabled
      */
     get onDidChangeTelemetryEnabled(): Event<boolean> {
-      return Event.None as Event<boolean>;
+      return telemetryExt.onDidChangeTelemetryEnabled;
+    },
+
+    get onDidChangeShell() {
+      return exthostTerminal.onDidChangeShell;
     },
   };
 

@@ -1,54 +1,55 @@
 import throttle from 'lodash/throttle';
 
-import { Injectable, Autowired, Optional } from '@opensumi/di';
+import { Autowired, Injectable, Optional } from '@opensumi/di';
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
-  Disposable,
-  URI,
-  MaybeNull,
-  IEventBus,
-  ILogger,
-  Schemes,
-  IExtensionInfo,
   CommandRegistry,
-  StorageProvider,
-  STORAGE_SCHEMA,
-  IStorage,
+  Disposable,
   IDisposable,
+  IEventBus,
+  IExtensionInfo,
+  ILogger,
+  IOpenerService,
+  IStorage,
+  MaybeNull,
+  STORAGE_SCHEMA,
+  Schemes,
+  StorageProvider,
+  URI,
   arrays,
 } from '@opensumi/ide-core-browser';
-import { IOpenerService } from '@opensumi/ide-core-browser';
 import { CommandOpener } from '@opensumi/ide-core-browser/lib/opener/command-opener';
 import { HttpOpener } from '@opensumi/ide-core-browser/lib/opener/http-opener';
-import { CancellationToken, WithEventBus, OnEvent } from '@opensumi/ide-core-common';
-import { WorkbenchEditorService, IResource } from '@opensumi/ide-editor';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
+import { CancellationToken, OnEvent, WithEventBus } from '@opensumi/ide-core-common';
+import { IResource, WorkbenchEditorService } from '@opensumi/ide-editor';
 import { EditorGroupChangeEvent, IEditorOpenType } from '@opensumi/ide-editor/lib/browser';
 import { IMainLayoutService, ViewCollapseChangedEvent } from '@opensumi/ide-main-layout';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
 import { IIconService, IconType } from '@opensumi/ide-theme';
 import {
-  IWebviewService,
   IEditorWebviewComponent,
-  IWebview,
   IPlainWebview,
   IPlainWebviewComponentHandle,
+  IWebview,
+  IWebviewService,
 } from '@opensumi/ide-webview';
 
 import { ISumiExtHostWebviews } from '../../../common/sumi/webview';
 import {
-  IMainThreadWebview,
-  WebviewPanelShowOptions,
-  IWebviewPanelOptions,
-  IWebviewOptions,
   ExtHostAPIIdentifier,
   IExtHostWebview,
-  IWebviewPanelViewState,
+  IExtHostWebviewView,
+  IMainThreadWebview,
   IMainThreadWebviewView,
   IWebviewExtensionDescription,
-  IExtHostWebviewView,
+  IWebviewOptions,
+  IWebviewPanelOptions,
+  IWebviewPanelViewState,
+  type ViewBadge,
+  WebviewPanelShowOptions,
+  WebviewViewOptions,
   WebviewViewResolverRegistrationEvent,
   WebviewViewResolverRegistrationRemovalEvent,
-  WebviewViewOptions,
 } from '../../../common/vscode';
 import { viewColumnToResourceOpenOptions } from '../../../common/vscode/converter';
 import { WebviewViewShouldShowEvent } from '../../components/extension-webview-view';
@@ -273,6 +274,9 @@ export class MainThreadWebview extends Disposable implements IMainThreadWebview 
         longLive: webviewOptions.retainContextWhenHidden,
       },
       id,
+      {
+        extWebview: viewType,
+      },
     );
     const viewColumn = editorWebview.group ? editorWebview.group.index + 1 : persistedWebviewPanelMeta.viewColumn;
     await this.doCreateWebviewPanel(id, viewType, title, { viewColumn }, webviewOptions, extensionInfo, state);
@@ -346,6 +350,9 @@ export class MainThreadWebview extends Disposable implements IMainThreadWebview 
         longLive: options.retainContextWhenHidden,
       },
       id,
+      {
+        extWebview: viewType,
+      },
     );
     const webviewPanel = new WebviewPanel(
       id,
@@ -612,7 +619,7 @@ class WebviewPanel extends Disposable {
 
 class WebviewView extends Disposable {
   public title: string;
-
+  public badge?: ViewBadge;
   public viewColumn: number;
 
   constructor(
@@ -771,6 +778,18 @@ export class MainThreadWebviewView extends WithEventBus implements IMainThreadWe
     return {
       dispose: () => webviewView.dispose(),
     };
+  }
+
+  $setBadge(handle: string, badge?: ViewBadge): void {
+    const webviewView = this._webviewViews.get(handle);
+    if (webviewView) {
+      webviewView.badge = badge;
+      const handler = this.mainLayout.getTabbarHandler(webviewView.viewType);
+      if (handler) {
+        handler.setBadge(badge ? badge : '');
+        handler.accordionService.updateViewBadge(webviewView.viewType, badge ? badge : '');
+      }
+    }
   }
 
   $show(handle: string, preserveFocus: boolean): void {

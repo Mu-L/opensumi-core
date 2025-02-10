@@ -1,5 +1,5 @@
 import { Autowired } from '@opensumi/di';
-import { ClientAppContribution, getIcon, PreferenceContribution } from '@opensumi/ide-core-browser';
+import { ClientAppContribution, PreferenceContribution, getIcon } from '@opensumi/ide-core-browser';
 import { OUTPUT_CONTAINER_ID } from '@opensumi/ide-core-browser/lib/common/container-id';
 import {
   ComponentContribution,
@@ -8,24 +8,24 @@ import {
   ToolbarRegistry,
 } from '@opensumi/ide-core-browser/lib/layout';
 import {
-  Disposable,
+  Command,
   CommandContribution,
   CommandRegistry,
-  Command,
-  localize,
+  CommonLanguageId,
+  Disposable,
   PreferenceSchema,
+  localize,
 } from '@opensumi/ide-core-common';
 import { Domain } from '@opensumi/ide-core-common/lib/di-helper';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { monaco as monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
 
 import { OutputLinkProvider } from './output-link.provider';
 import { outputPreferenceSchema } from './output-preference';
 import { OutputService } from './output.service';
-import { Output, ChannelSelector } from './output.view';
+import { ChannelSelector, Output } from './output.view';
 
 const OUTPUT_CLEAR: Command = {
   id: 'output.channel.clear',
-  iconClass: getIcon('clear'),
   label: '%output.channel.clear%',
 };
 
@@ -54,21 +54,21 @@ export class OutputContribution
   schema: PreferenceSchema = outputPreferenceSchema;
 
   onStart() {
-    this.addDispose(monaco.languages.registerLinkProvider('log', this.outputLinkProvider));
+    this.addDispose(monacoApi.languages.registerLinkProvider(CommonLanguageId.Log, this.outputLinkProvider));
   }
 
   registerToolbarItems(registry: ToolbarRegistry) {
     registry.registerItem({
       id: 'output.clear.action',
       command: OUTPUT_CLEAR.id,
+      iconClass: getIcon('clear'),
       viewId: OUTPUT_CONTAINER_ID,
     });
   }
 
   registerCommands(commands: CommandRegistry): void {
     commands.registerCommand(OUTPUT_CLEAR, {
-      execute: () => this.outputService.selectedChannel.clear(),
-      isEnabled: () => !!this.outputService.selectedChannel,
+      execute: () => this.outputService.selectedChannel?.clear(),
     });
   }
 
@@ -80,7 +80,7 @@ export class OutputContribution
         component: Output,
       },
       {
-        title: localize('output.tabbar.title', '输出'),
+        title: localize('output.tabbar.title'),
         priority: 9,
         containerId: OUTPUT_CONTAINER_ID,
         activateKeyBinding: 'ctrlcmd+shift+u',

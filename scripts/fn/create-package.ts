@@ -1,10 +1,12 @@
 import * as path from 'path';
-import * as glob from 'glob';
+
 import * as fs from 'fs-extra';
-import { packagesDir, toolsDir } from './dir-constants';
-import { run } from './shell';
+import * as glob from 'glob';
 import camelCase from 'lodash/camelCase';
 import upperFirst from 'lodash/upperFirst';
+
+import { packagesDir, toolsDir } from './dir-constants';
+import { run } from './shell';
 
 const templateDir = path.join(toolsDir, '/template');
 const templatePattern = path.join(templateDir, '/**');
@@ -34,9 +36,11 @@ export async function createPackage(name: string) {
     throw new Error(`${name} is exists, can't create once more.`);
   }
 
+  const pkgName = `@opensumi/ide-${name}`;
+
   const filePaths = glob.sync(templatePattern);
   const replaceList = [
-    createReplaceTuple('template-name', `@opensumi/ide-${name}`),
+    createReplaceTuple('template-name', pkgName),
     createReplaceTuple('TemplateUpperName', upperFirst(camelCase(name))),
   ];
 
@@ -46,9 +50,7 @@ export async function createPackage(name: string) {
     if (stat.isFile()) {
       const buffer = await fs.readFile(filePath, 'utf-8');
 
-      const content = replaceList.reduce((ret, [reg, value]) => {
-        return ret.replace(reg, value);
-      }, buffer.toString());
+      const content = replaceList.reduce((ret, [reg, value]) => ret.replace(reg, value), buffer.toString());
 
       const relativePath = path.relative(templateDir, filePath);
       const resultPath = path.join(packagesDir, name, relativePath);
@@ -67,8 +69,8 @@ export async function createPackage(name: string) {
   const resolveJsonPath = path.join(__dirname, '../../configs/ts/tsconfig.resolve.json');
   const resolveTsConfig = require(resolveJsonPath);
   const extendPaths = {
-    [`@opensumi/ide-${name}`]: [`../packages/${name}/src/index.ts`],
-    [`@opensumi/ide-${name}/lib/*`]: [`../packages/${name}/src/*`],
+    [pkgName]: [`../packages/${name}/src/index.ts`],
+    [`${pkgName}/lib/*`]: [`../packages/${name}/src/*`],
   };
   Object.assign(resolveTsConfig.compilerOptions.paths, extendPaths);
   await fs.writeFile(resolveJsonPath, JSON.stringify(resolveTsConfig, null, 2) + '\n');
@@ -78,5 +80,6 @@ export async function createPackage(name: string) {
   await fs.writeFile(moduleTsJsonPath, JSON.stringify(moduleTsConfig, null, 2) + '\n');
 
   // 创建完模块之后执行一次初始化
-  run('yarn run init');
+  await run('yarn');
+  await run('yarn run init');
 }

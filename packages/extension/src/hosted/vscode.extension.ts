@@ -1,7 +1,7 @@
-import type vscode from 'vscode';
-
-import { IExtensionHostService, IExtensionHost, IExtensionWorkerHost, JSONType, IExtensionProps } from '../common';
+import { IExtensionHost, IExtensionHostService, IExtensionProps, IExtensionWorkerHost, JSONType } from '../common';
 import { VSCodeExtensionService } from '../common/vscode';
+
+import type vscode from 'vscode';
 
 export abstract class Extension<T = any, S extends IExtensionHost = any> implements vscode.Extension<T> {
   readonly id: string;
@@ -15,6 +15,8 @@ export abstract class Extension<T = any, S extends IExtensionHost = any> impleme
   readonly extensionKind: vscode.ExtensionKind;
 
   readonly extendConfig: JSONType;
+
+  readonly l10n?: string;
 
   readonly extensionUri: vscode.Uri;
 
@@ -32,6 +34,7 @@ export abstract class Extension<T = any, S extends IExtensionHost = any> impleme
     this.extensionPath = path;
     this.packageJSON = packageJSON;
     this.extensionKind = packageJSON.extensionKind || undefined;
+    this.l10n = packageJSON.l10n;
     this.extendConfig = extendConfig || undefined;
     this.extensionUri = metadata.extensionLocation;
     if (exportsData) {

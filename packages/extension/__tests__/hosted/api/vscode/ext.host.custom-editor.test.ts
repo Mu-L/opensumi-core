@@ -1,40 +1,26 @@
-import { RPCProtocol } from '@opensumi/ide-connection';
-import { Emitter, CancellationTokenSource, Uri } from '@opensumi/ide-core-common';
+import { CancellationTokenSource, Emitter, Uri } from '@opensumi/ide-core-common';
 import { URI } from '@opensumi/ide-core-common';
 import {
-  MainThreadAPIIdentifier,
   ExtHostAPIIdentifier,
   ExtensionDocumentDataManager,
+  MainThreadAPIIdentifier,
 } from '@opensumi/ide-extension/lib/common/vscode';
 import {
-  IMainThreadCustomEditor,
-  CustomTextEditorProvider,
-  CustomEditorType,
-  CustomEditorProvider,
   CustomDocument,
-  CustomDocumentEditEvent,
   CustomDocumentContentChangeEvent,
+  CustomDocumentEditEvent,
+  CustomEditorProvider,
+  CustomEditorType,
+  CustomTextEditorProvider,
+  IMainThreadCustomEditor,
 } from '@opensumi/ide-extension/lib/common/vscode/custom-editor';
 import { ExtHostWebviewService } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.api.webview';
 import { ExtHostCustomEditorImpl } from '@opensumi/ide-extension/lib/hosted/api/vscode/ext.host.custom-editor';
 
 import { mockService } from '../../../../../../tools/dev-tool/src/mock-injector';
+import { createMockPairRPCProtocol } from '../../../../__mocks__/initRPCProtocol';
 
-
-const emitterA = new Emitter<any>();
-const emitterB = new Emitter<any>();
-
-const mockClientA = {
-  send: (msg) => emitterB.fire(msg),
-  onMessage: emitterA.event,
-};
-const mockClientB = {
-  send: (msg) => emitterA.fire(msg),
-  onMessage: emitterB.event,
-};
-
-const rpcProtocolExt = new RPCProtocol(mockClientA);
-const rpcProtocolMain = new RPCProtocol(mockClientB);
+const { rpcProtocolExt, rpcProtocolMain } = createMockPairRPCProtocol();
 
 let extHost: ExtHostCustomEditorImpl;
 let mainThread: IMainThreadCustomEditor;
@@ -71,7 +57,7 @@ describe('vscode extHost CustomEditor Test', () => {
 
     await waitIPC();
 
-    expect(mainThread.$registerCustomEditor).toBeCalledWith(
+    expect(mainThread.$registerCustomEditor).toHaveBeenCalledWith(
       viewType,
       CustomEditorType.TextEditor,
       {},
@@ -107,7 +93,7 @@ describe('vscode extHost CustomEditor Test', () => {
 
     await waitIPC();
 
-    expect(customTextEditorProvider.resolveCustomTextEditor).toBeCalledWith(
+    expect(customTextEditorProvider.resolveCustomTextEditor).toHaveBeenCalledWith(
       expect.objectContaining({
         uri: docUri,
       }),
@@ -156,7 +142,7 @@ describe('vscode extHost CustomEditor Test', () => {
 
     await waitIPC();
 
-    expect(mainThread.$registerCustomEditor).toBeCalledWith(
+    expect(mainThread.$registerCustomEditor).toHaveBeenCalledWith(
       viewType,
       CustomEditorType.FullEditor,
       {},
@@ -193,7 +179,7 @@ describe('vscode extHost CustomEditor Test', () => {
 
     await waitIPC();
 
-    expect(customEditorProvider.resolveCustomEditor).toBeCalledWith(
+    expect(customEditorProvider.resolveCustomEditor).toHaveBeenCalledWith(
       expect.any(TestCustomEditorDocument),
       {
         id: webviewPanelId,
@@ -201,7 +187,7 @@ describe('vscode extHost CustomEditor Test', () => {
       expect.anything(),
     );
 
-    expect(customEditorProvider.resolveCustomEditor).toBeCalledWith(
+    expect(customEditorProvider.resolveCustomEditor).toHaveBeenCalledWith(
       expect.objectContaining({
         uri: docUri,
       }),
@@ -220,7 +206,10 @@ describe('vscode extHost CustomEditor Test', () => {
     await extHost.$saveCustomDocument(viewType, docUri, new CancellationTokenSource().token);
     expect(doc?.saved).toBeTruthy();
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), false);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      false,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     // 回滚自定义文档
@@ -228,7 +217,10 @@ describe('vscode extHost CustomEditor Test', () => {
     await extHost.$revertCustomDocument(viewType, docUri, new CancellationTokenSource().token);
     expect(doc?.reverted).toBeTruthy();
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), false);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      false,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     // 产生一次变更
@@ -241,39 +233,57 @@ describe('vscode extHost CustomEditor Test', () => {
 
     _onDidChangeCustomDocument.fire(edit);
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), true);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      true,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     await extHost.$undo(viewType, docUri);
-    expect(edit.undo).toBeCalledTimes(1);
+    expect(edit.undo).toHaveBeenCalledTimes(1);
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), false);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      false,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     await extHost.$redo(viewType, docUri);
-    expect(edit.redo).toBeCalledTimes(1);
+    expect(edit.redo).toHaveBeenCalledTimes(1);
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), true);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      true,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     // 此时保存
     await extHost.$saveCustomDocument(viewType, docUri, new CancellationTokenSource().token);
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), false);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      false,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     // 保存后回滚, 此时应该是 dirty
     await extHost.$undo(viewType, docUri);
-    expect(edit.undo).toBeCalledTimes(2);
+    expect(edit.undo).toHaveBeenCalledTimes(2);
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), true);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      true,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
 
     // 再 redo 恢复 dirty=false
     await extHost.$redo(viewType, docUri);
-    expect(edit.redo).toBeCalledTimes(2);
+    expect(edit.redo).toHaveBeenCalledTimes(2);
     await waitIPC();
-    expect(mainThread.$acceptCustomDocumentDirty).toBeCalledWith(expect.objectContaining({ path: docUri.path }), false);
+    expect(mainThread.$acceptCustomDocumentDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ path: docUri.path }),
+      false,
+    );
     (mainThread.$acceptCustomDocumentDirty as jest.Mock).mockClear();
   });
 });

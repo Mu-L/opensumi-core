@@ -1,16 +1,16 @@
-import { Injectable, Autowired } from '@opensumi/di';
-import { Tree, ITreeNodeOrCompositeTreeNode } from '@opensumi/ide-components';
+import { Autowired, Injectable } from '@opensumi/di';
+import { ITreeNodeOrCompositeTreeNode, Tree } from '@opensumi/ide-components';
 import {
-  URI,
   Emitter,
-  MaybeNull,
+  Event,
+  IStorage,
   IdleValue,
+  MaybeNull,
+  STORAGE_NAMESPACE,
+  StorageProvider,
+  URI,
   compareRangesUsingStarts,
   getSymbolIcon,
-  Event,
-  StorageProvider,
-  STORAGE_NAMESPACE,
-  IStorage,
 } from '@opensumi/ide-core-browser';
 import {
   DocumentSymbolStore,
@@ -18,7 +18,7 @@ import {
 } from '@opensumi/ide-editor/lib/browser/breadcrumb/document-symbol';
 
 import { OutlineSortOrder } from '../../common';
-import { OutlineCompositeTreeNode, OutlineTreeNode, OutlineRoot } from '../outline-node.define';
+import { OutlineCompositeTreeNode, OutlineRoot, OutlineTreeNode } from '../outline-node.define';
 
 import { OutlineContextKeyService } from './outline-contextkey.service';
 
@@ -65,6 +65,9 @@ export class OutlineTreeService extends Tree {
     return this._whenReady;
   }
 
+  /**
+   * trigger when outline tree changed(include sortType, followCursor changed)
+   */
   get onDidChange(): Event<void> {
     return this.onDidChangeEmitter.event;
   }
@@ -130,7 +133,6 @@ export class OutlineTreeService extends Tree {
         children =
           parent.raw.children
             ?.map((symbol: INormalizedDocumentSymbol) => {
-              const cache = this.cacheOutlineNodes.get(symbol.id);
               if (symbol.children?.length) {
                 return new OutlineCompositeTreeNode(this, parent, symbol, getSymbolIcon(symbol.kind) + ' outline-icon');
               }

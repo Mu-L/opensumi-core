@@ -1,36 +1,40 @@
 import React from 'react';
 
-import { MessageType, URI } from '@opensumi/ide-core-common';
+import { Event, MayCancelablePromise, MessageType, URI } from '@opensumi/ide-core-common';
+
+import type vscode from 'vscode';
 
 export const IMessageService = Symbol('IMessageService');
 
+export interface OpenMessageOptions {
+  message: string | React.ReactNode;
+  type: MessageType;
+  buttons?: any[];
+  options?: vscode.MessageOptions;
+  closable?: boolean;
+  from?: string;
+  props?: Record<string, any>;
+}
 export interface IMessageService {
   info(
     message: string | React.ReactNode,
     buttons?: string[],
     closable?: boolean,
     props?: Record<string, any>,
-  ): Promise<string | undefined>;
+  ): MayCancelablePromise<string | undefined>;
   warning(
     message: string | React.ReactNode,
     buttons?: string[],
     closable?: boolean,
     props?: Record<string, any>,
-  ): Promise<string | undefined>;
+  ): MayCancelablePromise<string | undefined>;
   error(
     message: string | React.ReactNode,
     buttons?: string[],
     closable?: boolean,
     props?: Record<string, any>,
-  ): Promise<string | undefined>;
-  open<T = string>(
-    message: string | React.ReactNode,
-    type: MessageType,
-    buttons?: string[],
-    closable?: boolean,
-    from?: string,
-    props?: Record<string, any>,
-  ): Promise<T | undefined>;
+  ): MayCancelablePromise<string | undefined>;
+  open<T = string>(options: OpenMessageOptions): MayCancelablePromise<T | undefined>;
   hide<T = string>(value?: T): void;
 }
 
@@ -44,10 +48,12 @@ export const MAX_MESSAGE_LENGTH = 1000;
 export const IDialogService = Symbol('IDialogService');
 export interface IDialogService extends IMessageService {
   closable?: boolean;
-  isVisible(): boolean;
+  visible: boolean;
+  onDidDialogVisibleChange: Event<boolean>;
   getMessage(): string | React.ReactNode;
+  getDetail(): string | undefined;
   getIcon(): Icon | undefined;
-  getButtons(): string[];
+  getButtons(): string[] | undefined;
   getType(): MessageType | undefined;
   getProps(): Record<string, any>;
   reset(): void;
@@ -60,7 +66,7 @@ export abstract class AbstractMessageService implements IMessageService {
     closable?: boolean,
     props?: Record<string, any>,
   ): Promise<string | undefined> {
-    return this.open(message, MessageType.Info, buttons, closable, undefined, props);
+    return this.open({ message, type: MessageType.Info, buttons, closable, props });
   }
 
   warning(
@@ -69,7 +75,7 @@ export abstract class AbstractMessageService implements IMessageService {
     closable?: boolean,
     props?: Record<string, any>,
   ): Promise<string | undefined> {
-    return this.open(message, MessageType.Warning, buttons, closable, undefined, props);
+    return this.open({ message, type: MessageType.Warning, buttons, closable, props });
   }
 
   error(
@@ -78,22 +84,15 @@ export abstract class AbstractMessageService implements IMessageService {
     closable?: boolean,
     props?: Record<string, any>,
   ): Promise<string | undefined> {
-    return this.open(message, MessageType.Error, buttons, closable, undefined, props);
+    return this.open({ message, type: MessageType.Error, buttons, closable, props });
   }
-  abstract open<T = string>(
-    message: string | React.ReactNode,
-    type: MessageType,
-    buttons?: any[],
-    closable?: boolean,
-    from?: string,
-    props?: Record<string, any>,
-  ): Promise<T | undefined>;
+  abstract open<T = string>(options: OpenMessageOptions): Promise<T | undefined>;
   abstract hide<T = string>(value?: T): void;
 }
 
 export interface IWindowDialogService {
   showOpenDialog(options?: IOpenDialogOptions): Promise<URI[] | undefined>;
-  showSaveDialog(options?: ISaveDialogOptions): Promise<URI | undefined>;
+  showSaveDialog(options?: ISaveDialogOptions & { saveAs?: boolean }): Promise<URI | undefined>;
 }
 
 export const IWindowDialogService = Symbol('IWindowDialogService');
@@ -102,7 +101,7 @@ export interface IDialogOptions {
   title?: string;
   defaultUri?: URI;
   filters?: {
-    [name: string]: string;
+    [name: string]: string[];
   };
 }
 

@@ -1,7 +1,7 @@
-import { localize, IJSONSchemaRegistry, ISchemaStore, IApplicationService } from '@opensumi/ide-core-browser';
+import { IApplicationService, IJSONSchemaRegistry, ISchemaStore, localize } from '@opensumi/ide-core-browser';
 import { DefaultUriLabelProvider } from '@opensumi/ide-core-browser/lib/services';
 import { CommonServerPath } from '@opensumi/ide-core-common';
-import { BinaryBuffer, Disposable, URI, OperatingSystem } from '@opensumi/ide-core-common';
+import { BinaryBuffer, Disposable, OperatingSystem, URI } from '@opensumi/ide-core-common';
 import {
   HashCalculateServiceImpl,
   IHashCalculateService,
@@ -78,6 +78,9 @@ describe('file scheme tests', () => {
     },
     dispose: () => null,
   }));
+  injector.mock(IEditorDocumentModelService, 'getModelDescription', () => ({
+    dirty: true,
+  }));
 
   injector.addProviders({
     token: FileSchemeDocNodeServicePath,
@@ -144,8 +147,8 @@ describe('file scheme tests', () => {
       [],
       'utf8',
     );
-    expect(saveByContent).toBeCalledTimes(1);
-    expect(saveByChanges).toBeCalledTimes(0);
+    expect(saveByContent).toHaveBeenCalledTimes(1);
+    expect(saveByChanges).toHaveBeenCalledTimes(0);
 
     expect(await documentProvider.provideEditorDocumentModelContent(new URI('file:///test.ts'), 'utf8')).toBe(
       docContentPrefix + 'file:///test.ts',

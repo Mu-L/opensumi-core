@@ -1,5 +1,4 @@
 declare module 'vscode' {
-
   /**
    * The kind of {@link QuickPickItem quick pick item}.
    */
@@ -31,6 +30,11 @@ declare module 'vscode' {
      * the default is {@link QuickPickItemKind.Default}.
      */
     kind?: QuickPickItemKind;
+
+    /**
+     * The icon path or {@link ThemeIcon} for the QuickPickItem.
+     */
+    iconPath?: IconPath;
 
     /**
      * A human readable string which is rendered less prominent.
@@ -374,6 +378,17 @@ declare module 'vscode' {
     value: string;
 
     /**
+		 * Selection range in the input value. Defined as tuple of two number where the
+		 * first is the inclusive start index and the second the exclusive end index. When `undefined` the whole
+		 * pre-filled value will be selected, when empty (start equals end) only the cursor will be set,
+		 * otherwise the defined range will be selected.
+		 *
+		 * This property does not get updated when the user types or makes a selection,
+		 * but it can be updated by the extension.
+		 */
+		valueSelection: readonly [number, number] | undefined;
+
+    /**
      * Optional placeholder in the filter text.
      */
     placeholder: string | undefined;
@@ -549,6 +564,7 @@ declare module 'vscode' {
    * Impacts the behavior and appearance of the validation message.
    */
   export enum InputBoxValidationSeverity {
+    Ignore = 0,
     Info = 1,
     Warning = 2,
     Error = 3
@@ -570,5 +586,4 @@ declare module 'vscode' {
      */
     readonly severity: InputBoxValidationSeverity;
   }
-
 }

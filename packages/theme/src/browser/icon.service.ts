@@ -1,34 +1,33 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
-  URI,
-  PreferenceService,
-  PreferenceSchemaProvider,
-  IPreferenceSettingsService,
-  Emitter,
-  Event,
-  ILogger,
   CODICON_OWNER,
   Deferred,
-  OnEvent,
-  WithEventBus,
+  Emitter,
+  Event,
   ExtensionDidContributes,
   GeneralSettingsId,
+  ILogger,
+  IPreferenceSettingsService,
+  OnEvent,
+  PreferenceSchemaProvider,
+  PreferenceService,
+  URI,
+  WithEventBus,
+  randomString,
 } from '@opensumi/ide-core-browser';
-import { StaticResourceService } from '@opensumi/ide-static-resource/lib/browser';
+import { StaticResourceService } from '@opensumi/ide-core-browser/lib/static-resource';
 
 import {
-  ThemeType,
-  IconThemeType,
   IIconService,
-  ThemeContribution,
-  getThemeId,
   IIconTheme,
-  getThemeTypeSelector,
-  IconType,
+  IThemeContribution,
   IconShape,
   IconThemeInfo,
-  FontIconDefinition,
-  IconFontFamily,
+  IconThemeType,
+  IconType,
+  ThemeType,
+  getThemeId,
+  getThemeTypeSelector,
 } from '../common';
 
 import { IconThemeStore } from './icon-theme-store';
@@ -63,7 +62,7 @@ export class IconService extends WithEventBus implements IIconService {
 
   private iconThemes: Map<string, IIconTheme> = new Map();
 
-  private iconContributionRegistry: Map<string, { contribution: ThemeContribution; basePath: URI }> = new Map();
+  private iconContributionRegistry: Map<string, { contribution: IThemeContribution; basePath: URI }> = new Map();
 
   public currentThemeId: string;
   public currentTheme: IIconTheme;
@@ -96,11 +95,13 @@ export class IconService extends WithEventBus implements IIconService {
   }
 
   private listen() {
-    this.preferenceService.onPreferenceChanged(async (e) => {
-      if (e.preferenceName === GeneralSettingsId.Icon && this.iconContributionRegistry.has(e.newValue)) {
-        await this.applyTheme(this.preferenceService.get<string>(GeneralSettingsId.Icon)!);
-      }
-    });
+    this.addDispose(
+      this.preferenceService.onSpecificPreferenceChange(GeneralSettingsId.Icon, async (e) => {
+        if (this.iconContributionRegistry.has(e.newValue)) {
+          await this.applyTheme(e.newValue);
+        }
+      }),
+    );
   }
 
   private styleSheetCollection = '';
@@ -167,7 +168,7 @@ export class IconService extends WithEventBus implements IIconService {
   }
 
   protected getRandomIconClass(prefix = '') {
-    return `${prefix}icon-${Math.random().toString(36).slice(-8)}`;
+    return `${prefix}icon-${randomString(6)}`;
   }
 
   protected getMaskStyleSheet(iconUrl: string, className: string, baseTheme?: string): string {
@@ -320,7 +321,7 @@ export class IconService extends WithEventBus implements IIconService {
     }
   }
 
-  registerIconThemes(iconContributions: ThemeContribution[], basePath: URI) {
+  registerIconThemes(iconContributions: IThemeContribution[], basePath: URI) {
     for (const contribution of iconContributions) {
       const themeId = getThemeId(contribution);
       this.iconContributionRegistry.set(themeId, { contribution, basePath });
@@ -348,39 +349,14 @@ export class IconService extends WithEventBus implements IIconService {
     this.updateIconThemes();
   }
 
-  registerFontIcons(definitions: FontIconDefinition[], iconFontFamilies: IconFontFamily[]) {
-    const styleSheetContnt: string[] = [];
-
-    for (const def of definitions) {
-      styleSheetContnt.push(
-        `.codicon-${def.id}::before { content: '${def.content}'; font-family: '${def.fontFamily}' }`,
-      );
-    }
-
-    for (const font of iconFontFamilies) {
-      styleSheetContnt.push(
-        `@font-face {src: url('${font.source}') format('${font.format}'); font-family: '${font.fontFamily}'; font-display: ${font.display}; }`,
-      );
-    }
-
-    let styleNode = document.getElementById('codiconStyles');
-    if (styleNode) {
-      styleNode.innerHTML = styleSheetContnt.join('\r');
-    } else {
-      styleNode = document.createElement('style');
-      styleNode.id = 'codiconStyles';
-      styleNode.innerHTML = styleSheetContnt.join('\r');
-      document.getElementsByTagName('head')[0].appendChild(styleNode);
-    }
-  }
-
   getAvailableThemeInfos(): IconThemeInfo[] {
     const themeInfos: IconThemeInfo[] = [];
     for (const { contribution } of this.iconContributionRegistry.values()) {
-      const { label, id } = contribution;
+      const { label, id, extensionId } = contribution;
       themeInfos.push({
         themeId: id || getThemeId(contribution),
         name: label,
+        extensionId,
       });
     }
     return themeInfos;

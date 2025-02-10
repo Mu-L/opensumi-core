@@ -1,21 +1,22 @@
 import React from 'react';
 
-import { Injectable, Injector, Autowired, INJECTOR_TOKEN } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  electronEnv,
-  URI,
-  MessageType,
-  StorageProvider,
-  IStorage,
-  STORAGE_NAMESPACE,
   AppConfig,
+  IStorage,
+  MessageType,
+  STORAGE_NAMESPACE,
+  StorageProvider,
+  URI,
+  electronEnv,
   isMacintosh,
 } from '@opensumi/ide-core-browser';
 import { IElectronMainUIService } from '@opensumi/ide-core-common/lib/electron';
 import { IFileServiceClient } from '@opensumi/ide-file-service';
-import { IWindowDialogService, IOpenDialogOptions, IDialogService, ISaveDialogOptions } from '@opensumi/ide-overlay';
+import { IDialogService, IOpenDialogOptions, ISaveDialogOptions, IWindowDialogService } from '@opensumi/ide-overlay';
 
 import { FileTreeDialogModel } from './file-dialog-model.service';
+import styles from './file-dialog.module.less';
 import { FileTreeDialogService } from './file-dialog.service';
 import { FileDialog } from './file-dialog.view';
 
@@ -40,6 +41,7 @@ export class WindowDialogServiceImpl implements IWindowDialogService {
 
   private _whenReady: Promise<void>;
   private _defaultUri: URI;
+  private idx = 1;
 
   constructor() {
     this._whenReady = this.init();
@@ -71,6 +73,7 @@ export class WindowDialogServiceImpl implements IWindowDialogService {
 
   // https://code.visualstudio.com/api/references/vscode-api#OpenDialogOptions
   async showOpenDialog(options: IOpenDialogOptions = {}): Promise<URI[] | undefined> {
+    this.dialogService.reset();
     await this.whenReady;
     const defaultOptions: IOpenDialogOptions = {
       canSelectFiles: true,
@@ -112,7 +115,7 @@ export class WindowDialogServiceImpl implements IWindowDialogService {
       });
       if (res && res.length > 0) {
         const files = res.map((r) => URI.file(r));
-        this.updateRecentDefaultUri(files[0]);
+        this.updateRecentDefaultUri(files[0].parent);
         return files;
       } else {
         return undefined;
@@ -129,14 +132,25 @@ export class WindowDialogServiceImpl implements IWindowDialogService {
       }
       await fileTreeDialogService.whenReady;
       const model = FileTreeDialogModel.createModel(this.injector, fileTreeDialogService);
-      const res = await this.dialogService.open<string[]>(
-        <FileDialog model={model} options={{ ...defaultOptions, ...options }} isOpenDialog={true} />,
-        MessageType.Empty,
-      );
+      const res = await this.dialogService.open<string[]>({
+        message: (
+          <FileDialog
+            key={this.idx++}
+            fileService={fileTreeDialogService}
+            model={model}
+            options={{ ...defaultOptions, ...options }}
+            isOpenDialog={true}
+          />
+        ),
+        type: MessageType.Empty,
+        buttons: [],
+        closable: true,
+        props: { className: styles.file_dialog_wrapper },
+      });
       this.dialogService.reset();
       if (res && res.length > 0) {
         const files = res.map((r) => URI.file(r));
-        this.updateRecentDefaultUri(files[0]);
+        this.updateRecentDefaultUri(files[0].parent);
         return files;
       } else {
         return undefined;
@@ -175,10 +189,21 @@ export class WindowDialogServiceImpl implements IWindowDialogService {
       }
       await fileTreeDialogService.whenReady;
       const model = FileTreeDialogModel.createModel(this.injector, fileTreeDialogService);
-      const res = await this.dialogService.open<string[]>(
-        <FileDialog model={model} options={options} isOpenDialog={false} />,
-        MessageType.Empty,
-      );
+      const res = await this.dialogService.open<string[]>({
+        message: (
+          <FileDialog
+            key={this.idx++}
+            fileService={fileTreeDialogService}
+            model={model}
+            options={options}
+            isOpenDialog={false}
+          />
+        ),
+        type: MessageType.Empty,
+        buttons: [],
+        closable: true,
+        props: { className: styles.file_dialog_wrapper },
+      });
       this.dialogService.reset();
       if (res && res.length > 0) {
         const file = URI.file(res[0]);

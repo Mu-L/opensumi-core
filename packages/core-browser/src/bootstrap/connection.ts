@@ -1,79 +1,112 @@
 import { Injector, Provider } from '@opensumi/di';
-import { RPCServiceCenter, initRPCService, RPCMessageConnection } from '@opensumi/ide-connection';
+import { RPCServiceCenter, initRPCService } from '@opensumi/ide-connection';
 import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
-import { createWebSocketConnection } from '@opensumi/ide-connection/lib/common/message';
+import { ISumiConnectionOptions } from '@opensumi/ide-connection/lib/common/rpc/connection';
+import { RPCServiceChannelPath } from '@opensumi/ide-connection/lib/common/server-handler';
 import {
-  getDebugLogger,
-  IReporterService,
   BasicModule,
   BrowserConnectionCloseEvent,
-  BrowserConnectionOpenEvent,
   BrowserConnectionErrorEvent,
+  BrowserConnectionOpenEvent,
   IEventBus,
-  UrlProvider,
+  ILogger,
+  IReporterService,
 } from '@opensumi/ide-core-common';
 import { BackService } from '@opensumi/ide-core-common/lib/module';
 
 import { ClientAppStateService } from '../application';
+import { Logger } from '../logger';
+import { AppConfig } from '../react-providers/config-provider';
 
 import { ModuleConstructor } from './app.interface';
 
-const initialLogger = getDebugLogger();
+import type { MessageConnection } from '@opensumi/vscode-jsonrpc/lib/common/connection';
 
-export async function createClientConnection2(
+export async function createConnectionService(
   injector: Injector,
   modules: ModuleConstructor[],
-  wsPath: UrlProvider,
-  onReconnect: () => void,
-  protocols?: string[],
-  clientId?: string,
+  channelHandler: WSChannelHandler,
+  options: ISumiConnectionOptions = {},
 ) {
+  const appConfig = injector.get(AppConfig) as AppConfig;
   const reporterService: IReporterService = injector.get(IReporterService);
+  channelHandler.setReporter(reporterService);
+
   const eventBus = injector.get(IEventBus);
   const stateService = injector.get(ClientAppStateService);
 
-  const wsChannelHandler = new WSChannelHandler(wsPath, initialLogger, protocols, clientId);
-  wsChannelHandler.setReporter(reporterService);
-  wsChannelHandler.connection.addEventListener('open', async () => {
-    await stateService.reachedState('core_module_initialized');
-    eventBus.fire(new BrowserConnectionOpenEvent());
+  const onOpen = () => {
+    stateService.reachedState('core_module_initialized').then(() => {
+      eventBus.fire(new BrowserConnectionOpenEvent());
+    });
+  };
+
+  if (channelHandler.connection.isOpen()) {
+    onOpen();
+  }
+
+  // reconnecting will still emit the open event
+  channelHandler.connection.onOpen(() => {
+    onOpen();
   });
 
-  wsChannelHandler.connection.addEventListener('close', async () => {
-    await stateService.reachedState('core_module_initialized');
-    eventBus.fire(new BrowserConnectionCloseEvent());
+  channelHandler.connection.onClose(() => {
+    stateService.reachedState('core_module_initialized').then(() => {
+      eventBus.fire(new BrowserConnectionCloseEvent());
+    });
   });
 
-  wsChannelHandler.connection.addEventListener('error', async (e) => {
-    await stateService.reachedState('core_module_initialized');
-    eventBus.fire(new BrowserConnectionErrorEvent(e));
+  channelHandler.connection.onError((e) => {
+    stateService.reachedState('core_module_initialized').then(() => {
+      eventBus.fire(new BrowserConnectionErrorEvent(e));
+    });
   });
 
-  await wsChannelHandler.initHandler();
+  await channelHandler.initHandler();
 
   injector.addProviders({
     token: WSChannelHandler,
-    useValue: wsChannelHandler,
+    useValue: channelHandler,
   });
-  // 重连不会执行后面的逻辑
-  const channel = await wsChannelHandler.openChannel('RPCService');
-  channel.onReOpen(() => onReconnect());
 
-  bindConnectionService(injector, modules, createWebSocketConnection(channel));
+  const channel = await channelHandler.openChannel(RPCServiceChannelPath);
+
+  const clientCenter = new RPCServiceCenter();
+  clientCenter.setSumiConnection(channel.createSumiConnection(options));
+
+  if (appConfig?.measure?.connection) {
+    clientCenter.setReporter(reporterService, appConfig.measure.connection.minimumReportThresholdTime);
+  }
+
+  initConnectionService(injector, modules, clientCenter);
+
+  // report log to server after connection established
+  const logger = injector.get(ILogger) as Logger;
+  logger.reportToServer();
+
+  return channel;
 }
 
-export async function bindConnectionService(
+/**
+ * @deprecated Please use `bindConnectionService` instead
+ */
+export function bindConnectionServiceDeprecated(
   injector: Injector,
   modules: ModuleConstructor[],
-  connection: RPCMessageConnection,
+  connection: MessageConnection,
 ) {
   const clientCenter = new RPCServiceCenter();
-  clientCenter.setConnection(connection);
+  const dispose = clientCenter.setConnection(connection);
 
-  connection.onClose(() => {
-    clientCenter.removeConnection(connection);
+  const toDispose = connection.onClose(() => {
+    dispose.dispose();
+    toDispose.dispose();
   });
 
+  initConnectionService(injector, modules, clientCenter);
+}
+
+function initConnectionService(injector: Injector, modules: ModuleConstructor[], clientCenter: RPCServiceCenter) {
   const { getRPCService } = initRPCService(clientCenter);
 
   const backServiceArr: BackService[] = [];
@@ -85,6 +118,9 @@ export async function bindConnectionService(
     if (moduleInstance.backServices) {
       for (const backService of moduleInstance.backServices) {
         backServiceArr.push(backService);
+        if (backService.protocol) {
+          clientCenter.loadProtocol(backService.protocol);
+        }
       }
     }
   }

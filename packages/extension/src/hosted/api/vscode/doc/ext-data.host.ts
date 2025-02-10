@@ -1,12 +1,12 @@
-import type vscode from 'vscode';
-
 import { Schemes } from '@opensumi/ide-core-common';
 
 import { IMainThreadDocumentsShape } from '../../../../common/vscode';
-import { Range, Position, EndOfLine, Uri } from '../../../../common/vscode/ext-types';
+import { EndOfLine, Position, Range, Uri } from '../../../../common/vscode/ext-types';
 
 import { MirrorTextModel } from './mirror';
 import { ensureValidWordDefinition, getWordAtText } from './wordHelper';
+
+import type vscode from 'vscode';
 
 const _modeId2WordDefinition = new Map<string, RegExp | undefined>();
 export function setWordDefinitionFor(modeId: string, wordDefinition: RegExp | undefined): void {
@@ -31,7 +31,8 @@ export function regExpLeadsToEndlessLoop(regexp: RegExp): boolean {
 }
 
 export class ExtHostDocumentData extends MirrorTextModel {
-  private _proxy: IMainThreadDocumentsShape;
+  readonly #proxy: IMainThreadDocumentsShape;
+
   private _languageId: string;
   private _isDirty: boolean;
   private _document: vscode.TextDocument;
@@ -48,7 +49,7 @@ export class ExtHostDocumentData extends MirrorTextModel {
     isDirty: boolean,
   ) {
     super(uri, lines, eol, versionId);
-    this._proxy = proxy;
+    this.#proxy = proxy;
     this._languageId = languageId;
     this._isDirty = isDirty;
   }
@@ -135,6 +136,10 @@ export class ExtHostDocumentData extends MirrorTextModel {
     this._languageId = newLanguageId;
   }
 
+  _getLanguageId(): string {
+    return this._languageId;
+  }
+
   _acceptIsDirty(isDirty: boolean): void {
     this._isDirty = isDirty;
   }
@@ -143,7 +148,7 @@ export class ExtHostDocumentData extends MirrorTextModel {
     if (this._isDisposed) {
       return Promise.reject(new Error('Document has been closed'));
     }
-    return this._proxy.$trySaveDocument(this._uri.toString());
+    return this.#proxy.$trySaveDocument(this._uri.toString());
   }
 
   private _getTextInRange(_range: vscode.Range): string {

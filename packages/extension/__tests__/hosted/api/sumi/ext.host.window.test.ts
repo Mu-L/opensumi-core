@@ -1,4 +1,4 @@
-import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpcProtocol';
+import { IRPCProtocol } from '@opensumi/ide-connection/lib/common/rpc/multiplexer';
 import { IWindowInfo } from '@opensumi/ide-extension/lib/common/sumi/window';
 import { ExtHostIDEWindow, ExtIDEWebviewWindow } from '@opensumi/ide-extension/lib/hosted/api/sumi/ext.host.window';
 import { createWindowApiFactory } from '@opensumi/ide-extension/lib/hosted/api/sumi/ext.host.window';
@@ -7,7 +7,6 @@ import { createBrowserInjector } from '../../../../../../tools/dev-tool/src/inje
 import { MainThreadSumiAPIIdentifier } from '../../../../src/common/sumi';
 import { MainThreadAPIIdentifier } from '../../../../src/common/vscode';
 import { ExtHostCommands } from '../../../../src/hosted/api/vscode/ext.host.command';
-
 
 const mockMainThreadIDEWindowProxy = {
   $createWebviewWindow: jest.fn(async () => {
@@ -59,7 +58,7 @@ describe('packages/extension/__tests__/hosted/api/sumi/ext.host.window.test.ts',
 
   it('reloadWindow should be work', () => {
     windowAPI.reloadWindow();
-    expect(mockMainThreadCommandProxy.$executeCommand).toBeCalledTimes(1);
+    expect(mockMainThreadCommandProxy.$executeCommand).toHaveBeenCalledTimes(1);
   });
 
   describe('createWebviewWindow should be work', () => {
@@ -89,32 +88,32 @@ describe('packages/extension/__tests__/hosted/api/sumi/ext.host.window.test.ts',
 
     it('show method should be work', () => {
       window.show();
-      expect(mockMainThreadIDEWindowProxy.$show).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$show).toHaveBeenCalledTimes(1);
     });
 
     it('hide method should be work', () => {
       window.hide();
-      expect(mockMainThreadIDEWindowProxy.$hide).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$hide).toHaveBeenCalledTimes(1);
     });
 
     it('postMessage method should be work', () => {
       window.postMessage('message');
-      expect(mockMainThreadIDEWindowProxy.$postMessage).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$postMessage).toHaveBeenCalledTimes(1);
     });
 
     it('loadUrl method should be work', () => {
       window.loadUrl('http://opensumi.com');
-      expect(mockMainThreadIDEWindowProxy.$loadURL).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$loadURL).toHaveBeenCalledTimes(1);
     });
 
     it('setSize method should be work', () => {
       window.setSize({ width: 100, height: 200 });
-      expect(mockMainThreadIDEWindowProxy.$setSize).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$setSize).toHaveBeenCalledTimes(1);
     });
 
     it('setAlwaysOnTop method should be work', () => {
       window.setAlwaysOnTop(true);
-      expect(mockMainThreadIDEWindowProxy.$setSize).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$setSize).toHaveBeenCalledTimes(1);
     });
 
     it('window should contain windowId and webContentsID', () => {
@@ -124,7 +123,7 @@ describe('packages/extension/__tests__/hosted/api/sumi/ext.host.window.test.ts',
 
     it('dispose method should be work', () => {
       window.dispose();
-      expect(mockMainThreadIDEWindowProxy.$destroy).toBeCalledTimes(1);
+      expect(mockMainThreadIDEWindowProxy.$destroy).toHaveBeenCalledTimes(1);
     });
   });
 });

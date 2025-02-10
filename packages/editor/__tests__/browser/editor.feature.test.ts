@@ -1,27 +1,29 @@
-import { QuickPickService, PreferenceService, IContextKeyService } from '@opensumi/ide-core-browser';
+import { IContextKeyService, PreferenceService, QuickPickService } from '@opensumi/ide-core-browser';
 import { AbstractContextMenuService, ICtxMenuRenderer } from '@opensumi/ide-core-browser/lib/menu/next';
-import { ILogger, Disposable, URI, Emitter, IEventBus, ISelection } from '@opensumi/ide-core-common';
+import { Disposable, Emitter, IEventBus, ILogger, ISelection, URI } from '@opensumi/ide-core-common';
 import { IEditor } from '@opensumi/ide-editor';
 import {
-  IEditorFeatureRegistry,
-  IEditorDocumentModelService,
-  getSplitActionFromDragDrop,
   DragOverPosition,
-  EditorGroupSplitAction,
-  WorkbenchEditorService,
-  EditorSelectionChangeEvent,
-  IEditorGroup,
   EditorGroupChangeEvent,
   EditorGroupCloseEvent,
+  EditorGroupSplitAction,
+  EditorOpenType,
+  EditorSelectionChangeEvent,
+  IEditorDocumentModelService,
+  IEditorFeatureRegistry,
+  IEditorGroup,
+  WorkbenchEditorService,
+  getSplitActionFromDragDrop,
 } from '@opensumi/ide-editor/lib/browser';
 import { EditorFeatureRegistryImpl } from '@opensumi/ide-editor/lib/browser/feature';
-import { FormattingSelector } from '@opensumi/ide-editor/lib/browser/format/formatterSelect';
+import { FormattingSelector } from '@opensumi/ide-editor/lib/browser/format/formatter-selector';
 import { EditorHistoryService } from '@opensumi/ide-editor/lib/browser/history';
 import { EditorContextMenuController } from '@opensumi/ide-editor/lib/browser/menu/editor.context';
 import { TabTitleMenuService } from '@opensumi/ide-editor/lib/browser/menu/title-context.menu';
 import { EditorTopPaddingContribution } from '@opensumi/ide-editor/lib/browser/view/topPadding';
 import { EditorExtensionsRegistry } from '@opensumi/ide-monaco/lib/browser/contrib/command';
-import * as monaco from '@opensumi/monaco-editor-core/esm/vs/editor/editor.api';
+import { monacoApi } from '@opensumi/ide-monaco/lib/browser/monaco-api';
+import { IMessageService } from '@opensumi/ide-overlay';
 import { SyncDescriptor } from '@opensumi/monaco-editor-core/esm/vs/platform/instantiation/common/descriptors';
 
 import { createBrowserInjector } from '../../../../tools/dev-tool/src/injector-helper';
@@ -33,6 +35,7 @@ describe('editor status bar item test', () => {
 
   beforeAll(() => {
     injector.mockService(ILogger);
+    injector.mockService(IMessageService);
     injector.addProviders({
       token: IEditorFeatureRegistry,
       useClass: EditorFeatureRegistryImpl,
@@ -52,13 +55,13 @@ describe('editor status bar item test', () => {
 
     const disposer = service.registerEditorFeatureContribution(contribution);
 
-    expect(listener).toBeCalledWith(contribution);
+    expect(listener).toHaveBeenCalledWith(contribution);
 
     service.runContributions({
       onDispose: jest.fn(),
     } as any);
 
-    expect(contribution.contribute).toBeCalledTimes(1);
+    expect(contribution.contribute).toHaveBeenCalledTimes(1);
 
     disposer.dispose();
   });
@@ -81,8 +84,8 @@ describe('editor status bar item test', () => {
     };
     service.runContributions(editor as any);
     _onDidChangeModel.fire();
-    expect(editor.monacoEditor.changeViewZones).toBeCalled();
-    expect(accessor.addZone).toBeCalled();
+    expect(editor.monacoEditor.changeViewZones).toHaveBeenCalled();
+    expect(accessor.addZone).toHaveBeenCalled();
   });
 
   const config = {};
@@ -99,6 +102,9 @@ describe('editor status bar item test', () => {
       },
       dispose: jest.fn(),
     }),
+    getModelDescription: () => ({
+      languageId: 'javascript',
+    }),
   });
 
   it('formatter select test', async () => {
@@ -108,11 +114,11 @@ describe('editor status bar item test', () => {
 
     const selector: FormattingSelector = injector.get(FormattingSelector);
 
-    await selector.select(
+    await selector.selectFormatter(
       [
         {
           displayName: 'Test Formatter',
-          extensionId: 'testFormatter',
+          extensionId: 'testFormatter' as any,
           provideDocumentFormattingEdits: jest.fn(),
         },
         {
@@ -125,6 +131,7 @@ describe('editor status bar item test', () => {
         uri: new URI('file:///test/test.js').codeUri,
       } as any,
       1,
+      1,
     );
 
     expect(config['editor.preferredFormatter']['javascript']).toBe('testFormatter');
@@ -136,19 +143,17 @@ describe('editor status bar item test', () => {
     });
 
     const selector: FormattingSelector = injector.get(FormattingSelector);
-    await selector.select(
+    await selector.pickFormatter(
       [
         {
           displayName: 'Test Single Formatter',
-          extensionId: 'testSingleFormatter',
+          extensionId: 'testSingleFormatter' as any,
           provideDocumentFormattingEdits: jest.fn(),
         },
       ],
       {
         uri: new URI('file:///test/test2.js').codeUri,
       } as any,
-      1,
-      true, // force show selector
     );
 
     expect(config['editor.preferredFormatter']['javascript']).toBe('testSingleFormatter');
@@ -199,7 +204,7 @@ describe('editor history test', () => {
       new EditorGroupChangeEvent({
         group: testEditorGroup,
         newOpenType: {
-          type: 'code',
+          type: EditorOpenType.code,
         },
         oldOpenType: null,
         newResource: {
@@ -305,10 +310,10 @@ describe('editor history test', () => {
       new EditorGroupChangeEvent({
         group: testEditorGroup,
         newOpenType: {
-          type: 'code',
+          type: EditorOpenType.code,
         },
         oldOpenType: {
-          type: 'code',
+          type: EditorOpenType.code,
         },
         newResource: {
           uri: testUri2,
@@ -355,10 +360,10 @@ describe('editor history test', () => {
       new EditorGroupChangeEvent({
         group: testEditorGroup,
         newOpenType: {
-          type: 'code',
+          type: EditorOpenType.code,
         },
         oldOpenType: {
-          type: 'code',
+          type: EditorOpenType.code,
         },
         newResource: {
           uri: testUri3,
@@ -486,8 +491,8 @@ describe('editor menu test', () => {
       injector.get(ICtxMenuRenderer),
     ]);
 
-    const monacoEditor = monaco.editor.create(document.createElement('div'));
-    const model = monaco.editor.createModel('test');
+    const monacoEditor = monacoApi.editor.create(document.createElement('div'));
+    const model = monacoApi.editor.createModel('test');
     monacoEditor.setModel(model);
 
     const editor = {
@@ -505,7 +510,7 @@ describe('editor menu test', () => {
       } as any,
     });
 
-    expect(injector.get<ICtxMenuRenderer>(ICtxMenuRenderer).show).toBeCalled();
+    expect(injector.get<ICtxMenuRenderer>(ICtxMenuRenderer).show).toHaveBeenCalled();
   });
 
   it('editor title context menu test', () => {
@@ -521,6 +526,6 @@ describe('editor menu test', () => {
         })),
       },
     } as any);
-    expect(injector.get<ICtxMenuRenderer>(ICtxMenuRenderer).show).toBeCalled();
+    expect(injector.get<ICtxMenuRenderer>(ICtxMenuRenderer).show).toHaveBeenCalled();
   });
 });

@@ -1,32 +1,36 @@
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
 import {
-  URI,
-  IRef,
-  ReferenceManager,
+  Dispatcher,
+  IDisposable,
   IEditorDocumentChange,
   IEditorDocumentModelSaveResult,
-  WithEventBus,
-  OnEvent,
-  StorageProvider,
-  IStorage,
-  STORAGE_SCHEMA,
   ILogger,
+  IRef,
+  IStorage,
+  OnEvent,
   PreferenceService,
   ReadyEvent,
-  memoize,
+  ReferenceManager,
+  STORAGE_SCHEMA,
+  StorageProvider,
+  URI,
+  WithEventBus,
   mapToSerializable,
+  memoize,
   serializableToMap,
 } from '@opensumi/ide-core-browser';
 import { IHashCalculateService } from '@opensumi/ide-core-common/lib/hash-calculate/hash-calculate';
+import { IFileServiceClient } from '@opensumi/ide-file-service';
 import { EOL } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+
+import { IEditorDocumentDescription, IEditorDocumentModel } from '../../common/editor';
 
 import { EditorDocumentModel } from './editor-document-model';
 import {
-  IEditorDocumentModel,
+  EditorDocumentModelCreationEvent,
+  EditorDocumentModelOptionExternalUpdatedEvent,
   IEditorDocumentModelContentRegistry,
   IEditorDocumentModelService,
-  EditorDocumentModelOptionExternalUpdatedEvent,
-  EditorDocumentModelCreationEvent,
   IPreferredModelOptions,
 } from './types';
 
@@ -54,6 +58,9 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
   @Autowired(IHashCalculateService)
   private readonly hashCalculateService: IHashCalculateService;
 
+  @Autowired(IFileServiceClient)
+  protected readonly fileSystem: IFileServiceClient;
+
   private storage: IStorage;
 
   private editorDocModels = new Map<string, EditorDocumentModel>();
@@ -66,7 +73,9 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
 
   private preferredModelOptions = new Map<string, IPreferredModelOptions>();
 
-  private _ready = new ReadyEvent<void>();
+  private _ready = this.registerDispose(new ReadyEvent<void>());
+
+  private modelCreationEventDispatcher = this.registerDispose(new Dispatcher<void>());
 
   constructor() {
     super();
@@ -82,6 +91,7 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
       this._delete(key);
     });
     this._modelReferenceManager.onInstanceCreated((model) => {
+      this.modelCreationEventDispatcher.dispatch(model.uri.toString());
       this.eventBus.fire(
         new EditorDocumentModelCreationEvent({
           uri: model.uri,
@@ -103,6 +113,10 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
         }
       }),
     );
+  }
+
+  onDocumentModelCreated(uri: string, listener: () => void): IDisposable {
+    return this.modelCreationEventDispatcher.on(uri)(listener);
   }
 
   private _delete(uri: string | URI): void {
@@ -216,6 +230,30 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
     return this._modelReferenceManager.getReferenceIfHasInstance(uri.toString(), reason);
   }
 
+  getModelDescription(uri: URI, reason?: string): IEditorDocumentDescription | null {
+    const ref = this.getModelReference(uri, reason);
+    if (!ref) {
+      return null;
+    }
+
+    const instance = ref.instance;
+    const resullt = {
+      alwaysDirty: instance.alwaysDirty,
+      closeAutoSave: instance.closeAutoSave,
+      disposeEvenDirty: instance.disposeEvenDirty,
+      eol: instance.eol,
+      encoding: instance.encoding,
+      dirty: instance.dirty,
+      languageId: instance.languageId,
+      readonly: instance.readonly,
+      uri: instance.uri,
+      id: instance.id,
+      savable: instance.savable,
+    };
+    ref.dispose();
+    return resullt;
+  }
+
   getAllModels(): IEditorDocumentModel[] {
     return Array.from(this.editorDocModels.values());
   }
@@ -256,17 +294,23 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
 
   private async doCreateModel(uriString: string, encoding?: string): Promise<EditorDocumentModel> {
     const uri = new URI(uriString);
-    const provider = await this.contentRegistry.getProvider(uri);
+    let provider = await this.contentRegistry.getProvider(uri);
+
+    if (!provider) {
+      const providerReady = await this.fileSystem.shouldWaitProvider(uri.scheme);
+      if (providerReady) {
+        provider = await this.contentRegistry.getProvider(uri);
+      }
+    }
 
     if (!provider) {
       throw new Error(`No document provider found for ${uri.toString()}`);
     }
 
-    const [content, readonly, languageId, eol, alwaysDirty, closeAutoSave, disposeEvenDirty] = await Promise.all([
+    const [content, readonly, languageId, alwaysDirty, closeAutoSave, disposeEvenDirty] = await Promise.all([
       provider.provideEditorDocumentModelContent(uri, encoding),
       provider.isReadonly ? provider.isReadonly(uri) : undefined,
       provider.preferLanguageForUri ? provider.preferLanguageForUri(uri) : undefined,
-      provider.provideEOL ? provider.provideEOL(uri) : undefined,
       provider.isAlwaysDirty ? provider.isAlwaysDirty(uri) : false,
       provider.closeAutoSave ? provider.closeAutoSave(uri) : false,
       provider.disposeEvenDirty ? provider.disposeEvenDirty(uri) : false,
@@ -276,6 +320,8 @@ export class EditorDocumentModelServiceImpl extends WithEventBus implements IEdi
     if (!encoding && provider.provideEncoding) {
       encoding = await provider.provideEncoding(uri);
     }
+
+    const eol = provider.provideEOL ? await provider.provideEOL(uri) : EOL.LF;
 
     const savable = !!provider.saveDocumentModel;
 

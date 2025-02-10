@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { RawContextKey } from '@opensumi/ide-core-browser/lib/raw-context-key';
-import { IJSONSchemaMap, isString, path, URI, ProblemMatcher, ProblemMatch } from '@opensumi/ide-core-common';
+import { IJSONSchemaMap, ProblemMatch, ProblemMatcher, URI, isString, path } from '@opensumi/ide-core-common';
 import { UriComponents } from '@opensumi/ide-editor';
 
 import { IWorkspaceFolder } from './index';
@@ -293,6 +293,8 @@ export interface PresentationOptions {
    * Controls whether the task is executed in a specific terminal group using split panes.
    */
   group?: string;
+
+  close?: boolean;
 }
 
 export namespace PresentationOptions {
@@ -1123,7 +1125,6 @@ export namespace TaskEvent {
     task: Task,
     processIdOrExitCode?: number,
   ): TaskEvent;
-  // tslint:disable-next-line: unified-signatures
   export function create(kind: TaskEventKind.Start, task: Task, terminalId?: string): TaskEvent;
   export function create(kind: TaskEventKind.ProblemMatched, task: Task, problems?: ProblemMatch[]): TaskEvent;
   export function create(

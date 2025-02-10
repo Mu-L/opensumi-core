@@ -1,6 +1,7 @@
+import { ThemeIcon } from '@opensumi/ide-core-common';
 import { SymbolKind as SymbolKindEnum } from '@opensumi/monaco-editor-core/esm/vs/editor/common/languages';
 
-import { IDE_ICONFONT_CN_CSS, IDE_OCTICONS_CN_CSS, IDE_CODICONS_CN_CSS } from './ide-iconfont';
+import { IDE_CODICONS_CN_CSS, IDE_ICONFONT_CN_CSS, IDE_OCTICONS_CN_CSS } from './ide-iconfont';
 
 export { updateIconMap, getIcon } from '@opensumi/ide-components/lib/icon/util';
 
@@ -12,6 +13,7 @@ export function getOctIcon(iconKey: string) {
 }
 
 export const CODICON_OWNER = 'codicon';
+export const KTICON_OWNER = 'kticon';
 
 const codIconId = [
   'add',
@@ -29,6 +31,7 @@ const codIconId = [
   'record-keys',
   'keyboard',
   'tag',
+  'git-pull-request-label',
   'tag-add',
   'tag-remove',
   'person',
@@ -64,6 +67,7 @@ const codIconId = [
   'debug-breakpoint',
   'debug-breakpoint-disabled',
   'debug-hint',
+  'terminal-decoration-success',
   'primitive-square',
   'edit',
   'pencil',
@@ -183,7 +187,9 @@ const codIconId = [
   'chrome-minimize',
   'chrome-restore',
   'circle-outline',
+  'circle',
   'debug-breakpoint-unverified',
+  'terminal-decoration-incomplete',
   'circle-slash',
   'circuit-board',
   'clear-all',
@@ -281,6 +287,7 @@ const codIconId = [
   'megaphone',
   'mention',
   'milestone',
+  'git-pull-request-milestone',
   'mortar-board',
   'move',
   'multiple-windows',
@@ -390,7 +397,9 @@ const codIconId = [
   'debug-breakpoint-function',
   'debug-breakpoint-function-disabled',
   'debug-stackframe-active',
+  'circle-small-filled',
   'debug-stackframe-dot',
+  'terminal-decoration-mark',
   'debug-stackframe',
   'debug-stackframe-focused',
   'debug-breakpoint-unsupported',
@@ -404,9 +413,11 @@ const codIconId = [
   'menu',
   'expand-all',
   'feedback',
+  'git-pull-request-reviewer',
   'group-by-ref-type',
   'ungroup-by-ref-type',
   'account',
+  'git-pull-request-assignee',
   'bell-dot',
   'debug-console',
   'library',
@@ -435,6 +446,7 @@ const codIconId = [
   'pinned-dirty',
   'pass-filled',
   'circle-large-filled',
+  'circle-large',
   'circle-large-outline',
   'combine',
   'gather',
@@ -492,17 +504,84 @@ const codIconId = [
   'verified-filled',
   'newline',
   'layout',
+  'layout-activitybar-left',
+  'layout-activitybar-right',
+  'layout-panel-left',
+  'layout-panel-center',
+  'layout-panel-justify',
+  'layout-panel-right',
+  'layout-panel',
+  'layout-sidebar-left',
+  'layout-sidebar-right',
+  'layout-statusbar',
+  'layout-menubar',
+  'layout-centered',
+  'target',
+  'indent',
+  'record-small',
+  'error-small',
+  'terminal-decoration-error',
+  'arrow-circle-down',
+  'arrow-circle-left',
+  'arrow-circle-right',
+  'arrow-circle-up',
+  'layout-sidebar-right-off',
+  'layout-panel-off',
+  'layout-sidebar-left-off',
+  'blank',
+  'heart-filled',
+  'map',
+  'map-filled',
+  'circle-small',
+  'bell-slash',
+  'bell-slash-dot',
+  'comment-unresolved',
+  'git-pull-request-go-to-changes',
+  'git-pull-request-new-changes',
+  'search-fuzzy',
+  'comment-draft',
+  'send',
+  'sparkle',
+  'insert',
+  'mic',
+  'thumbsdown-filled',
+  'thumbsup-filled',
+  'coffee',
+  'snake',
+  'game',
+  'vr',
+  'chip',
+  'piano',
+  'music',
+  'mic-filled',
+  'git-fetch',
+  'copilot',
 ];
+
+const codIconIdSet = new Set(codIconId);
+
+const sumiconSet = new Set(['magic-wand']);
 
 /**
  * @param iconKey icon id
  * @param fallback codicon 找不到 icon 时是否回退到 octicon
  */
 export function getExternalIcon(iconKey: string, iconOwner = CODICON_OWNER, fallback = iconOwner === CODICON_OWNER) {
-  if (fallback && iconOwner === CODICON_OWNER && !codIconId.includes(iconKey)) {
+  if (fallback && iconOwner === CODICON_OWNER && !codIconIdSet.has(iconKey)) {
     return getOctIcon(iconKey);
   }
+  if (iconOwner === KTICON_OWNER) {
+    return `kaitian-icon ${iconOwner}-${iconKey}`;
+  }
   return `${iconOwner} ${iconOwner}-${iconKey}`;
+}
+
+export function asClassNameArrayWrapper(icon: ThemeIcon) {
+  if (sumiconSet.has(icon.id)) {
+    return ['kaitian-icon', `${KTICON_OWNER}-${icon.id}`];
+  }
+
+  return ThemeIcon.asClassNameArray(icon);
 }
 
 /**

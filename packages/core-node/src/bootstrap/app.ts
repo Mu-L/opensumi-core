@@ -7,12 +7,24 @@ import path from 'path';
 import Koa from 'koa';
 
 import { Injector } from '@opensumi/di';
+import { injectConnectionProviders } from '@opensumi/ide-connection/lib/common/server-handler';
 import { WebSocketHandler } from '@opensumi/ide-connection/lib/node';
-import { ContributionProvider, createContributionProvider, isWindows } from '@opensumi/ide-core-common';
-import { ILogServiceManager, ILogService, SupportLogNamespace, StoragePaths } from '@opensumi/ide-core-common';
-import { DEFAULT_TRS_REGISTRY } from '@opensumi/ide-core-common/lib/const';
+import {
+  ContributionProvider,
+  ILogService,
+  ILogServiceManager,
+  StoragePaths,
+  SupportLogNamespace,
+  createContributionProvider,
+  getDebugLogger,
+  getModuleDependencies,
+  injectGDataStores,
+  isWindows,
+} from '@opensumi/ide-core-common';
+import { DEFAULT_OPENVSX_REGISTRY } from '@opensumi/ide-core-common/lib/const';
+import { suppressNodeJSEpipeError } from '@opensumi/ide-core-common/lib/node';
 
-import { createServerConnection2, createNetServerConnection, RPCServiceCenter } from '../connection';
+import { RPCServiceCenter, createNetServerConnection, createServerConnection2 } from '../connection';
 import { NodeModule } from '../node-module';
 import { AppConfig, IServerApp, IServerAppOpts, ModuleConstructor, ServerAppContribution } from '../types';
 
@@ -23,7 +35,7 @@ export class ServerApp implements IServerApp {
 
   private config: IServerAppOpts;
 
-  private logger: ILogService;
+  private logger: Pick<ILogService, 'log' | 'error'> = getDebugLogger();
 
   private webSocketHandler: WebSocketHandler[];
 
@@ -45,15 +57,13 @@ export class ServerApp implements IServerApp {
     this._injector = opts.injector || new Injector();
     this.webSocketHandler = opts.webSocketHandler || [];
     // 使用外部传入的中间件
-    this.use = opts.use || ((middleware) => null);
+    this.use = opts.use || (() => null);
     this.config = {
+      ...opts,
       injector: this.injector,
-      logDir: opts.logDir,
-      logLevel: opts.logLevel,
-      LogServiceClass: opts.LogServiceClass,
       marketplace: Object.assign(
         {
-          endpoint: DEFAULT_TRS_REGISTRY.ENDPOINT,
+          endpoint: DEFAULT_OPENVSX_REGISTRY,
           extensionDir: path.join(
             os.homedir(),
             ...(isWindows ? [StoragePaths.WINDOWS_APP_DATA_DIR, StoragePaths.WINDOWS_ROAMING_DIR] : ['']),
@@ -61,23 +71,12 @@ export class ServerApp implements IServerApp {
             StoragePaths.MARKETPLACE_DIR,
           ),
           showBuiltinExtensions: false,
-          accountId: DEFAULT_TRS_REGISTRY.ACCOUNT_ID,
-          masterKey: DEFAULT_TRS_REGISTRY.MASTER_KEY,
           ignoreId: [],
         },
         opts.marketplace,
       ),
-      processCloseExitThreshold: opts.processCloseExitThreshold,
-      terminalPtyCloseThreshold: opts.terminalPtyCloseThreshold,
-      staticAllowOrigin: opts.staticAllowOrigin,
-      staticAllowPath: opts.staticAllowPath,
-      extLogServiceClassPath: opts.extLogServiceClassPath,
-      maxExtProcessCount: opts.maxExtProcessCount,
-      onDidCreateExtensionHostProcess: opts.onDidCreateExtensionHostProcess,
       extHost: process.env.EXTENSION_HOST_ENTRY || opts.extHost,
-      blockPatterns: opts.blockPatterns,
-      extHostIPCSockPath: opts.extHostIPCSockPath,
-      extHostForkOptions: opts.extHostForkOptions,
+      rpcMessageTimeout: opts.rpcMessageTimeout || -1,
     };
     this.bindProcessHandler();
     this.initBaseProvider();
@@ -94,7 +93,7 @@ export class ServerApp implements IServerApp {
    * 将被依赖但未被加入modules的模块加入到待加载模块最后
    */
   public resolveModuleDeps(moduleConstructor: ModuleConstructor, modules: any[]) {
-    const dependencies = Reflect.getMetadata('dependencies', moduleConstructor) as [];
+    const dependencies = getModuleDependencies(moduleConstructor);
     if (dependencies) {
       dependencies.forEach((dep) => {
         if (modules.indexOf(dep) === -1) {
@@ -117,6 +116,7 @@ export class ServerApp implements IServerApp {
       useValue: this.config,
     });
     injectInnerProviders(this.injector);
+    injectConnectionProviders(this.injector);
   }
 
   private async initializeContribution() {
@@ -149,28 +149,16 @@ export class ServerApp implements IServerApp {
   ) {
     await this.initializeContribution();
 
-    let serviceCenter;
-
     if (serviceHandler) {
-      serviceCenter = new RPCServiceCenter();
-      serviceHandler(serviceCenter);
+      serviceHandler(new RPCServiceCenter());
     } else {
       if (server instanceof http.Server || server instanceof https.Server) {
         // 创建 websocket 通道
-        serviceCenter = createServerConnection2(
-          server,
-          this.injector,
-          this.modulesInstances,
-          this.webSocketHandler,
-          this.opts,
-        );
+        createServerConnection2(server, this.injector, this.modulesInstances, this.webSocketHandler, this.opts);
       } else if (server instanceof net.Server) {
-        serviceCenter = createNetServerConnection(server, this.injector, this.modulesInstances);
+        createNetServerConnection(server, this.injector, this.modulesInstances);
       }
     }
-
-    // TODO: 每次链接来的时候绑定一次，或者是服务获取的时候多实例化出来
-    // bindModuleBackService(this.injector, this.modulesInstances, serviceCenter);
 
     await this.startContribution();
   }
@@ -191,6 +179,10 @@ export class ServerApp implements IServerApp {
    * 绑定 process 退出逻辑
    */
   private bindProcessHandler() {
+    suppressNodeJSEpipeError(process, (msg) => {
+      this.logger.error(msg);
+    });
+
     process.on('uncaughtException', (error) => {
       if (error) {
         this.logger.error('Uncaught Exception: ', error.toString());
@@ -225,6 +217,8 @@ export class ServerApp implements IServerApp {
    * @param modules
    */
   private createNodeModules(Constructors: ModuleConstructor[] = [], modules: NodeModule[] = []) {
+    injectGDataStores(this.injector);
+
     const allModules = [...modules];
     Constructors.forEach((c) => {
       this.resolveModuleDeps(c, Constructors);

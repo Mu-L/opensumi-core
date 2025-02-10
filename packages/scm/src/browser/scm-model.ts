@@ -1,9 +1,20 @@
-import { action, observable } from 'mobx';
-
 import { Autowired, Injectable } from '@opensumi/di';
 import { PreferenceService } from '@opensumi/ide-core-browser';
-import { Disposable, Emitter, Event, getDebugLogger, Uri, ISplice } from '@opensumi/ide-core-common';
-import { combinedDisposable, dispose, DisposableStore, IDisposable, toDisposable } from '@opensumi/ide-core-common';
+import {
+  CommandService,
+  Disposable,
+  DisposableStore,
+  Emitter,
+  Event,
+  IDisposable,
+  ILogger,
+  ISplice,
+  Uri,
+  combinedDisposable,
+  dispose,
+  toDisposable,
+} from '@opensumi/ide-core-common';
+import { observableValue, transaction } from '@opensumi/ide-monaco/lib/common/observable';
 
 import { ISCMMenus, ISCMRepository, ISCMResource, ISCMResourceGroup, SCMService } from '../common';
 
@@ -196,22 +207,45 @@ export class ViewModelContext extends Disposable {
   @Autowired(PreferenceService)
   private readonly preferenceService: PreferenceService;
 
+  @Autowired(CommandService)
+  private readonly commandService: CommandService;
+
+  @Autowired(ILogger)
+  private readonly logger: ILogger;
+
   private onDidSelectedRepoChangeEmitter: Emitter<ISCMRepository> = new Emitter();
+  private onAlwaysShowActionsChangeEmitter: Emitter<boolean> = new Emitter();
 
   get onDidSelectedRepoChange() {
     return this.onDidSelectedRepoChangeEmitter.event;
+  }
+
+  get onAlwaysShowActionsChange() {
+    return this.onAlwaysShowActionsChangeEmitter.event;
   }
 
   public get menus(): ISCMMenus {
     return this._menus;
   }
 
-  private logger = getDebugLogger();
-
   private toDisposableListener: IDisposable | null;
 
-  private _onDidSCMListChangeEmitter: Emitter<void> = new Emitter();
-  public onDidSCMListChange = this._onDidSCMListChangeEmitter.event;
+  private onDidSCMListChangeEmitter: Emitter<void> = new Emitter();
+  public onDidSCMListChange = this.onDidSCMListChangeEmitter.event;
+
+  private onDidSCMRepoListChangeEmitter: Emitter<ISCMRepository[]> = new Emitter();
+  public onDidSCMRepoListChange = this.onDidSCMRepoListChangeEmitter.event;
+
+  public repoList: ISCMRepository[] = [];
+  public selectedRepo: ISCMRepository | undefined;
+
+  public scmList = new Array<ISCMDataItem>();
+
+  private _currentWorkspace: Uri;
+
+  public readonly selectedRepos = observableValue<ISCMRepository[]>(this, []);
+
+  public alwaysShowActions: boolean;
 
   constructor() {
     super();
@@ -244,6 +278,21 @@ export class ViewModelContext extends Disposable {
     const repoOnDidSplice = Event.filter(resourceGroup.onDidSplice, (e) => e.target === repository);
     disposables.add(
       repoOnDidSplice(({ index, deleteCount, elements }) => {
+        // https://github.com/microsoft/vscode/blob/5ea57c3b481522195786cf1b669cd6ad8bda3381/extensions/git/src/repository.ts#L808
+        if (elements.some((e: ISCMResourceGroup) => e.id === 'merge')) {
+          const mergeChanges: Uri[] = [];
+          const mergeChangesObj: Record<string, boolean> = {};
+          elements.forEach((repository: ISCMResourceGroup) => {
+            if (Array.isArray(repository.elements)) {
+              repository.elements.forEach((state) => {
+                mergeChanges.push(state.sourceUri);
+                mergeChangesObj[state.sourceUri.toString()] = true;
+              });
+            }
+          });
+          this.commandService.executeCommand('setContext', 'git.mergeChanges', mergeChanges);
+          this.commandService.executeCommand('setContext', 'git.mergeChangesObj', mergeChangesObj);
+        }
         if (repository.provider.rootUri) {
           // 只处理存在工作区路径的 SCMList
           this.spliceSCMList(repository.provider.rootUri, index, deleteCount, ...elements);
@@ -262,17 +311,15 @@ export class ViewModelContext extends Disposable {
   private initTreeAlwaysShowActions() {
     this.alwaysShowActions = !!this.preferenceService.get<boolean>('scm.alwaysShowActions');
     this.disposables.push(
-      this.preferenceService.onSpecificPreferenceChange(
-        'scm.alwaysShowActions',
-        (changes) => (this.alwaysShowActions = changes.newValue),
-      ),
+      this.preferenceService.onSpecificPreferenceChange('scm.alwaysShowActions', (changes) => {
+        if (this.alwaysShowActions !== changes.newValue) {
+          this.updateAlwaysShowActions(changes.newValue);
+        }
+      }),
     );
   }
 
-  @observable
-  public alwaysShowActions: boolean;
-
-  start() {
+  private start() {
     this.scmService.onDidAddRepository(
       (repo: ISCMRepository) => {
         this.addRepo(repo);
@@ -302,18 +349,10 @@ export class ViewModelContext extends Disposable {
     });
   }
 
-  @observable
-  public repoList = observable.array<ISCMRepository>([]);
-
-  @observable
-  public selectedRepos = observable.array<ISCMRepository>([]);
-
-  @observable
-  public selectedRepo: ISCMRepository | undefined;
-
-  public scmList = new Array<ISCMDataItem>();
-
-  private _currentWorkspace: Uri;
+  private updateAlwaysShowActions(value: boolean) {
+    this.alwaysShowActions = value;
+    this.onAlwaysShowActionsChangeEmitter.fire(value);
+  }
 
   private spliceSCMList = (workspace: Uri, start: number, deleteCount: number, ...toInsert: ISCMDataItem[]) => {
     if (!this._currentWorkspace || this._currentWorkspace.toString() === workspace.toString()) {
@@ -322,10 +361,9 @@ export class ViewModelContext extends Disposable {
       this.scmList = [...toInsert];
     }
     this._currentWorkspace = workspace;
-    this._onDidSCMListChangeEmitter.fire();
+    this.onDidSCMListChangeEmitter.fire();
   };
 
-  @action
   private addRepo(repo: ISCMRepository) {
     // 因为这里每个传入的 repo 均为新实例，这里需要通过 Uri.toString() 去判断
     if (
@@ -342,9 +380,9 @@ export class ViewModelContext extends Disposable {
     if (repo.selected && this.repoList.length === 1) {
       this.changeSelectedRepos([repo]);
     }
+    this.onDidSCMRepoListChangeEmitter.fire(this.repoList);
   }
 
-  @action
   private deleteRepo(repo: ISCMRepository) {
     const index = this.repoList.indexOf(repo);
     if (index < 0) {
@@ -352,11 +390,13 @@ export class ViewModelContext extends Disposable {
       return;
     }
     this.repoList.splice(index, 1);
+    this.onDidSCMRepoListChangeEmitter.fire(this.repoList);
   }
 
-  @action
   private changeSelectedRepos(repos: ISCMRepository[]) {
-    this.selectedRepos.replace(repos);
+    transaction((tx) => {
+      this.selectedRepos.set(repos, tx);
+    });
     const selectedRepo = repos[0];
     this.selectedRepo = selectedRepo;
     this.onDidSelectedRepoChangeEmitter.fire(selectedRepo);

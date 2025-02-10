@@ -1,8 +1,7 @@
 import { BrowserWindowConstructorOptions } from 'electron';
 
 import { Injector } from '@opensumi/di';
-import { ConstructorOf, ExtensionCandidate } from '@opensumi/ide-core-common';
-import { IDisposable } from '@opensumi/ide-core-common';
+import { ConstructorOf, ExtensionCandidate, IDisposable } from '@opensumi/ide-core-common';
 import { IURLHandler } from '@opensumi/ide-core-common/lib/electron';
 
 import { ElectronMainModule } from '../electron-main-module';
@@ -80,12 +79,6 @@ export interface ElectronAppConfig {
    * 如有外部 injector，优先使用外部
    */
   injector?: Injector;
-
-  /**
-   * 是否开启对 OpenSumi DevTools 的支持
-   * 默认值为 false
-   */
-  devtools?: boolean;
 }
 
 export const ElectronAppConfig = Symbol('ElectronAppConfig');

@@ -1,25 +1,21 @@
-import { Autowired, Injectable, Injector, INJECTOR_TOKEN } from '@opensumi/di';
-import {
-  initRPCService,
-  IRPCProtocol,
-  RPCProtocol,
-  RPCServiceCenter,
-  createWebSocketConnection,
-} from '@opensumi/ide-connection';
-import { WSChannelHandler as IWSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { IRPCProtocol, SumiConnectionMultiplexer, WSChannel, createExtMessageIO } from '@opensumi/ide-connection';
+import { WSChannelHandler } from '@opensumi/ide-connection/lib/browser';
+import { BaseConnection } from '@opensumi/ide-connection/lib/common/connection';
 import {
   AppConfig,
+  ContributionProvider,
   Deferred,
-  electronEnv,
-  Emitter,
+  Disposable,
+  DisposableStore,
+  ExtHostSpawnOptions,
+  IApplicationService,
   IExtensionProps,
-  ILogger,
-  IDisposable,
   toDisposable,
-  createElectronClientConnection,
 } from '@opensumi/ide-core-browser';
 
 import {
+  CONNECTION_HANDLE_BETWEEN_EXTENSION_AND_MAIN_THREAD,
   ExtensionNodeServiceServerPath,
   IExtension,
   IExtensionHostService,
@@ -27,26 +23,38 @@ import {
 } from '../common';
 import { ActivatedExtensionJSON } from '../common/activator';
 import { AbstractNodeExtProcessService } from '../common/extension.service';
+import { IMainThreadExtenderService, MainThreadExtenderContribution } from '../common/main.thread.extender';
 import { ExtHostAPIIdentifier } from '../common/vscode';
+import { knownProtocols } from '../common/vscode/protocols';
 
-import { createSumiApiFactory } from './sumi/main.thread.api.impl';
-import { createApiFactory as createVSCodeAPIFactory } from './vscode/api/main.thread.api.impl';
+import { createSumiAPIFactory } from './sumi/main.thread.api.impl';
+import { initNodeThreadAPIProxy } from './vscode/api/main.thread.api.impl';
+import { initSharedAPIProxy } from './vscode/api/main.thread.api.shared-impl';
 
 @Injectable()
 export class NodeExtProcessService implements AbstractNodeExtProcessService<IExtensionHostService> {
-  @Autowired(ILogger)
-  private readonly logger: ILogger;
-
   @Autowired(AppConfig)
   private readonly appConfig: AppConfig;
 
   @Autowired(INJECTOR_TOKEN)
-  private readonly injector: Injector;
+  protected readonly injector: Injector;
 
   @Autowired(ExtensionNodeServiceServerPath)
   private readonly extensionNodeClient: IExtensionNodeClientService;
 
-  private _apiFactoryDisposables: IDisposable[] = [];
+  @Autowired(IApplicationService)
+  protected readonly applicationService: IApplicationService;
+
+  @Autowired(WSChannelHandler)
+  private readonly channelHandler: WSChannelHandler;
+
+  @Autowired(IMainThreadExtenderService)
+  private readonly mainThreadExtenderService: IMainThreadExtenderService;
+
+  @Autowired(MainThreadExtenderContribution)
+  private readonly mainThreadExtenderContributionProvider: ContributionProvider<MainThreadExtenderContribution>;
+
+  private _apiFactoryDisposables = new DisposableStore();
 
   public ready: Deferred<void> = new Deferred();
   private _extHostUpdated: Deferred<void> = new Deferred();
@@ -55,10 +63,7 @@ export class NodeExtProcessService implements AbstractNodeExtProcessService<IExt
   public protocol: IRPCProtocol;
 
   public disposeApiFactory() {
-    this._apiFactoryDisposables.forEach((disposable) => {
-      disposable.dispose();
-    });
-    this._apiFactoryDisposables = [];
+    this._apiFactoryDisposables.clear();
   }
 
   public async disposeProcess() {
@@ -67,11 +72,10 @@ export class NodeExtProcessService implements AbstractNodeExtProcessService<IExt
   }
 
   public async activate(): Promise<IRPCProtocol> {
-    this.protocol = await this.createExtProcess();
+    await this.createExtProcess();
     if (this.protocol) {
       this.ready.resolve();
-      this.logger.verbose('init node thread api proxy', this.protocol);
-      await this.createBrowserMainThreadAPI(this.protocol);
+      await this.createBrowserMainThreadAPI();
 
       const proxy = await this.getProxy();
       await proxy.$updateExtHostData();
@@ -122,11 +126,38 @@ export class NodeExtProcessService implements AbstractNodeExtProcessService<IExt
     return this.protocol.getProxy<IExtensionHostService>(ExtHostAPIIdentifier.ExtHostExtensionService);
   }
 
-  private async createBrowserMainThreadAPI(protocol: IRPCProtocol) {
-    this._apiFactoryDisposables.push(
-      toDisposable(await createVSCodeAPIFactory(protocol, this.injector, this)),
-      toDisposable(createSumiApiFactory(protocol, this.injector)),
-    );
+  private async createBrowserMainThreadAPI() {
+    const apiProxy = initSharedAPIProxy(this.protocol, this.injector);
+    this._apiFactoryDisposables.add(apiProxy);
+    this._apiFactoryDisposables.add(toDisposable(initNodeThreadAPIProxy(this.protocol, this.injector, this)));
+    this._apiFactoryDisposables.add(toDisposable(createSumiAPIFactory(this.protocol, this.injector)));
+    this._apiFactoryDisposables.add(this.createExternalSumiAPIFactory());
+    await apiProxy.setup();
+  }
+
+  getSpawnOptions(): ExtHostSpawnOptions {
+    return {};
+  }
+
+  /**
+   * register external main thread class
+   * @returns disposer
+   */
+  private createExternalSumiAPIFactory() {
+    const disposer = new Disposable();
+    // register main thread extender contribution
+    const contributions = this.mainThreadExtenderContributionProvider.getContributions();
+    for (const contribution of contributions) {
+      contribution.registerMainThreadExtender(this.mainThreadExtenderService);
+    }
+    // instantiate this MainThreadExtenderClass
+    const extenders = this.mainThreadExtenderService.getMainThreadExtenders();
+    for (const extender of extenders) {
+      const service = this.injector.get(extender.serviceClass, [this.protocol]);
+      this.protocol.set(extender.identifier, service);
+      disposer.addDispose(service);
+    }
+    return disposer;
   }
 
   public async getActivatedExtensions(): Promise<ActivatedExtensionJSON[]> {
@@ -135,65 +166,41 @@ export class NodeExtProcessService implements AbstractNodeExtProcessService<IExt
   }
 
   private get clientId() {
-    let clientId: string;
-
-    if (this.appConfig.isElectronRenderer && !this.appConfig.isRemote) {
-      this.logger.verbose('createExtProcess electronEnv.metadata.windowClientId', electronEnv.metadata.windowClientId);
-      clientId = electronEnv.metadata.windowClientId;
-    } else {
-      const WSChannelHandler = this.injector.get(IWSChannelHandler);
-      clientId = WSChannelHandler.clientId;
-    }
-
-    return clientId;
+    return this.applicationService.clientId;
   }
 
   private async createExtProcess() {
     await this.extensionNodeClient.createProcess(this.clientId, {
       enableDebugExtensionHost: this.appConfig.enableDebugExtensionHost,
+      inspectExtensionHost: this.appConfig.inspectExtensionHost,
       extensionConnectOption: this.appConfig.extensionConnectOption,
+      extHostSpawnOptions: this.getSpawnOptions(),
     });
 
-    return this.initExtProtocol();
+    await this.initExtProtocol();
   }
 
+  connection: BaseConnection<Uint8Array>;
+  channel: WSChannel;
+
+  /**
+   * 这个 protocol 需要每次都重新创建，因为服务端是会在该 channel 连上后才开始进行插件进程相关的逻辑的
+   */
   private async initExtProtocol() {
-    const mainThreadCenter = new RPCServiceCenter();
-
-    // Electron 环境下，未指定 isRemote 时默认使用本地连接
-    // 否则使用 WebSocket 连接
-    if (this.appConfig.isElectronRenderer && !this.appConfig.isRemote) {
-      const connectPath = await this.extensionNodeClient.getElectronMainThreadListenPath(
-        electronEnv.metadata.windowClientId,
-      );
-      this.logger.verbose('electron initExtProtocol connectPath', connectPath);
-
-      // electron 环境下要使用 Node 端的 connection
-      mainThreadCenter.setConnection(createElectronClientConnection(connectPath));
-    } else {
-      const WSChannelHandler = this.injector.get(IWSChannelHandler);
-      const channel = await WSChannelHandler.openChannel('ExtMainThreadConnection');
-      mainThreadCenter.setConnection(createWebSocketConnection(channel));
+    if (this.channel) {
+      this.channel.dispose();
+    }
+    if (this.protocol) {
+      (this.protocol as SumiConnectionMultiplexer).dispose?.();
     }
 
-    const { getRPCService } = initRPCService<{
-      onMessage: (msg: string) => void;
-    }>(mainThreadCenter);
+    this.channel = await this.channelHandler.openChannel(CONNECTION_HANDLE_BETWEEN_EXTENSION_AND_MAIN_THREAD);
+    this.connection = this.channel.createConnection();
 
-    const service = getRPCService('ExtProtocol');
-    const onMessageEmitter = new Emitter<string>();
-    service.on('onMessage', (msg) => {
-      onMessageEmitter.fire(msg);
+    this.protocol = new SumiConnectionMultiplexer(this.connection, {
+      timeout: this.appConfig.rpcMessageTimeout,
+      name: 'node-ext-host',
+      io: createExtMessageIO(knownProtocols),
     });
-    const onMessage = onMessageEmitter.event;
-    const send = service.onMessage;
-
-    const mainThreadProtocol = new RPCProtocol({
-      onMessage,
-      send,
-    });
-
-    // 重启/重连时直接覆盖前一个连接
-    return mainThreadProtocol;
   }
 }

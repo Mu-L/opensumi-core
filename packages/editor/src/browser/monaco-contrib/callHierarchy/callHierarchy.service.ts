@@ -1,13 +1,13 @@
-import { Injectable, Autowired } from '@opensumi/di';
+import { Autowired, Injectable } from '@opensumi/di';
 import {
   CancellationToken,
   IDisposable,
   IPosition,
-  arrays,
   RefCountedDisposable,
-  onUnexpectedExternalError,
   URI,
   Uri,
+  arrays,
+  onUnexpectedExternalError,
 } from '@opensumi/ide-core-common';
 import {
   CallHierarchyItem,
@@ -17,13 +17,12 @@ import {
   IncomingCall,
   OutgoingCall,
 } from '@opensumi/ide-monaco/lib/browser/contrib/callHierarchy';
-import { ITextModel, Position } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
+import { ITextModel, Position, ProviderResult } from '@opensumi/ide-monaco/lib/browser/monaco-api/types';
 
 import { IEditorDocumentModelService } from '../../doc-model/types';
 
 const { isNonEmptyArray } = arrays;
 
-declare type ProviderResult<T> = T | undefined | null | Thenable<T | undefined | null>;
 /* ---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
@@ -113,8 +112,10 @@ export class CallHierarchyService implements ICallHierarchyService {
   }
 
   async prepareCallHierarchyProvider(resource: Uri, position: Position) {
-    let textModel = this.modelService.getModelReference(URI.parse(resource.toString()))?.instance.getMonacoModel();
-    let textModelReference: IDisposable | undefined;
+    let textModelReference = this.modelService.getModelReference(URI.parse(resource.toString()));
+    let textModel: ITextModel | undefined = textModelReference?.instance.getMonacoModel();
+    textModelReference?.dispose();
+
     if (!textModel) {
       const result = await this.modelService.createModelReference(URI.parse(resource.toString()));
       textModel = result.instance.getMonacoModel();

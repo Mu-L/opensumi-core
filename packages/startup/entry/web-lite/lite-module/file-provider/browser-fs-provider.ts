@@ -1,19 +1,18 @@
 import * as fs from 'fs';
 
 import { FileChangeType, FileSystemProviderCapabilities } from '@opensumi/ide-core-browser';
-import { Event, URI, FileUri, Uri, Emitter, path, BinaryBuffer } from '@opensumi/ide-core-common';
+import { BinaryBuffer, Emitter, Event, FileUri, URI, Uri, path } from '@opensumi/ide-core-common';
 import { ensureDir } from '@opensumi/ide-core-common/lib/browser-fs/ensure-dir';
 import { promisify } from '@opensumi/ide-core-common/lib/browser-fs/util';
 import {
-  IDiskFileProvider,
   FileChangeEvent,
   FileStat,
-  FileType,
   FileSystemError,
-  notEmpty,
+  FileType,
+  IDiskFileProvider,
+  getFileTypeByExt,
   isErrnoException,
-  EXT_LIST_IMAGE,
-  EXT_LIST_VIDEO,
+  notEmpty,
 } from '@opensumi/ide-file-service';
 
 import { HttpTreeList } from './http-file.service';
@@ -264,7 +263,7 @@ export class BrowserFsProvider implements IDiskFileProvider {
 
   async getFileType(uri: string): Promise<string | undefined> {
     if (!uri.startsWith('file:/')) {
-      return this._getFileType('');
+      return getFileTypeByExt('');
     }
 
     try {
@@ -275,7 +274,7 @@ export class BrowserFsProvider implements IDiskFileProvider {
         if (ext.startsWith('.')) {
           ext = ext.slice(1);
         }
-        return this._getFileType(ext);
+        return getFileTypeByExt(ext);
       } else {
         return 'directory';
       }
@@ -442,20 +441,6 @@ export class BrowserFsProvider implements IDiskFileProvider {
         resolve(children.filter(notEmpty));
       });
     });
-  }
-
-  private _getFileType(ext: string) {
-    let type = 'text';
-
-    if (EXT_LIST_IMAGE.indexOf(ext) > -1) {
-      type = 'image';
-    } else if (EXT_LIST_VIDEO.indexOf(ext) > -1) {
-      type = 'video';
-    } else if (BrowserFsProvider.binaryExtList.indexOf(ext) > -1) {
-      type = 'binary';
-    }
-
-    return type;
   }
 }
 

@@ -1,18 +1,19 @@
-import type vscode from 'vscode';
-
 import { IRPCProtocol } from '@opensumi/ide-connection';
 import {
-  IDisposable,
-  Emitter,
-  Disposable,
-  Uri,
-  DisposableStore,
-  toDisposable,
-  Event,
   CancellationTokenSource,
+  Disposable,
+  DisposableStore,
+  Emitter,
+  Event,
+  IDisposable,
+  Uri,
   asPromise,
+  isNumber,
+  isString,
+  isUndefined,
+  randomString,
+  toDisposable,
 } from '@opensumi/ide-core-common';
-import type { CancellationToken } from '@opensumi/ide-core-common';
 
 import {
   DataTransferDTO,
@@ -22,13 +23,20 @@ import {
   ITreeViewRevealOptions,
   ITreeViewsService,
   MainThreadAPIIdentifier,
+  TreeItemCheckboxState,
+  TreeView,
+  TreeViewItem,
+  TreeViewSelection,
   TreeviewsService,
+  ViewBadge,
 } from '../../../common/vscode';
-import { TreeView, TreeViewItem, TreeViewSelection } from '../../../common/vscode';
 import { DataTransfer } from '../../../common/vscode/converter';
 import * as types from '../../../common/vscode/ext-types';
 
 import { ExtHostCommands } from './ext.host.command';
+
+import type { CancellationToken } from '@opensumi/ide-core-common';
+import type vscode from 'vscode';
 
 type Root = null | undefined | void;
 interface TreeData<T> {
@@ -100,6 +108,9 @@ export class ExtHostTreeViews implements IExtHostTreeView {
       get onDidChangeVisibility() {
         return treeView.onDidChangeVisibility;
       },
+      get onDidChangeCheckboxState() {
+        return treeView.onDidChangeCheckboxState;
+      },
       get message(): string {
         return treeView.message;
       },
@@ -118,6 +129,12 @@ export class ExtHostTreeViews implements IExtHostTreeView {
       set description(description: string) {
         treeView.description = description;
       },
+      get badge(): ViewBadge | undefined {
+        return treeView.badge;
+      },
+      set badge(badge: ViewBadge | undefined) {
+        treeView.badge = badge;
+      },
       reveal: (element: T, options: ITreeViewRevealOptions): Thenable<void> => treeView.reveal(element, options),
       dispose: () => {
         this.treeViews.delete(treeViewId);
@@ -129,7 +146,7 @@ export class ExtHostTreeViews implements IExtHostTreeView {
   /**
    * 获取子节点
    * @param treeViewId
-   * @param treeItemId
+   * @param treeItemId 可选参数，如果不传则获取根节点
    */
   async $getChildren(treeViewId: string, treeItemId?: string): Promise<TreeViewItem[] | undefined> {
     const treeView = this.treeViews.get(treeViewId);
@@ -201,6 +218,20 @@ export class ExtHostTreeViews implements IExtHostTreeView {
       throw new Error('No tree view with id ' + treeViewId);
     }
     treeView.setVisible(isVisible);
+  }
+
+  /**
+   * 设置节点的选择状态
+   * @param treeViewId
+   * @param items
+   * @returns
+   */
+  $checkStateChanged(treeViewId: string, items: { treeItemId: string; checked: boolean }[]): Promise<void> {
+    const treeView = this.treeViews.get(treeViewId);
+    if (!treeView) {
+      throw new Error('No tree view with id ' + treeViewId);
+    }
+    return treeView.checkStateChanged(items);
   }
 
   async $handleDrop(
@@ -294,6 +325,9 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
   private readonly onDidChangeVisibilityEmitter = new Emitter<vscode.TreeViewVisibilityChangeEvent>();
   readonly onDidChangeVisibility = this.onDidChangeVisibilityEmitter.event;
 
+  private readonly onDidChangeCheckboxStateEmitter = new Emitter<vscode.TreeCheckboxChangeEvent<T>>();
+  readonly onDidChangeCheckboxState = this.onDidChangeCheckboxStateEmitter.event;
+
   private _visible = false;
 
   private selectedItemIds = new Set<string>();
@@ -312,6 +346,7 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
   private _title: string;
   private _description: string;
   private _message: string;
+  private _badge?: ViewBadge = undefined;
 
   private roots: TreeViewItem[] | undefined = undefined;
   private nodes: Map<T, TreeViewItem[] | undefined> = new Map();
@@ -319,7 +354,6 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
   private refreshPromise: Promise<void> = Promise.resolve();
   private refreshQueue: Promise<void> = Promise.resolve();
 
-  private isFetchingChildren = false;
   constructor(
     private treeViewId: string,
     private options: vscode.TreeViewOptions<T>,
@@ -336,6 +370,7 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
     this.disposable.add(this._onDidChangeData);
     // 将 options 直接取值，避免循环引用导致序列化异常
     proxy.$registerTreeDataProvider(treeViewId, {
+      manageCheckboxStateManually: options.manageCheckboxStateManually,
       showCollapseAll: !!options.showCollapseAll,
       canSelectMany: !!options.canSelectMany,
       dropMimeTypes,
@@ -346,10 +381,6 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
 
     if (this.dataProvider.onDidChangeTreeData) {
       const dispose = this.dataProvider.onDidChangeTreeData((itemToRefresh) => {
-        if (this.isFetchingChildren) {
-          // cause of https://github.com/opensumi/core/issues/723.
-          return;
-        }
         this._onDidChangeData.fire({ element: itemToRefresh, message: false });
       });
       if (dispose) {
@@ -370,9 +401,6 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
         (result, current) => {
           if (!result) {
             result = { message: false, elements: [] };
-            if (this.isFetchingChildren) {
-              return result;
-            }
           }
           if (current.element !== false) {
             if (!refreshingPromise) {
@@ -496,6 +524,14 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
     return this._visible;
   }
 
+  get badge(): ViewBadge | undefined {
+    return this._badge;
+  }
+  set badge(badge: ViewBadge | undefined) {
+    this._badge = badge;
+    this.proxy.$setBadge(this.treeViewId, badge);
+  }
+
   get selectedElements(): T[] {
     const items: T[] = [];
     for (const id of this.selectedItemIds) {
@@ -511,16 +547,68 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
     // 在缓存中查找对应节点
     let elementId = element.id;
     if (!elementId) {
-      this.id2Element.forEach((el, id) => {
-        if (Object.is(el, element)) {
-          elementId = id;
-        }
-      });
+      const treeViewItem = this.element2TreeViewItem.get(element);
+      if (treeViewItem) {
+        elementId = treeViewItem.id;
+      }
     }
 
-    if (elementId) {
-      return this.proxy.$reveal(this.treeViewId, elementId, options);
+    if (typeof this.dataProvider.getParent !== 'function') {
+      throw new Error("Required registered TreeDataProvider to implement 'getParent' method to access 'reveal' method");
     }
+
+    await this.refreshPromise;
+
+    if (elementId) {
+      const revealOptions = {
+        expand: options?.expand,
+        focus: options?.focus,
+        select: options?.select,
+      } as ITreeViewRevealOptions;
+
+      await this.proxy.$reveal(this.treeViewId, elementId, revealOptions);
+    } else {
+      // need reveal the root
+      await this.proxy.$reveal(this.treeViewId, undefined, options);
+    }
+  }
+
+  getViewTreeId(value: T, treeItem: vscode.TreeItem): string {
+    let id = value.id || treeItem.id;
+    if (!id) {
+      // 获取Label属性
+      let label: string | ITreeItemLabel | undefined;
+      const treeItemLabel: string | vscode.TreeItemLabel | undefined = treeItem.label;
+      if (treeItemLabel) {
+        label = treeItemLabel;
+      }
+
+      // 当没有指定label时尝试使用resourceUri
+      if (!label && treeItem.resourceUri) {
+        label = treeItem.resourceUri.path.toString();
+        label = decodeURIComponent(label);
+        if (label.indexOf('/') >= 0) {
+          label = label.substring(label.lastIndexOf('/') + 1);
+        }
+      }
+
+      const _label = isString(label) ? label : label?.label;
+      id = [this.treeViewId, _label, randomString(4)].filter(Boolean).join(':');
+    }
+
+    return id;
+  }
+
+  private async resolveParentChain(element: T): Promise<T[]> {
+    const parentChain: T[] = [];
+
+    // will receive `null` or `undefined` if `element` is a child of root.
+    let parent = await this.dataProvider.getParent!(element);
+    while (parent) {
+      parentChain.push(parent);
+      parent = await this.dataProvider.getParent!(parent);
+    }
+    return parentChain;
   }
 
   getTreeItem(treeItemId?: string): T | undefined {
@@ -567,6 +655,23 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
     );
   }
 
+  async checkStateChanged(items: readonly { treeItemId: string; checked: boolean }[]): Promise<void> {
+    const transformed: [T, TreeItemCheckboxState][] = [];
+    items.forEach((item) => {
+      const node = this.getTreeItem(item.treeItemId);
+      if (node) {
+        transformed.push([node, item.checked ? TreeItemCheckboxState.Checked : TreeItemCheckboxState.Unchecked]);
+        const treeViewItem = this.element2TreeViewItem.get(node);
+        if (treeViewItem && treeViewItem.checkboxInfo) {
+          treeViewItem.checkboxInfo.checked = item.checked;
+        }
+      }
+    });
+    this.onDidChangeCheckboxStateEmitter.fire({
+      items: transformed,
+    });
+  }
+
   /**
    * 在节点被点击或者打开时，获取原有的 command 为 undefined 时被调用
    * 在节点被 Hover 时，获取原有的 tooltip 为 undefined 时被调用
@@ -592,64 +697,75 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
     return;
   }
 
+  /**
+   * Get the children of `element` or root if no element is passed.
+   *
+   * @param element The element from which the provider gets children. Can be `undefined`.
+   * @return Children of `element` or root if no element is passed.
+   */
+  async resolveChildren(element?: T): Promise<TreeViewItem[] | undefined> {
+    const treeItems: TreeViewItem[] = [];
+
+    const results = await this.dataProvider.getChildren(element);
+    if (!results) {
+      return;
+    }
+
+    for (const value of results.values()) {
+      // 遍历treeDataProvider获取的值生成节点
+      if (this._refreshCancellationSource.token.isCancellationRequested) {
+        return;
+      }
+      const treeViewItem = await this.cacheElement(value);
+      treeItems.push(treeViewItem);
+    }
+
+    return treeItems;
+  }
+
+  async cacheElement(value: T): Promise<TreeViewItem> {
+    const treeItem = await this.dataProvider.getTreeItem(value);
+
+    const id = this.getViewTreeId(value, treeItem);
+    this.id2Element.set(id, value);
+
+    const treeViewItem = this.toTreeViewItem(treeItem, {
+      id,
+    });
+    this.element2TreeViewItem.set(value, treeViewItem);
+    this.element2VSCodeTreeItem.set(value, treeItem);
+
+    return treeViewItem;
+  }
+
+  /**
+   * @param treeItemId 可选参数，如果不传则获取根节点
+   */
   async getChildren(treeItemId?: string): Promise<TreeViewItem[] | undefined> {
     // 缓存中获取节点
     const cachedElement = this.getTreeItem(treeItemId);
-    // 如果存在缓存数据，优先从缓存中获取子节点
+
+    // 没有 cachedElement 时，获取根节点，如果根节点已经初始化则直接返回
     if (!cachedElement && this.roots) {
       return this.roots;
     }
+
     let children: TreeViewItem[] | undefined;
-    this.isFetchingChildren = true;
-    const results = await this.dataProvider.getChildren(cachedElement);
-    this.isFetchingChildren = false;
     if (this._refreshCancellationSource.token.isCancellationRequested) {
       children = undefined;
     } else {
+      const results = await this.resolveChildren(cachedElement);
       if (results) {
-        const treeItems: TreeViewItem[] = [];
-        for (const [index, value] of results.entries()) {
-          // 遍历treeDataProvider获取的值生成节点
-          const treeItem = await this.dataProvider.getTreeItem(value);
-          if (this._refreshCancellationSource.token.isCancellationRequested) {
-            return;
-          }
-          // 获取Label属性
-          let label: string | ITreeItemLabel | undefined;
-          const treeItemLabel: string | vscode.TreeItemLabel | undefined = treeItem.label;
-          if (treeItemLabel) {
-            label = treeItemLabel;
-          }
-          // 当没有指定label时尝试使用resourceUri
-          if (!label && treeItem.resourceUri) {
-            label = treeItem.resourceUri.path.toString();
-            label = decodeURIComponent(label);
-            if (label.indexOf('/') >= 0) {
-              label = label.substring(label.lastIndexOf('/') + 1);
-            }
-          }
-          // 生成ID用于存储缓存
-          const id =
-            treeItem.id || `${treeItemId || 'root'}/${index}:${typeof label === 'string' ? label : label?.label}`;
-          this.id2Element.set(id, value);
-
-          const treeViewItem = this.toTreeViewItem(treeItem, {
-            id,
-          });
-          this.element2TreeViewItem.set(value, treeViewItem);
-          this.element2VSCodeTreeItem.set(value, treeItem);
-          treeItems.push(treeViewItem);
-        }
-
         if (this._refreshCancellationSource.token.isCancellationRequested) {
           children = undefined;
         } else {
-          children = treeItems;
+          children = results;
         }
       } else {
         children = undefined;
       }
     }
+
     if (!cachedElement) {
       this.roots = children;
     } else {
@@ -684,6 +800,22 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
         };
       }
     }
+
+    let checkboxInfo;
+    if (isUndefined(treeItem.checkboxState)) {
+      checkboxInfo = undefined;
+    } else if (!isNumber(treeItem.checkboxState)) {
+      checkboxInfo = {
+        checked: treeItem.checkboxState.state === TreeItemCheckboxState.Checked,
+        tooltip: treeItem.checkboxState.tooltip,
+        accessibilityInformation: treeItem.checkboxState.accessibilityInformation,
+      };
+    } else {
+      checkboxInfo = {
+        checked: treeItem.checkboxState === TreeItemCheckboxState.Checked,
+      };
+    }
+
     const treeViewItem = {
       id,
       label,
@@ -695,6 +827,7 @@ class ExtHostTreeView<T extends vscode.TreeItem> implements IDisposable {
       tooltip: treeItem.tooltip,
       collapsibleState: treeItem.collapsibleState,
       contextValue: treeItem.contextValue,
+      checkboxInfo,
       accessibilityInformation: treeItem.accessibilityInformation,
       command: treeItem.command ? this.commands.converter.toInternal(treeItem.command, this.disposable) : undefined,
       ...props,

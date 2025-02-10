@@ -1,9 +1,10 @@
 import { Autowired } from '@opensumi/di';
 import { ClientAppContribution, ComponentContribution, ComponentRegistry, getIcon } from '@opensumi/ide-core-browser';
-import { Domain, localize, replaceLocalizePlaceholder, URI } from '@opensumi/ide-core-common';
+import { Domain, URI, localize, replaceLocalizePlaceholder } from '@opensumi/ide-core-common';
 import {
   BrowserEditorContribution,
   EditorComponentRegistry,
+  EditorOpenType,
   IResource,
   ResourceService,
 } from '@opensumi/ide-editor/lib/browser';
@@ -12,7 +13,7 @@ import { IIconService, IconType } from '@opensumi/ide-theme';
 
 import { IVSXExtensionService, VSXExtensionServiceToken } from '../common';
 
-import { OPEN_VSX_EXTENSION_MANAGER_CONTAINER_ID, EXTENSION_SCHEME } from './const';
+import { EXTENSION_SCHEME, OPEN_VSX_EXTENSION_MANAGER_CONTAINER_ID } from './const';
 import { ExtensionOverview } from './extension-overview';
 import { VSXExtensionView } from './vsx-extension.view';
 
@@ -81,7 +82,7 @@ export class VSXExtensionContribution
     editorComponentRegistry.registerEditorComponentResolver(EXTENSION_SCHEME, (_, __, resolve) => {
       resolve?.([
         {
-          type: 'component',
+          type: EditorOpenType.component,
           componentId: EXTENSIONS_DETAIL_COMPONENT_ID,
         },
       ]);

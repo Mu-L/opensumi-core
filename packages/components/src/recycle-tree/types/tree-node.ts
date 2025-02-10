@@ -3,6 +3,12 @@ export interface IAccessibilityInformation {
   role?: string;
 }
 
+export interface TreeViewItemCheckboxInfo {
+  checked: boolean;
+  tooltip?: string;
+  accessibilityInformation?: IAccessibilityInformation;
+}
+
 export interface ITreeNode {
   /**
    * 唯一标识id
@@ -42,6 +48,10 @@ export interface ITreeNode {
    */
   readonly parent: ICompositeTreeNode | undefined;
   /**
+   * 节点的选择信息
+   */
+  readonly checkboxInfo?: TreeViewItemCheckboxInfo;
+  /**
    * 节点无障碍信息
    */
   readonly accessibilityInformation?: IAccessibilityInformation;
@@ -53,6 +63,10 @@ export interface ITreeNode {
    * 设置是否可见，这里的可见表示的是否在展示数据内，并不是代表是否在用户视窗范围内
    */
   setVisible: (b: boolean) => this;
+  /**
+   * 清理节点
+   */
+  dispose: () => void;
 }
 
 export interface ICompositeTreeNode extends ITreeNode {

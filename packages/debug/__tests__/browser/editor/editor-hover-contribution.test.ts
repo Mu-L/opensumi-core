@@ -3,8 +3,8 @@ import {
   IContextKeyService,
   IFileServiceClient,
   MonacoOverrideServiceRegistry,
+  QuickPickService,
 } from '@opensumi/ide-core-browser';
-import { QuickPickService } from '@opensumi/ide-core-browser';
 import { DebugModelFactory, IDebugModelManager, IDebugServer } from '@opensumi/ide-debug';
 import { DebugPreferences } from '@opensumi/ide-debug/lib/browser/debug-preferences';
 import { DebugEditorContribution } from '@opensumi/ide-debug/lib/browser/editor/debug-editor-contribution';
@@ -63,6 +63,7 @@ describe('Editor Hover Contribution', () => {
         token: IDebugSessionManager,
         useValue: {
           onDidChangeActiveDebugSession: jest.fn(() => Disposable.create(() => {})),
+          onDidDestroyDebugSession: jest.fn(() => Disposable.create(() => {})),
         },
       },
       {
@@ -94,6 +95,6 @@ describe('Editor Hover Contribution', () => {
       },
     };
     contribution.contribute(mockEditor as any);
-    expect(mockContextKeyService.onDidChangeContext).toBeCalledTimes(0);
+    expect(mockContextKeyService.onDidChangeContext).toHaveBeenCalledTimes(0);
   });
 });

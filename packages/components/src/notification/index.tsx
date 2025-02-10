@@ -1,7 +1,8 @@
-import clx from 'classnames';
+import cls from 'classnames';
 import React from 'react';
 
-import { isUndefined } from '@opensumi/ide-utils';
+import { IAction } from '@opensumi/ide-core-common';
+import { CancelablePromise, createCancelablePromise, isUndefined } from '@opensumi/ide-utils';
 
 import { Button } from '../button';
 import { MessageType } from '../common';
@@ -28,52 +29,64 @@ export function open<T = string>(
   type: MessageType,
   closable = true,
   key: string,
-  buttons?: string[],
+  buttons?: Array<string | IAction>,
   description?: string | React.ReactNode,
   duration?: number,
   onClose?: () => void,
-): Promise<T | undefined> | undefined {
-  return new Promise((resolve) => {
-    const args: ArgsProps = {
-      key,
-      className: clx('kt-notification-wrapper', {
-        ['kt-notification-info']: type === MessageType.Info,
-        ['kt-notification-error']: type === MessageType.Error,
-        ['kt-notification-warn']: type === MessageType.Warning,
-      }),
-      duration: isUndefined(duration) ? DURATION[type] : duration,
-      onClose: () => {
-        onClose && onClose();
-        cachedArgs.delete(key);
-        resolve(undefined);
-      },
-      btn: buttons
-        ? buttons.map((button, index) => (
-            <Button
-              className={clx('kt-notification-button')}
-              size='small'
-              ghost={index === 0}
-              onClick={() => {
-                resolve(button as any);
-                antdNotification.close(key);
-              }}
-              key={button}
-            >
-              {button}
-            </Button>
-          ))
-        : null,
-      message,
-      description,
-    };
-    cachedArgs.set(key, [type, args]);
+): CancelablePromise<T | undefined> | undefined {
+  return createCancelablePromise<T | undefined>((token) => {
+    token.onCancellationRequested(() => {
+      close(key);
+    });
+    return new Promise((resolve) => {
+      const args: ArgsProps = {
+        key,
+        className: cls('kt-notification-wrapper', {
+          ['kt-notification-info']: type === MessageType.Info,
+          ['kt-notification-error']: type === MessageType.Error,
+          ['kt-notification-warn']: type === MessageType.Warning,
+        }),
+        duration: isUndefined(duration) ? DURATION[type] : duration,
+        onClose: () => {
+          onClose && onClose();
+          cachedArgs.delete(key);
+          resolve(undefined);
+        },
+        btn: buttons
+          ? buttons.map((button, index) => {
+              const isStringButton = typeof button === 'string';
+              const buttonProps = {
+                className: `${cls('kt-notification-button')}${isStringButton ? '' : button.class}`,
+                ghost: isStringButton ? index === 0 : !button.primary,
+                key: isStringButton ? button : button.id,
+                onClick: () => {
+                  resolve(button as any);
+                  antdNotification.close(key);
+                  if (!isStringButton) {
+                    button.run();
+                  }
+                },
+              };
+              const text = isStringButton ? button : button.label;
+              return (
+                <Button size='small' {...buttonProps}>
+                  {text}
+                </Button>
+              );
+            })
+          : null,
+        message,
+        description,
+      };
+      cachedArgs.set(key, [type, args]);
 
-    // closable 为 false 时，不展示 closeIcon
-    if (!closable) {
-      args.closeIcon = <span />;
-    }
+      // closable 为 false 时，不展示 closeIcon
+      if (!closable) {
+        args.closeIcon = <span />;
+      }
 
-    doOpenNotification(type, args);
+      doOpenNotification(type, args);
+    });
   });
 }
 

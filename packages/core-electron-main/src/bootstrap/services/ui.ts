@@ -2,19 +2,18 @@ import { spawn } from 'child_process';
 import { dirname } from 'path';
 import qs from 'querystring';
 
-import { BrowserWindow, dialog, shell, webContents, clipboard } from 'electron';
+import { BrowserWindow, clipboard, dialog, shell, webContents } from 'electron';
 import { stat } from 'fs-extra';
-import semver from 'semver';
 
-import { Injectable, Autowired, INJECTOR_TOKEN, Injector } from '@opensumi/di';
-import { Domain, isWindows, IEventBus, URI } from '@opensumi/ide-core-common';
+import { Autowired, INJECTOR_TOKEN, Injectable, Injector } from '@opensumi/di';
+import { Domain, IEventBus, URI, isWindows } from '@opensumi/ide-core-common';
 import {
   IElectronMainUIService,
   IElectronMainUIServiceShape,
   IElectronPlainWebviewWindowOptions,
 } from '@opensumi/ide-core-common/lib/electron';
 
-import { ElectronMainApiProvider, ElectronMainContribution, ElectronMainApiRegistry } from '../types';
+import { ElectronMainApiProvider, ElectronMainApiRegistry, ElectronMainContribution } from '../types';
 
 import { WindowCreatedEvent } from './events';
 
@@ -82,13 +81,7 @@ export class ElectronMainUIService
   }
 
   async moveToTrash(path: string) {
-    if (semver.lt(process.versions.electron, '13.0.0')) {
-      // Removed: shell.moveItemToTrash()
-      // https://www.electronjs.org/docs/latest/breaking-changes#removed-shellmoveitemtotrash
-      await (shell as any).moveItemToTrash(path);
-    } else {
-      await shell.trashItem(path);
-    }
+    await shell.trashItem(path);
   }
 
   async revealInFinder(path: string) {
@@ -145,23 +138,17 @@ export class ElectronMainUIService
   async showOpenDialog(windowId: number, options: Electron.OpenDialogOptions): Promise<string[] | undefined> {
     return new Promise((resolve, reject) => {
       try {
-        if (semver.lt(process.versions.electron, '6.0.0')) {
-          (dialog as any).showOpenDialog(BrowserWindow.fromId(windowId), options, (paths) => {
-            resolve(paths);
-          });
-        } else {
-          const win = BrowserWindow.fromId(windowId);
-          if (!win) {
-            return reject(new Error(`BrowserWindow ${windowId} not found`));
-          }
-          dialog.showOpenDialog(win, options).then((value) => {
-            if (value.canceled) {
-              resolve(undefined);
-            } else {
-              resolve(value.filePaths);
-            }
-          }, reject);
+        const win = BrowserWindow.fromId(windowId);
+        if (!win) {
+          return reject(new Error(`BrowserWindow ${windowId} not found`));
         }
+        dialog.showOpenDialog(win, options).then((value) => {
+          if (value.canceled) {
+            resolve(undefined);
+          } else {
+            resolve(value.filePaths);
+          }
+        }, reject);
       } catch (e) {
         reject(e);
       }
@@ -170,23 +157,17 @@ export class ElectronMainUIService
   async showSaveDialog(windowId: number, options: Electron.SaveDialogOptions): Promise<string | undefined> {
     return new Promise((resolve, reject) => {
       try {
-        if (semver.lt(process.versions.electron, '6.0.0')) {
-          (dialog as any).showSaveDialog(BrowserWindow.fromId(windowId), options, (path) => {
-            resolve(path);
-          });
-        } else {
-          const win = BrowserWindow.fromId(windowId);
-          if (!win) {
-            return reject(new Error(`BrowserWindow ${windowId} not found`));
-          }
-          dialog.showSaveDialog(win, options).then((value) => {
-            if (value.canceled) {
-              resolve(undefined);
-            } else {
-              resolve(value.filePath);
-            }
-          }, reject);
+        const win = BrowserWindow.fromId(windowId);
+        if (!win) {
+          return reject(new Error(`BrowserWindow ${windowId} not found`));
         }
+        dialog.showSaveDialog(win, options).then((value) => {
+          if (value.canceled) {
+            resolve(undefined);
+          } else {
+            resolve(value.filePath);
+          }
+        }, reject);
       } catch (e) {
         reject(e);
       }

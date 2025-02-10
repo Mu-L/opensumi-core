@@ -1,4 +1,4 @@
-import { Event, URI, IDisposable, MaybeNull, MaybePromise } from '@opensumi/ide-core-common';
+import { Event, IDisposable, MaybeNull, MaybePromise, URI } from '@opensumi/ide-core-common';
 import { IEditorGroup } from '@opensumi/ide-editor';
 import { ITheme } from '@opensumi/ide-theme';
 
@@ -170,7 +170,11 @@ export interface IWebviewService {
 
   getWebview(id: string): IWebview | undefined;
 
-  createEditorWebviewComponent(options?: IWebviewContentOptions, id?: string): IEditorWebviewComponent<IWebview>;
+  createEditorWebviewComponent(
+    options?: IWebviewContentOptions,
+    id?: string,
+    metadata?: Record<string, any>,
+  ): IEditorWebviewComponent<IWebview>;
 
   createEditorPlainWebviewComponent(
     options?: IPlainWebviewConstructionOptions,
@@ -254,6 +258,7 @@ export interface IPlainWebviewComponentHandle extends IDisposable {
 export interface IEditorWebviewMetaData {
   id: string;
   options?: IWebviewContentOptions;
+  metadata?: Record<string, any>;
 }
 
 export interface IWebviewReviver {

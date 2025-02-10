@@ -1,19 +1,19 @@
-import type vscode from 'vscode';
-
 import {
   CancellationToken,
-  MessageType,
-  MaybePromise,
+  Event,
   IMarkdownString,
   IThemeColor,
-  Event,
+  MaybePromise,
+  MessageType,
 } from '@opensumi/ide-core-common';
-import { QuickPickItem, QuickPickOptions, QuickInputOptions, QuickTitleButton } from '@opensumi/ide-quick-open';
+import { QuickInputOptions, QuickPickItem, QuickPickOptions, QuickTitleButton } from '@opensumi/ide-quick-open';
 
 import { Severity } from './enums';
 import * as types from './ext-types';
-import { UriComponents, QuickInputButton } from './ext-types';
+import { QuickInputButton, UriComponents } from './ext-types';
 import { IExtensionDescription } from './extension';
+
+import type vscode from 'vscode';
 
 export interface IMainThreadMessage {
   $showMessage(
@@ -44,6 +44,7 @@ export interface IMainThreadQuickOpen {
   $hideQuickPick(): void;
   $showQuickInput(options: QuickInputOptions, validateInput: boolean): Promise<string | undefined>;
   $hideQuickInput(): void;
+  $updateQuickPick(options: QuickPickOptions): void;
   $createOrUpdateInputBox(id: number, options: QuickInputOptions): void;
   $hideInputBox(id: number): void;
   $disposeInputBox(id: number): void;
@@ -160,7 +161,7 @@ export interface IMainThreadStatusBar {
     priority: number,
     alignment: number,
     color: IThemeColor | string | undefined,
-    backgroundColor: IThemeColor | undefined,
+    backgroundColor: IThemeColor | string | undefined,
     tooltip: string | IMarkdownString | undefined,
     accessibilityInformation: vscode.AccessibilityInformation | undefined,
     command: string | undefined,
@@ -181,19 +182,31 @@ export interface IExtHostStatusBar {
 
 export interface IMainThreadOutput {
   $append(channelName: string, value: string): PromiseLike<void>;
+  $appendLine(channelName: string, value: string): PromiseLike<void>;
   $replace(channelName: string, value: string): PromiseLike<void>;
   $clear(channelName: string): PromiseLike<void>;
   $dispose(channelName: string): PromiseLike<void>;
   $reveal(channelName: string, preserveFocus: boolean): PromiseLike<void>;
   $close(channelName: string): PromiseLike<void>;
+
+  $setLanguageId(channelName: string, languageId: string): PromiseLike<void>;
+}
+
+export interface ICreateOutputChannelOptions {
+  log?: boolean;
+  languageId?: string;
 }
 
 export interface IExtHostOutput {
-  createOutputChannel(name: string): types.OutputChannel;
+  createOutputChannel(
+    name: string,
+    optionsOrLanguageId: string | ICreateOutputChannelOptions | undefined,
+  ): types.OutputChannel | types.LogOutputChannel;
 }
 
 export interface IExtHostWindowState {
-  $setWindowState(focused: boolean);
+  $onDidChangeWindowFocus(focused: boolean);
+  $onDidChangeWindowActive(active: boolean);
 
   readonly state: types.WindowState;
 

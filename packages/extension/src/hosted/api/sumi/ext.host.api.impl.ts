@@ -1,25 +1,27 @@
 import { IRPCProtocol } from '@opensumi/ide-connection';
-import { ReporterService, REPORT_HOST, IReporter } from '@opensumi/ide-core-common';
+import { IReporter, REPORT_HOST, ReporterService, isFunction } from '@opensumi/ide-core-common';
 
 import { IExtensionHostService, IExtensionWorkerHost, WorkerHostAPIIdentifier } from '../../../common';
-import { ExtHostSumiAPIIdentifier } from '../../../common/sumi';
+import { ExtHostSumiAPIIdentifier, SumiApiExtenders } from '../../../common/sumi';
 import { ExtHostAPIIdentifier, IExtensionDescription } from '../../../common/vscode';
 import { ExtensionHostEditorService } from '../vscode/editor/editor.host';
 
+import { ExtHostChatAgents, createChatApiFactory } from './ext.host.chat.impl';
 import { createCommandsApiFactory } from './ext.host.command';
 import { ExtHostCommon, createEventAPIFactory } from './ext.host.common';
-import { createLayoutAPIFactory, ExtHostLayout } from './ext.host.layout';
+import { ExtHostLayout, createLayoutAPIFactory } from './ext.host.layout';
 import { ExtHostLifeCycle, createLifeCycleApi } from './ext.host.lifecycle';
 import { ExtHostTheme, createThemeApi } from './ext.host.theme';
 import { ExtHostToolbarActionService, createToolbarAPIFactory } from './ext.host.toolbar';
 import { ExtHostWebview, createWebviewApi } from './ext.host.webview';
-import { createWindowApiFactory, ExtHostIDEWindow } from './ext.host.window';
+import { ExtHostIDEWindow, createWindowApiFactory } from './ext.host.window';
 
 export function createAPIFactory(
   rpcProtocol: IRPCProtocol,
   extensionService: IExtensionHostService | IExtensionWorkerHost,
   type: string,
   reporterEmitter: IReporter,
+  sumiApiExtenders: SumiApiExtenders = {},
 ) {
   if (type === 'worker') {
     rpcProtocol.set(WorkerHostAPIIdentifier.ExtWorkerHostExtensionService, extensionService);
@@ -46,12 +48,30 @@ export function createAPIFactory(
   ) as ExtHostCommon;
   const extHostToolbar = rpcProtocol.set(
     ExtHostSumiAPIIdentifier.ExtHostToolbar,
-    new ExtHostToolbarActionService(extHostCommands, extHostCommon, rpcProtocol),
+    new ExtHostToolbarActionService(extHostCommands, extHostCommon, rpcProtocol, extensionService.logger),
   ) as ExtHostToolbarActionService;
   const extHostWindow = rpcProtocol.set(
     ExtHostSumiAPIIdentifier.ExtHostIDEWindow,
     new ExtHostIDEWindow(rpcProtocol),
   ) as ExtHostIDEWindow;
+  const extHostChatAgents = rpcProtocol.set(
+    ExtHostSumiAPIIdentifier.ExtHostChatAgents,
+    new ExtHostChatAgents(rpcProtocol),
+  ) as ExtHostChatAgents;
+
+  const externalSumiApis = Object.keys(sumiApiExtenders).reduce((acc, key) => {
+    const SumiApiExtender = sumiApiExtenders[key];
+    const extender = new SumiApiExtender(rpcProtocol);
+    let rpcService;
+    // register external api rpc protocol
+    if (isFunction(extender.createRPCService)) {
+      const [identifier, service] = extender.createRPCService();
+      rpcService = service;
+      rpcProtocol.set(identifier, service);
+    }
+    acc[key] = extender.createApiFactory(rpcService);
+    return acc;
+  }, {});
 
   return (extension: IExtensionDescription) => {
     const reporter = new ReporterService(reporterEmitter, {
@@ -69,6 +89,8 @@ export function createAPIFactory(
       reporter,
       commands: createCommandsApiFactory(extHostCommands, extHostEditors, extension),
       toolbar: createToolbarAPIFactory(extension, extHostToolbar),
+      chat: createChatApiFactory(extension, extHostChatAgents),
+      ...externalSumiApis,
     };
   };
 }
